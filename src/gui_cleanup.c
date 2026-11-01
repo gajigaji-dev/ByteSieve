@@ -414,7 +414,7 @@ static void apply_filter(CleanupPanel *p)
 static void set_warning(CleanupPanel *p)
 {
     if (p->has_result && p->result.root_protected) {
-        SetWindowTextW(p->warn, L"경고: 시스템 보호 경로 안입니다. 표시된 항목은 Windows나 "
+        SetWindowTextW(p->warn, L"경고: 시스템·프로그램 보호 경로 안입니다. 표시된 항목은 Windows나 "
                                 L"프로그램에 필요할 수 있어 휴지통으로 옮길 수 없습니다.");
     } else {
         SetWindowTextW(p->warn, L"탐지는 읽기 전용입니다. 체크한 항목만 확인을 거쳐 휴지통(없는 "

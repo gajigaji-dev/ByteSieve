@@ -312,15 +312,12 @@ void cleanup_protect_free(CleanupProtect *p)
     cleanup_protect_init(p);
 }
 
-int cleanup_protect_add(CleanupProtect *p, const wchar_t *path)
+/* s[0..len) 을 목록에 넣는다(대소문자 무시로 같은 경로가 있으면 넣지 않고 성공). */
+static int protect_add_span(CleanupProtect *p, const wchar_t *s, size_t len)
 {
-    const wchar_t *s;
-    size_t len, i;
+    size_t i;
     wchar_t *copy;
 
-    if (p == NULL || !local_span(path, &s, &len) || len == 0) {
-        return -1;
-    }
     for (i = 0; i < p->len; i++) {
         if (name_eq_n(p->paths[i], wcslen(p->paths[i]), s, len)) {
             return 0;
@@ -345,10 +342,147 @@ int cleanup_protect_add(CleanupProtect *p, const wchar_t *path)
     return 0;
 }
 
+int cleanup_protect_add(CleanupProtect *p, const wchar_t *path)
+{
+    const wchar_t *s;
+    size_t len;
+
+    if (p == NULL || !local_span(path, &s, &len) || len == 0) {
+        return -1;
+    }
+    return protect_add_span(p, s, len);
+}
+
+static int is_trim_char(wchar_t c)
+{
+    return c == L' ' || c == L'\t' || c == L'"';
+}
+
+int cleanup_protect_add_install(CleanupProtect *p, const wchar_t *path)
+{
+    const wchar_t *s, *e;
+    wchar_t *raw, *full;
+    size_t len;
+    int rc = -1;
+
+    if (p == NULL || path == NULL) {
+        return -1;
+    }
+    for (s = path; is_trim_char(*s); s++) {
+    }
+    for (e = s + wcslen(s); e > s && is_trim_char(e[-1]); e--) {
+    }
+    len = (size_t)(e - s);
+    /* "C:x"·상대·UNC·확장 경로는 받지 않는다(path_full 이 현재 폴더 기준으로 바꾸지 않도록). */
+    if (len < 4 || !((s[0] >= L'A' && s[0] <= L'Z') || (s[0] >= L'a' && s[0] <= L'z')) ||
+        s[1] != L':' || !path_is_separator(s[2])) {
+        return -1;
+    }
+    raw = malloc((len + 1) * sizeof(*raw));
+    if (raw == NULL) {
+        return -1;
+    }
+    memcpy(raw, s, len * sizeof(*raw));
+    raw[len] = L'\0';
+    full = path_full(raw);
+    free(raw);
+    /* 정규화한 뒤에도 볼륨 루트("C:\..", "C:\.")가 아니어야 한다. */
+    if (full != NULL && local_span(full, &s, &len) && len > 3) {
+        rc = protect_add_span(p, s, len);
+    }
+    free(full);
+    return rc;
+}
+
+int cleanup_is_dev_tool_product(const wchar_t *display_name)
+{
+    static const wchar_t *const prefixes[] = {L"Microsoft Visual Studio", L"Visual Studio "};
+    size_t len, i;
+
+    if (display_name == NULL) {
+        return 0;
+    }
+    len = wcslen(display_name);
+    for (i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); i++) {
+        size_t plen = wcslen(prefixes[i]);
+        if (len >= plen && name_eq_n(display_name, plen, prefixes[i], plen)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* 환경 변수 var 의 값 아래 tail 경로를 설치 경로로 추가한다. 변수가 없으면 건너뛴다. */
+static void add_env_install(CleanupProtect *p, const wchar_t *var, const wchar_t *tail)
+{
+    wchar_t buf[MAX_PATH];
+    wchar_t *joined;
+    DWORD n = GetEnvironmentVariableW(var, buf, MAX_PATH);
+
+    if (n == 0 || n >= MAX_PATH) {
+        return;
+    }
+    joined = path_join(buf, tail);
+    if (joined != NULL) {
+        cleanup_protect_add_install(p, joined);
+    }
+    free(joined);
+}
+
+/*
+ * 프로그램 제거 정보(root\...\Uninstall, view 는 KEY_WOW64_*)에서 개발 도구의 InstallLocation 을
+ * 추가한다. 읽지 못한 키·값은 건너뛴다.
+ */
+static void add_uninstall_dev_tools(CleanupProtect *p, HKEY root, REGSAM view)
+{
+    HKEY key;
+    DWORD i;
+
+    if (RegOpenKeyExW(root, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall", 0,
+                      KEY_READ | view, &key) != ERROR_SUCCESS) {
+        return;
+    }
+    for (i = 0;; i++) {
+        wchar_t sub[256], name[512], location[MAX_PATH];
+        DWORD sublen = sizeof(sub) / sizeof(sub[0]), size;
+        HKEY app;
+        LSTATUS st = RegEnumKeyExW(key, i, sub, &sublen, NULL, NULL, NULL, NULL);
+
+        if (st == ERROR_NO_MORE_ITEMS) {
+            break;
+        }
+        if (st != ERROR_SUCCESS ||
+            RegOpenKeyExW(key, sub, 0, KEY_QUERY_VALUE | view, &app) != ERROR_SUCCESS) {
+            continue;
+        }
+        /* REG_EXPAND_SZ 는 RegGetValueW 가 환경 변수를 바꿔 준다. */
+        size = sizeof(name);
+        if (RegGetValueW(app, NULL, L"DisplayName", RRF_RT_REG_SZ, NULL, name, &size) ==
+                ERROR_SUCCESS &&
+            cleanup_is_dev_tool_product(name)) {
+            size = sizeof(location);
+            if (RegGetValueW(app, NULL, L"InstallLocation", RRF_RT_REG_SZ, NULL, location,
+                             &size) == ERROR_SUCCESS) {
+                cleanup_protect_add_install(p, location);
+            }
+        }
+        RegCloseKey(app);
+    }
+    RegCloseKey(key);
+}
+
 size_t cleanup_protect_add_system(CleanupProtect *p)
 {
     static const wchar_t *const vars[] = {L"ProgramFiles", L"ProgramFiles(x86)",
                                           L"ProgramW6432", L"ProgramData"};
+    static const struct {
+        const wchar_t *var;
+        const wchar_t *tail;
+    } installs[] = {
+        {L"LOCALAPPDATA", L"Programs"},
+        {L"USERPROFILE", L".vscode\\extensions"},
+        {L"USERPROFILE", L".vscode-insiders\\extensions"},
+    };
     wchar_t buf[MAX_PATH];
     size_t before, i;
     DWORD n;
@@ -367,6 +501,12 @@ size_t cleanup_protect_add_system(CleanupProtect *p)
             cleanup_protect_add(p, buf);
         }
     }
+    for (i = 0; i < sizeof(installs) / sizeof(installs[0]); i++) {
+        add_env_install(p, installs[i].var, installs[i].tail);
+    }
+    add_uninstall_dev_tools(p, HKEY_LOCAL_MACHINE, KEY_WOW64_64KEY);
+    add_uninstall_dev_tools(p, HKEY_LOCAL_MACHINE, KEY_WOW64_32KEY);
+    add_uninstall_dev_tools(p, HKEY_CURRENT_USER, 0);
     return p->len - before;
 }
 

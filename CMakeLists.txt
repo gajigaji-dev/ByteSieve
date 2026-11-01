@@ -50,10 +50,11 @@ target_include_directories(bytesieve_job PUBLIC src)
 target_link_libraries(bytesieve_job PUBLIC bytesieve_model)
 bytesieve_configure(bytesieve_job)
 
-# 정리 후보 탐지 규칙(이름 분류·프로젝트 표시 파일·시스템 보호 경로). 파일 시스템에 접근하지 않는다.
+# 정리 후보 탐지 규칙(이름 분류·프로젝트 표시 파일·시스템·프로그램 보호 경로). 파일 시스템에 접근하지 않는다
+# (보호 경로는 환경 변수와 프로그램 제거 정보 레지스트리에서 읽는다).
 add_library(bytesieve_cleanup_rules STATIC src/cleanup_rules.c)
 target_include_directories(bytesieve_cleanup_rules PUBLIC src)
-target_link_libraries(bytesieve_cleanup_rules PUBLIC bytesieve_path)
+target_link_libraries(bytesieve_cleanup_rules PUBLIC bytesieve_path advapi32)
 bytesieve_configure(bytesieve_cleanup_rules)
 
 # 정리 후보 탐지 엔진(scan_tree_ex 기반). 읽기 전용이며 아무것도 삭제·수정하지 않는다.
@@ -82,6 +83,12 @@ target_link_libraries(bytesieve_cleanup_trash PUBLIC bytesieve_cleanup bytesieve
                       shell32 uuid)
 bytesieve_configure(bytesieve_cleanup_trash)
 
+# 공용 개발 캐시(npm·pip·Gradle·Cargo·NuGet) 위치 탐지·용량 세기. 읽기 전용이며 정리는 cleanup_trash 로.
+add_library(bytesieve_dev_cache STATIC src/dev_cache.c)
+target_include_directories(bytesieve_dev_cache PUBLIC src)
+target_link_libraries(bytesieve_dev_cache PUBLIC bytesieve_cleanup_trash shell32 ole32)
+bytesieve_configure(bytesieve_dev_cache)
+
 # 용량 표시 문자열("1.50 KiB"). GUI 의 스캔 화면과 드라이브 대시보드가 함께 쓴다.
 add_library(bytesieve_format STATIC src/size_format.c)
 target_include_directories(bytesieve_format PUBLIC src)
@@ -108,10 +115,11 @@ bytesieve_configure(bytesieve_sysmon)
 # 격리 폴더 탭(휴지통 없는 드라이브에서 격리한 항목의 복원·영구 삭제),
 # 시스템 탭(RAM·CPU 실시간 사용률 막대·그래프).
 add_executable(bytesieve-gui WIN32 src/gui_main.c src/gui_drives.c src/gui_cleanup.c
-               src/gui_quarantine.c src/gui_monitor.c)
+               src/gui_cache.c src/gui_quarantine.c src/gui_monitor.c)
 target_link_libraries(bytesieve-gui PRIVATE bytesieve_job bytesieve_history bytesieve_export
                       bytesieve_drive bytesieve_format bytesieve_cleanup_job
-                      bytesieve_cleanup_trash bytesieve_sysmon comctl32 comdlg32 shell32 ole32)
+                      bytesieve_cleanup_trash bytesieve_dev_cache bytesieve_sysmon comctl32
+                      comdlg32 shell32 ole32)
 bytesieve_configure(bytesieve-gui)
 
 # 대용량 폴더 스캔의 실행 시간·메모리 측정 도구.
@@ -124,6 +132,11 @@ target_link_libraries(disk-scanner PRIVATE bytesieve_cli bytesieve_jsonl)
 bytesieve_configure(disk-scanner)
 
 enable_testing()
+
+# 성능 측정 도구가 동작하고 스캐너 진단(작업 수·메모리·미리 열거)을 출력하는지(최적화 전후 비교용).
+add_test(NAME bench_smoke COMMAND bytesieve-bench --mode tree --runs 1 ${CMAKE_CURRENT_SOURCE_DIR}/src)
+set_tests_properties(bench_smoke PROPERTIES
+                     PASS_REGULAR_EXPRESSION "scanner: peak tasks [0-9]+ .* prefetched [0-9]+")
 
 # 인자 없이 실행하면 종료 코드 2(비정상)여야 한다.
 add_test(NAME no_args COMMAND disk-scanner)
@@ -235,6 +248,21 @@ target_link_libraries(test_scan_history PRIVATE bytesieve_history)
 bytesieve_configure(test_scan_history)
 add_test(NAME scan_history COMMAND test_scan_history)
 
+# 정밀 스캔(하드 링크 중복 보정): 실제 하드 링크 픽스처로 기본 합계 유지, 중복 경로·용량·할당,
+# 작업 스레드 1개·8개의 같은 결과, 모델의 폴더별 중복·순위·진행률을 확인한다.
+# 병렬 미리 열거: 하위 폴더 2500개 픽스처에서 동시에 살아 있는 폴더 작업 수 상한, 작업 스레드 1개·8개의
+# 같은 결과, 열거 수 맞추기(직접 + 미리 - 버림 = 처리), 제외 훅·취소 뒤 정리를 확인한다.
+add_executable(test_scan_parallel tests/test_scan_parallel.c)
+target_link_libraries(test_scan_parallel PRIVATE bytesieve_scanner)
+bytesieve_configure(test_scan_parallel)
+add_test(NAME scan_parallel COMMAND test_scan_parallel)
+set_tests_properties(scan_parallel PROPERTIES TIMEOUT 120)
+
+add_executable(test_hardlink tests/test_hardlink.c)
+target_link_libraries(test_hardlink PRIVATE bytesieve_model)
+bytesieve_configure(test_hardlink)
+add_test(NAME hardlink COMMAND test_hardlink)
+
 add_executable(test_export tests/test_export.c)
 target_link_libraries(test_export PRIVATE bytesieve_export)
 bytesieve_configure(test_export)
@@ -276,6 +304,13 @@ target_link_libraries(test_cleanup_trash PRIVATE bytesieve_cleanup_trash)
 bytesieve_configure(test_cleanup_trash)
 add_test(NAME cleanup_trash COMMAND test_cleanup_trash)
 
+# 공용 개발 캐시: 사용자 폴더를 임시 픽스처로 돌려 기본 위치·환경 변수·설정 파일·캐시 구조 확인·
+# 링크·용량·취소·정리 판정(항목별 탐지 경로)을 확인한다. 실제 캐시는 보지 않는다.
+add_executable(test_dev_cache tests/test_dev_cache.c)
+target_link_libraries(test_dev_cache PRIVATE bytesieve_dev_cache)
+bytesieve_configure(test_dev_cache)
+add_test(NAME dev_cache COMMAND test_dev_cache)
+
 # 격리 폴더: 임시 폴더를 가짜 볼륨으로 써서 이동·목록·복원·충돌·실패·기록 불일치·영구 삭제와
 # 정리(BYTESIEVE_QUARANTINE_ROOT)·탐지·폴더 스캔 연동을 확인한다.
 add_executable(test_quarantine tests/test_quarantine.c)
@@ -313,6 +348,12 @@ add_test(NAME gui_history
                  -DFIXTURE=${CMAKE_CURRENT_BINARY_DIR}/gui_history_fixture
                  -DHIST=${CMAKE_CURRENT_BINARY_DIR}/gui_history_check
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/gui_history_check.cmake)
+# 폴더 스캔 탭 정밀 스캔: 하드 링크 픽스처를 정밀 스캔(보정 열·보기·분석 줄) → 기본 스캔(열 숨김) 확인.
+add_test(NAME gui_precise
+         COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:bytesieve-gui>
+                 -DFIXTURE=${CMAKE_CURRENT_BINARY_DIR}/gui_precise_fixture
+                 -DHIST=${CMAKE_CURRENT_BINARY_DIR}/gui_precise_history
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/gui_precise_check.cmake)
 # 폴더 스캔 탭 내보내기: 스캔 → CSV·HTML 보고서 저장(대화 상자 없이) → 파일 내용 확인.
 add_test(NAME gui_export
          COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:bytesieve-gui>
@@ -320,11 +361,17 @@ add_test(NAME gui_export
                  -DOUT=${CMAKE_CURRENT_BINARY_DIR}/gui_export_out
                  -DHIST=${CMAKE_CURRENT_BINARY_DIR}/gui_export_history
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/gui_export_check.cmake)
+# 공용 캐시 탭: 사용자 폴더를 픽스처로 돌려 탐지 → 화면 확인 → 정리 가능한 캐시를 모두 휴지통으로
+# → 도구 폴더·설정·설치한 도구와 캐시 구조가 아닌 폴더는 남는지 확인(넣은 휴지통 항목만 지움).
+add_test(NAME gui_cache
+         COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:bytesieve-gui>
+                 -DFIXTURE=${CMAKE_CURRENT_BINARY_DIR}/gui_cache_fixture
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/gui_cache_check.cmake)
 # 시스템 탭: 몇 초 동안 RAM·CPU 를 측정해 화면·1초 갱신 간격·측정 실패 표시를 확인한다.
 add_test(NAME gui_monitor COMMAND bytesieve-gui --self-test-monitor)
 set_tests_properties(gui_scan gui_cancel gui_missing_dir gui_drives gui_cleanup
                      gui_cleanup_cancel gui_trash gui_quarantine gui_monitor gui_history
-                     gui_export PROPERTIES TIMEOUT 120)
+                     gui_export gui_cache gui_precise PROPERTIES TIMEOUT 120)
 # 폴더 스캔 자체 검사가 사용자 기록 폴더(%LOCALAPPDATA%)에 스냅숏을 쓰지 않게 한다.
 set_tests_properties(gui_scan gui_cancel gui_missing_dir PROPERTIES
                      ENVIRONMENT "BYTESIEVE_HISTORY_DIR=${CMAKE_CURRENT_BINARY_DIR}/gui_test_history")

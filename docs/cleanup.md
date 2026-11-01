@@ -30,11 +30,45 @@
 |---|---|
 | 경로 판정 | UNC·상대 경로, 260자 이상, 탐지 경로 밖이거나 탐지 경로 자체 |
 | | Windows·`Program Files`·`ProgramData`, 볼륨 루트의 `$Recycle.Bin`·`System Volume Information` 등과 같거나 그 아래 |
+| | 개발 도구·프로그램 설치 경로와 같거나 그 아래([보호 경로](#보호-경로)) |
 | | 볼륨 루트, `Users`, 사용자·공용 프로필, 바탕 화면·문서·다운로드 등 알려진 폴더, `AppData`, 실행 중인 프로그램 폴더, 그리고 이들의 상위 |
 | | 하위를 다 읽지 못한 항목(접근 거부·취소로 일부 누락) |
 | | 격리 폴더(`.bytesieve-trash`)이거나 그 안 |
 | 옮기기 직전 | 고정·이동식 드라이브가 아님(네트워크·CD 등), 이미 없음 |
 | | 탐지 때와 종류가 다름, 링크로 바뀜, `GetFinalPathNameByHandleW`로 구한 실제 위치가 표시 경로와 다름(중간 폴더가 정션으로 바뀐 경우 등) |
+
+### 보호 경로
+
+다음 경로는 탐지할 때 **들어가지 않고**(그 안의 실행 파일·`node_modules`·`__pycache__`·`out`·`*.log` 등은 후보가 되지 않음),
+정리 판정에서도 그 경로와 그 아래를 거부하며 그 상위(예: `AppData\Local`)는 중요 경로로 거부합니다.
+프로젝트 탐지, [정리 후보] 탭의 휴지통 이동, [공용 캐시] 탭이 모두 같은 목록(`cleanup_protect_add_system`)을 씁니다.
+
+| 경로 | 예 |
+|---|---|
+| `%WINDIR%`, `%ProgramFiles%`, `%ProgramFiles(x86)%`, `%ProgramW6432%`, `%ProgramData%` | Visual Studio·VS Code 시스템 설치의 기본 위치 |
+| `%LOCALAPPDATA%\Programs` | VS Code 사용자 설치(`Microsoft VS Code`), Python 등 사용자별 설치 프로그램 |
+| `%USERPROFILE%\.vscode\extensions`, `%USERPROFILE%\.vscode-insiders\extensions` | 설치한 VS Code 확장(안에 `package.json`·`node_modules`가 있어 예전에는 후보가 될 수 있었음) |
+| 프로그램 제거 정보(레지스트리 `Uninstall`, HKLM 64·32비트와 HKCU)의 `InstallLocation` | 표시 이름이 `Microsoft Visual Studio…`·`Visual Studio …`인 항목. 다른 드라이브(`D:\VS` 등)에 설치한 Visual Studio·VS Code |
+
+레지스트리 값은 앞뒤 공백·따옴표를 벗기고 `X:\폴더` 꼴의 로컬 절대 경로만 받습니다. 볼륨 루트(`D:\`)는 드라이브 전체가 보호되어
+탐지가 멈추지 않도록 받지 않습니다. 사용자가 보호 경로 안을 직접 탐지 경로로 고르면 항목은 보여 주되 모두 보호 표시를 붙여 옮기지 않습니다.
+압축 파일로 푼 VS Code(포터블)처럼 위 어디에도 등록되지 않은 위치는 알 수 없습니다.
+
+## 공용 개발 캐시
+
+[공용 캐시] 탭(`dev_cache`)은 npm·pip·Gradle·Cargo·NuGet의 공용 캐시를 찾습니다. 위치를 정하는 순서는 [gui.md](gui.md#공용-캐시)에 있습니다.
+정리는 위 안전 장치를 그대로 거치며, 캐시마다 **그 캐시 폴더의 부모(도구 폴더)를 탐지 경로**로 삼아 판정합니다
+(`cleanup_trash_job_start_each`). 공용 캐시에는 다음을 더 지킵니다.
+
+| 조건 | 처리 |
+|---|---|
+| 도구 폴더 자체(`.gradle`·`.cargo`·`.nuget`) | 항목으로 만들지 않음. 그 안의 캐시 하위 폴더만 다루므로 설정(`gradle.properties`)·인증 정보·설치한 도구(`.cargo\bin`)는 남음 |
+| 환경 변수·설정 파일이 가리킨 폴더 | 그 도구의 캐시 구조(예: npm은 `_cacache`, pip은 `http`·`wheels`, NuGet 패키지는 `<id>\<버전>\.nupkg.metadata`)가 보일 때만 정리 후보. 아니면 `캐시 구조가 아니라 정리하지 않음` |
+| 바꾸지 못한 변수(`%NOPE%`)·상대 경로만 있는 환경 변수 | 쓰지 않고 다음 위치로 |
+| 링크(정션·심볼릭 링크)인 캐시 폴더 | 정리하지 않음 |
+| 용량을 다 세지 못함(읽기 오류·취소) | 정리하지 않음 |
+| 캐시 위치가 사용자 프로필·문서 등 중요 경로이거나 그 상위 | 거부(위 경로 판정) |
+| 캐시 위치가 프로그램 설치 경로 안(Visual Studio의 `Shared\NuGetPackages`, `%LOCALAPPDATA%\Programs` 아래 Node.js의 npm 캐시 등) | 캐시 구조가 맞아도 거부(`보호: 시스템·프로그램 보호 경로`) |
 
 ## 격리 폴더
 

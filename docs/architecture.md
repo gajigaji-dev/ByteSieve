@@ -11,10 +11,10 @@
 
 ```
                     disk-scanner (CLI)                bytesieve-gui (GUI)
-                     │  cli · jsonl                     │  폴더 스캔 │ 드라이브 │ 정리 후보 │ 격리 폴더 │ 시스템
+                     │  cli · jsonl                     │  폴더 스캔 │ 드라이브 │ 정리 후보 │ 공용 캐시 │ 격리 폴더 │ 시스템
                      │                                  │
-   scan_history ── scan_model ── scan_job        cleanup_job ── cleanup_trash      drive   sysmon
-   (변화 추적)     (폴더 트리)   (스캔 스레드)   (탐지 스레드)   (휴지통 이동)    (드라이브) (RAM·CPU)
+   scan_history ── scan_model ── scan_job        cleanup_job ── cleanup_trash ── dev_cache   drive   sysmon
+   (변화 추적)     (폴더 트리)   (스캔 스레드)   (탐지 스레드)   (휴지통 이동)    (공용 캐시)  (드라이브) (RAM·CPU)
                                                                         │
                                                                     quarantine
                                                                     (격리 폴더)
@@ -35,7 +35,8 @@
 | `bytesieve_history` | 폴더별 용량 스냅숏 저장·읽기·비교 |
 | `bytesieve_export` | 스캔 결과 CSV·HTML 보고서 내보내기(임시 파일 → 바꿔치기, 64 KiB 버퍼로 나눠 쓰기) |
 | `bytesieve_cleanup_rules` / `bytesieve_cleanup` / `bytesieve_cleanup_job` | 정리 후보 규칙, 탐지 엔진, 탐지 스레드 |
-| `bytesieve_cleanup_trash` | 삭제 보호 판정, 직전 확인, 휴지통 이동(쓸 수 없으면 격리 폴더로) |
+| `bytesieve_cleanup_trash` | 삭제 보호 판정, 직전 확인, 휴지통 이동(쓸 수 없으면 격리 폴더로). 항목마다 탐지 경로를 따로 받는 작업도 지원 |
+| `bytesieve_dev_cache` | 공용 개발 캐시(npm·pip·Gradle·Cargo·NuGet) 위치 탐지(환경 변수·설정 파일·기본 위치, 캐시 구조 확인), 용량 세기, 작업 스레드 |
 | `bytesieve_quarantine` | 드라이브별 격리 폴더: 같은 볼륨 안 이동, 기록(원자적 쓰기), 목록·불일치 판정, 복원, 영구 삭제 |
 | `bytesieve_drive` / `bytesieve_sysmon` / `bytesieve_format` | 드라이브 조회, RAM·CPU 측정, 용량 표시 문자열 |
 | `bytesieve_cli` / `bytesieve_jsonl` | CLI 인자 해석·출력, JSON Lines 직렬화 |
@@ -57,10 +58,19 @@
 
 ## 병렬 미리 열거
 
-- 폴더를 열거한 쪽이 곧바로 하위 폴더 작업을 큐에 넣고, 작업 스레드(기본 논리 프로세서 수, 최대 8개)는 깊이 우선 처리 순서 키로 정렬한 힙에서
-  **가장 먼저 필요한 폴더부터** 읽습니다.
+- 폴더를 열거한 쪽은 하위 폴더마다 **칸**(32바이트: 부모의 열거 기록 위치·상태)만 만들고 큐에는 (부모, 칸 번호) 16바이트 항목을 넣습니다.
+  경로 사본을 가진 폴더 작업은 작업 스레드가 큐에서 꺼낼 때, 또는 호출 스레드가 그 폴더 차례가 됐을 때 비로소 만듭니다.
+- 작업 스레드(기본 논리 프로세서 수, 최대 8개)는 깊이 우선 처리 순서 키로 정렬한 힙에서 **가장 먼저 필요한 폴더부터** 읽습니다.
+- 미리 읽은 결과는 **1024개 폴더·2 MiB**로 제한합니다. 상한이 찼는데 큐 맨 앞이 미리 읽어 둔 것 중 가장 나중에 필요한 것보다 급하면,
+  그 나중 것을 내쫓고(칸은 큐로 되돌림) 급한 것을 읽습니다. 그래서 깊은 곳에서 새로 나타난 급한 폴더가 먼 형제 폴더에 막히지 않습니다.
+- 호출 스레드의 깊이 우선 스택은 하위 폴더마다 작업을 쌓지 않고, 처리를 마친 폴더 하나가 남은 하위 폴더 칸을 마지막 것부터 넘겨줍니다.
+  스택에 올릴 때 남은 하위 폴더 기록만 남기고 파일 기록은 버립니다.
+- 작업 스레드는 넣은 항목 수만큼만, 호출 스레드는 기다리는 작업이 끝났을 때만 깨웁니다.
 - 훅은 언제나 호출 스레드에서 병렬이 아닐 때와 **같은 순서**로 불리므로, 결과·오류 순서가 스레드 수와 상관없이 같습니다(테스트로 확인).
-- 미리 읽은 결과는 32 MiB(또는 65,536개 폴더)로 제한하고, 상한에 닿으면 호출 스레드가 직접 읽습니다.
+- `ScanReport`의 진단 값(`peak_tasks`·`peak_task_bytes`·`prefetched_dirs`·`self_fetched_dirs`·`prefetch_waits`·`discarded_dirs`)으로
+  메모리 상한과 분배를 확인할 수 있습니다. 직접 열거 + 미리 열거 − 버림 = 처리한 폴더 수가 항상 맞습니다(`scan_parallel` 테스트).
+- 남는 메모리 바닥은 **가장 큰 폴더 하나의 목록**입니다. 폴더 하나는 처리할 때까지 목록 전체를 들고 있어야 하므로
+  (`C:\Windows\WinSxS` 하위 폴더 3만 2천 개 ≈ 8 MB, `WinSxS\Manifests` 파일 4만 4천 개 ≈ 11 MB) 상한을 더 낮춰도 줄지 않습니다.
 
 측정 결과와 병목 분석은 [performance.md](performance.md)에 있습니다.
 
@@ -69,6 +79,20 @@
 할당 크기는 폴더 열거 결과에 들어 있어 파일을 열지 않습니다. 압축·스파스 파일만 `GetCompressedFileSizeW`로 다시 구하고,
 클라우드 자리표시자는 내려받기를 일으키지 않도록 건드리지 않습니다. 원인은 클라우드 전용 > 압축 > 스파스 > 기타 순으로 하나에만 넣으므로
 `디스크 사용 = 논리 크기 + 클러스터 낭비 - (압축 + 스파스 + 클라우드 + 기타)`가 항상 성립합니다.
+
+## 정밀 스캔(하드 링크 중복 보정)
+
+`scan_tree_opts(..., SCAN_OPT_HARDLINKS)`(모델은 `scan_model_build_opts`, 작업은 `scan_job_start_ex`)로 켭니다.
+
+- 열거 정보를 `FileFullDirectoryInfo` 대신 `FileIdExtdDirectoryInfo`(128비트 파일 ID)로 받고, 안 되면 `FileIdBothDirectoryInfo`(64비트),
+  그것도 안 되면 ID 없이 받습니다. 볼륨 일련번호는 폴더 핸들의 `FileIdInfo`로 구합니다. 파일을 열지 않으므로 추가 I/O가 거의 없습니다.
+- 파일 ID는 정밀 스캔일 때만 열거 기록(`EntryRec`)에 16바이트로 붙어, 기본 스캔의 메모리·속도는 그대로입니다.
+- 같은 실제 파일인지는 호출 스레드가 훅 순서대로 (볼륨, 파일 ID) 집합을 확인해 정하므로, 병렬 미리 열거와 상관없이 같은 경로가 "처음"이 됩니다.
+  처음이 아닌 경로는 `ScanEntry.hardlink_dup`로 알리고 `ScanReport.hardlink_dup_*`, `ScanNode.*_dup_*`에 따로 더합니다.
+  경로마다 센 기본 값(`total_bytes`·`alloc_bytes` 등)은 바꾸지 않으므로 기본 스캔과 정밀 스캔의 차이를 한 번의 정밀 스캔으로 보여 줄 수 있습니다.
+- 탐색 시작 볼륨이 `FILE_SUPPORTS_HARD_LINKS`가 아니면(FAT·exFAT) ID를 모으지 않습니다(FAT의 파일 ID는 믿을 수 없음). ID가 0이거나 없는 파일과,
+  집합을 늘릴 메모리가 없을 때의 파일은 `hardlink_unknown_files`로 세고 경로마다 셉니다.
+- 예: `C:\Windows`(파일 21만 개)는 경로마다 35.5 GB이지만 그중 5만 7천여 경로·10.9 GB가 하드 링크 중복이라 중복 제외 용량은 24.6 GB입니다.
 
 ## 변화 추적
 
