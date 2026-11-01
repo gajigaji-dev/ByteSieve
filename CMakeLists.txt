@@ -50,10 +50,11 @@ target_include_directories(bytesieve_job PUBLIC src)
 target_link_libraries(bytesieve_job PUBLIC bytesieve_model)
 bytesieve_configure(bytesieve_job)
 
-# 정리 후보 탐지 규칙(이름 분류·프로젝트 표시 파일·시스템 보호 경로). 파일 시스템에 접근하지 않는다.
+# 정리 후보 탐지 규칙(이름 분류·프로젝트 표시 파일·시스템·프로그램 보호 경로). 파일 시스템에 접근하지 않는다
+# (보호 경로는 환경 변수와 프로그램 제거 정보 레지스트리에서 읽는다).
 add_library(bytesieve_cleanup_rules STATIC src/cleanup_rules.c)
 target_include_directories(bytesieve_cleanup_rules PUBLIC src)
-target_link_libraries(bytesieve_cleanup_rules PUBLIC bytesieve_path)
+target_link_libraries(bytesieve_cleanup_rules PUBLIC bytesieve_path advapi32)
 bytesieve_configure(bytesieve_cleanup_rules)
 
 # 정리 후보 탐지 엔진(scan_tree_ex 기반). 읽기 전용이며 아무것도 삭제·수정하지 않는다.

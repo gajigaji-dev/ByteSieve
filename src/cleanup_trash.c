@@ -28,7 +28,7 @@ const wchar_t *cleanup_trash_status_text(CleanupTrashStatus status)
     case CLEANUP_TRASH_DENY_OUTSIDE:
         return L"탐지 경로 밖";
     case CLEANUP_TRASH_DENY_PROTECTED:
-        return L"시스템 보호 경로";
+        return L"시스템·프로그램 보호 경로";
     case CLEANUP_TRASH_DENY_CRITICAL:
         return L"중요 폴더이거나 그 상위";
     case CLEANUP_TRASH_DENY_INCOMPLETE:
