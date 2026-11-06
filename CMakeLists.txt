@@ -89,6 +89,11 @@ target_include_directories(bytesieve_dev_cache PUBLIC src)
 target_link_libraries(bytesieve_dev_cache PUBLIC bytesieve_cleanup_trash shell32 ole32)
 bytesieve_configure(bytesieve_dev_cache)
 
+# 스퀘어리파이드 트리맵 배치(순수 계산). GUI 폴더 스캔 탭의 트리맵 보기가 쓴다.
+add_library(bytesieve_treemap STATIC src/treemap.c)
+target_include_directories(bytesieve_treemap PUBLIC src)
+bytesieve_configure(bytesieve_treemap)
+
 # 용량 표시 문자열("1.50 KiB"). GUI 의 스캔 화면과 드라이브 대시보드가 함께 쓴다.
 add_library(bytesieve_format STATIC src/size_format.c)
 target_include_directories(bytesieve_format PUBLIC src)
@@ -115,8 +120,9 @@ bytesieve_configure(bytesieve_sysmon)
 # 격리 폴더 탭(휴지통 없는 드라이브에서 격리한 항목의 복원·영구 삭제),
 # 시스템 탭(RAM·CPU 실시간 사용률 막대·그래프).
 add_executable(bytesieve-gui WIN32 src/gui_main.c src/gui_drives.c src/gui_cleanup.c
-               src/gui_cache.c src/gui_quarantine.c src/gui_monitor.c)
+               src/gui_cache.c src/gui_quarantine.c src/gui_monitor.c src/gui_treemap.c)
 target_link_libraries(bytesieve-gui PRIVATE bytesieve_job bytesieve_history bytesieve_export
+                      bytesieve_treemap
                       bytesieve_drive bytesieve_format bytesieve_cleanup_job
                       bytesieve_cleanup_trash bytesieve_dev_cache bytesieve_sysmon comctl32
                       comdlg32 shell32 ole32)
@@ -287,6 +293,11 @@ add_executable(test_size_format tests/test_size_format.c)
 target_link_libraries(test_size_format PRIVATE bytesieve_format)
 bytesieve_configure(test_size_format)
 add_test(NAME size_format COMMAND test_size_format)
+
+add_executable(test_treemap tests/test_treemap.c)
+target_link_libraries(test_treemap PRIVATE bytesieve_treemap)
+bytesieve_configure(test_treemap)
+add_test(NAME treemap COMMAND test_treemap)
 
 add_executable(test_cleanup_rules tests/test_cleanup_rules.c)
 target_link_libraries(test_cleanup_rules PRIVATE bytesieve_cleanup_rules)
