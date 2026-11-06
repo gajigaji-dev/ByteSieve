@@ -5,8 +5,10 @@
 #include <io.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <wchar.h>
 
+#include "cleanup_rules.h"
 #include "cli.h"
 #include "jsonl.h"
 #include "scan_history.h"
@@ -108,13 +110,46 @@ static int run_scan_tracked(const CliOptions *opts)
     return cli_exit_code(status);
 }
 
+/*
+ * 정리한 항목을 옮겨 둔 격리 폴더(CLEANUP_QUARANTINE_DIR)는 사용 중인 공간으로 세지 않는다
+ * (GUI 폴더 스캔·--track 의 scan_model 과 같은 기준).
+ */
+static int skip_quarantine(const ScanEntry *entry, const ScanDirInfo *parent, void *ctx)
+{
+    (void)parent;
+    (void)ctx;
+    return cleanup_is_quarantine_name(entry->name);
+}
+
+static uintptr_t visit_progress(const ScanEntry *entry, uintptr_t parent, int will_descend,
+                                void *ctx)
+{
+    (void)parent;
+    (void)will_descend;
+    jsonl_progress_visit(entry, ctx);
+    return 0;
+}
+
+/* 격리 폴더를 빼고 스캔한다. progress 가 NULL 이 아니면 항목마다 JSON Lines 진행을 센다. */
+static ScanStatus scan_target(const CliOptions *opts, ScanReport *report, JsonlProgress *progress)
+{
+    ScanHooks hooks;
+
+    memset(&hooks, 0, sizeof(hooks));
+    hooks.should_skip_dir = skip_quarantine;
+    if (progress != NULL) {
+        hooks.on_entry = visit_progress;
+    }
+    return scan_tree_ex(opts->target, opts->max_depth, 0, report, &hooks, progress);
+}
+
 static int run_scan(const CliOptions *opts)
 {
     ScanReport report;
     ScanStatus status;
 
     scan_report_init(&report);
-    status = scan_tree(opts->target, opts->max_depth, &report, NULL, NULL);
+    status = scan_target(opts, &report, NULL);
     cli_print_report(stdout, stderr, opts->target, opts->max_depth, &report, status);
     scan_report_free(&report);
     return cli_exit_code(status);
@@ -149,8 +184,7 @@ static int run_scan_jsonl(const CliOptions *opts)
         progress.out = stdout;
         progress.interval = JSONL_PROGRESS_INTERVAL;
         progress.seen = 0;
-        status = scan_tree(opts->target, opts->max_depth, &report,
-                           jsonl_progress_visit, &progress);
+        status = scan_target(opts, &report, &progress);
     }
     code = cli_exit_code(status);
 

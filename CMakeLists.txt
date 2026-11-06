@@ -108,6 +108,8 @@ bytesieve_configure(bytesieve_export)
 # 논리 드라이브 목록·용량 조회(GetLogicalDrives, GetDiskFreeSpaceExW). 스캐너와 독립.
 add_library(bytesieve_drive STATIC src/drive.c)
 target_include_directories(bytesieve_drive PUBLIC src)
+# 암호화 상태: 셸 속성(System.Volume.BitLockerProtection)
+target_link_libraries(bytesieve_drive PUBLIC ole32 shell32 propsys)
 bytesieve_configure(bytesieve_drive)
 
 # RAM·CPU 사용률 측정(GlobalMemoryStatusEx, GetSystemTimes). UI 와 독립.
@@ -134,7 +136,7 @@ target_link_libraries(bytesieve-bench PRIVATE bytesieve_model bytesieve_cleanup 
 bytesieve_configure(bytesieve-bench)
 
 add_executable(disk-scanner src/main.c)
-target_link_libraries(disk-scanner PRIVATE bytesieve_cli bytesieve_jsonl)
+target_link_libraries(disk-scanner PRIVATE bytesieve_cli bytesieve_jsonl bytesieve_cleanup_rules)
 bytesieve_configure(disk-scanner)
 
 enable_testing()
@@ -185,6 +187,10 @@ bytesieve_cli_test(partial 1 "@FIXTURE@"
     "Files: +1\n|Directories: +2\n|Total size: +5 bytes|Errors: +1 .access_denied 1.|Skipped dirs: +1\n|Aborted: +no|Status: +partial .1 directory could not be read"
     "error: .*locked: access_denied .Windows error 5."
     -DDENY_FIXTURE=${CMAKE_CURRENT_BINARY_DIR}/cli_partial_fixture)
+# 정리한 항목을 옮겨 둔 격리 폴더(.bytesieve-trash, 1000바이트)는 세지 않는다(GUI·--track 과 같게).
+bytesieve_cli_test(skip_quarantine 0 "@FIXTURE@"
+    "Files: +1\n|Total size: +5 bytes|Status: +complete" ""
+    -DQUARANTINE_FIXTURE=${CMAKE_CURRENT_BINARY_DIR}/cli_quarantine_fixture)
 bytesieve_cli_test(fatal_missing 2 "${CMAKE_CURRENT_SOURCE_DIR}/no-such-dir"
     "Errors: +1 .not_found 1.|Aborted: +yes|Status: +fatal .scan aborted."
     "error: .*no-such-dir: not_found")
@@ -210,6 +216,9 @@ bytesieve_cli_test(jsonl_missing_dir 2 "--jsonl|${CMAKE_CURRENT_SOURCE_DIR}/no-s
 bytesieve_cli_test(jsonl_partial 1 "--jsonl|@FIXTURE@"
     "\"error_count\":1,\"errors\":.{\"path\":\"[^\"]*locked\",\"code\":5}.|\"status\":\"partial\",\"exit_code\":1" ""
     -DDENY_FIXTURE=${CMAKE_CURRENT_BINARY_DIR}/cli_jsonl_partial_fixture)
+bytesieve_cli_test(jsonl_skip_quarantine 0 "--jsonl|@FIXTURE@"
+    "\"files\":1,[^\n]*\"bytes\":5,|\"status\":\"complete\",\"exit_code\":0" ""
+    -DQUARANTINE_FIXTURE=${CMAKE_CURRENT_BINARY_DIR}/cli_jsonl_quarantine_fixture)
 
 # 폴더별 용량 변화 추적: 기준 스냅숏 → 픽스처 변경 → 비교, JSON Lines changes 이벤트.
 add_test(NAME cli_track

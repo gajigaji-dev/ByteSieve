@@ -26,6 +26,7 @@ enum {
     COL_LABEL,
     COL_TYPE,
     COL_FS,
+    COL_ENCRYPTION,
     COL_TOTAL,
     COL_USED,
     COL_FREE,
@@ -135,9 +136,26 @@ static void list_set(HWND list, int row, int col, const wchar_t *text)
     SendMessageW(list, LVM_SETITEMTEXTW, (WPARAM)row, (LPARAM)&lv);
 }
 
+/* 암호화 열: 뜻을 모르는 값·조회 실패는 원래 값·오류 코드를 덧붙인다. */
+static void encryption_text(const DriveInfo *d, wchar_t *buf, size_t len)
+{
+    if (d->encryption == DRIVE_ENC_UNKNOWN && d->encryption_raw >= 0) {
+        swprintf(buf, len, L"%ls(값 %ld)", drive_encryption_text(d->encryption),
+                 d->encryption_raw);
+    } else if (d->encryption == DRIVE_ENC_FAILED) {
+        swprintf(buf, len, L"%ls(0x%08lX)", drive_encryption_text(d->encryption),
+                 (unsigned long)d->encryption_error);
+    } else {
+        swprintf(buf, len, L"%ls", drive_encryption_text(d->encryption));
+    }
+}
+
 static void usage_text(const DriveInfo *d, wchar_t *buf, size_t len)
 {
-    if (d->status == DRIVE_STATUS_OK) {
+    if (d->status != DRIVE_STATUS_OK && d->encryption == DRIVE_ENC_LOCKED) {
+        /* 잠긴 BitLocker 드라이브는 용량을 읽을 수 없다. 오류 코드보다 이유를 보여 준다. */
+        swprintf(buf, len, L"BitLocker로 잠김(탐색기에서 잠금 해제 필요)");
+    } else if (d->status == DRIVE_STATUS_OK) {
         unsigned pm = drive_usage_permille(d);
         swprintf(buf, len, L"%u.%u%%", pm / 10, pm % 10);
     } else {
@@ -169,6 +187,8 @@ static void fill_list(DrivePanel *p)
         list_set(p->list, row, COL_LABEL, d->label);
         list_set(p->list, row, COL_TYPE, type_label(d->type));
         list_set(p->list, row, COL_FS, d->fs);
+        encryption_text(d, buf, sizeof(buf) / sizeof(buf[0]));
+        list_set(p->list, row, COL_ENCRYPTION, buf);
         if (d->status == DRIVE_STATUS_OK) {
             format_size(d->total_bytes, buf, 64);
             list_set(p->list, row, COL_TOTAL, buf);
@@ -186,9 +206,9 @@ static void fill_list(DrivePanel *p)
 
 static void update_summary(DrivePanel *p)
 {
-    wchar_t text[256], total[32], used[32], avail[32];
+    wchar_t text[320], total[32], used[32], avail[32];
     uint64_t sum_total = 0, sum_used = 0, sum_free = 0;
-    size_t i, failed = 0;
+    size_t i, failed = 0, enc_known = 0, encrypted = 0;
     SYSTEMTIME now;
 
     if (p->busy) {
@@ -210,15 +230,22 @@ static void update_summary(DrivePanel *p)
         } else {
             failed++;
         }
+        /* 암호화 상태를 알아낸 로컬·이동식 드라이브 중 암호화된 수 */
+        if (d->encryption != DRIVE_ENC_NOT_QUERIED && d->encryption != DRIVE_ENC_FAILED) {
+            enc_known++;
+            encrypted += drive_encryption_is_encrypted(d->encryption) != 0;
+        }
     }
     format_size(sum_total, total, 32);
     format_size(sum_used, used, 32);
     format_size(sum_free, avail, 32);
     GetLocalTime(&now);
     swprintf(text, sizeof(text) / sizeof(text[0]),
-             L"드라이브 %u개 · 전체 %ls · 사용 %ls · 여유 %ls · 조회 실패 %u개 · %02u:%02u:%02u 기준",
-             (unsigned)p->drives.len, total, used, avail, (unsigned)failed,
-             (unsigned)now.wHour, (unsigned)now.wMinute, (unsigned)now.wSecond);
+             L"드라이브 %u개 · 전체 %ls · 사용 %ls · 여유 %ls · 조회 실패 %u개 · "
+             L"BitLocker 암호화 %u/%u개 · %02u:%02u:%02u 기준",
+             (unsigned)p->drives.len, total, used, avail, (unsigned)failed, (unsigned)encrypted,
+             (unsigned)enc_known, (unsigned)now.wHour, (unsigned)now.wMinute,
+             (unsigned)now.wSecond);
     SetWindowTextW(p->summary, text);
 }
 
@@ -346,6 +373,7 @@ static void panel_create_controls(DrivePanel *p)
         {L"이름", 140, LVCFMT_LEFT},
         {L"종류", 84, LVCFMT_LEFT},
         {L"파일 시스템", 80, LVCFMT_LEFT},
+        {L"암호화", 150, LVCFMT_LEFT},
         {L"전체", 84, LVCFMT_RIGHT},
         {L"사용", 84, LVCFMT_RIGHT},
         {L"여유", 84, LVCFMT_RIGHT},
@@ -543,6 +571,14 @@ int drive_panel_verify(HWND panel)
                              (int)(sizeof(cell) / sizeof(cell[0])));
         usage_text(d, expect, sizeof(expect) / sizeof(expect[0]));
         PANEL_CHECK(wcscmp(cell, expect) == 0);
+        ListView_GetItemText(p->list, (int)i, COL_ENCRYPTION, cell,
+                             (int)(sizeof(cell) / sizeof(cell[0])));
+        encryption_text(d, expect, sizeof(expect) / sizeof(expect[0]));
+        PANEL_CHECK(wcscmp(cell, expect) == 0 && cell[0] != L'\0');
+        /* 암호화 상태는 로컬·이동식 드라이브만 조회한다 */
+        if (d->type != DRIVE_TYPE_FIXED && d->type != DRIVE_TYPE_REMOVABLE) {
+            PANEL_CHECK(d->encryption == DRIVE_ENC_NOT_QUERIED);
+        }
 
         if (d->status == DRIVE_STATUS_OK) {
             PANEL_CHECK(d->free_bytes <= d->total_bytes);
@@ -555,6 +591,9 @@ int drive_panel_verify(HWND panel)
             sys_found = 1;
             PANEL_CHECK(d->status == DRIVE_STATUS_OK && d->total_bytes > 0);
             PANEL_CHECK(d->type == DRIVE_TYPE_FIXED);
+            /* 시스템 드라이브는 암호화 여부와 상관없이 셸 속성을 읽을 수 있어야 한다 */
+            PANEL_CHECK(d->encryption != DRIVE_ENC_NOT_QUERIED &&
+                        d->encryption != DRIVE_ENC_FAILED);
         }
     }
     PANEL_CHECK(windir[0] == L'\0' || sys_found);

@@ -215,6 +215,94 @@ static void test_list_build(void)
     CHECK(drive_list_build(mask, fake_query, &fc, NULL) == -1);
 }
 
+/* 셸 속성 값 → 암호화 상태, 이름·문구, 암호화 여부 */
+static void test_encryption_mapping(void)
+{
+    static const struct {
+        long value;
+        DriveEncryption expect;
+    } cases[] = {
+        {0, DRIVE_ENC_NONE},       {1, DRIVE_ENC_ON},        {2, DRIVE_ENC_OFF},
+        {3, DRIVE_ENC_ENCRYPTING}, {4, DRIVE_ENC_DECRYPTING}, {5, DRIVE_ENC_SUSPENDED},
+        {6, DRIVE_ENC_LOCKED},     {7, DRIVE_ENC_UNKNOWN},   {8, DRIVE_ENC_PENDING},
+        {9, DRIVE_ENC_UNKNOWN},    {-1, DRIVE_ENC_UNKNOWN},
+    };
+    size_t i, j;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        CHECK(drive_encryption_from_bitlocker(1, cases[i].value) == cases[i].expect);
+    }
+    /* 값이 없으면 정보 없음 */
+    CHECK(drive_encryption_from_bitlocker(0, 1) == DRIVE_ENC_NONE);
+
+    CHECK(drive_encryption_is_encrypted(DRIVE_ENC_ON));
+    CHECK(drive_encryption_is_encrypted(DRIVE_ENC_LOCKED));
+    CHECK(drive_encryption_is_encrypted(DRIVE_ENC_SUSPENDED));
+    CHECK(drive_encryption_is_encrypted(DRIVE_ENC_PENDING));
+    CHECK(drive_encryption_is_encrypted(DRIVE_ENC_DECRYPTING));
+    CHECK(!drive_encryption_is_encrypted(DRIVE_ENC_ENCRYPTING));
+    CHECK(!drive_encryption_is_encrypted(DRIVE_ENC_OFF));
+    CHECK(!drive_encryption_is_encrypted(DRIVE_ENC_NONE));
+    CHECK(!drive_encryption_is_encrypted(DRIVE_ENC_NOT_QUERIED));
+    CHECK(!drive_encryption_is_encrypted(DRIVE_ENC_UNKNOWN));
+    CHECK(!drive_encryption_is_encrypted(DRIVE_ENC_FAILED));
+
+    /* 모든 상태에 식별자·화면 문구가 있고 식별자는 서로 다르다 */
+    for (i = 0; i < DRIVE_ENC_COUNT; i++) {
+        CHECK(drive_encryption_name((DriveEncryption)i)[0] != L'\0');
+        CHECK(drive_encryption_text((DriveEncryption)i)[0] != L'\0');
+        for (j = 0; j < i; j++) {
+            CHECK(wcscmp(drive_encryption_name((DriveEncryption)i),
+                         drive_encryption_name((DriveEncryption)j)) != 0);
+        }
+    }
+    CHECK(wcscmp(drive_encryption_name(DRIVE_ENC_LOCKED), L"locked") == 0);
+    CHECK(wcscmp(drive_encryption_name((DriveEncryption)99), L"unknown") == 0);
+}
+
+/* 가짜 조회: C: 켜짐, D: 잠김(용량 조회 실패), E: 네트워크 */
+static void fake_encrypted(DriveInfo *out, void *ctx)
+{
+    (void)ctx;
+    out->encryption_raw = -1;
+    switch (out->root[0]) {
+    case L'C':
+        out->type = DRIVE_TYPE_FIXED;
+        out->status = DRIVE_STATUS_OK;
+        out->total_bytes = 1000;
+        out->encryption = DRIVE_ENC_ON;
+        out->encryption_raw = 1;
+        break;
+    case L'D':
+        out->type = DRIVE_TYPE_REMOVABLE;
+        out->status = DRIVE_STATUS_ERROR;
+        out->error = ERROR_GEN_FAILURE;
+        out->total_bytes = 77; /* 잘못 남긴 용량 */
+        out->encryption = DRIVE_ENC_LOCKED;
+        out->encryption_raw = 6;
+        break;
+    default:
+        out->type = DRIVE_TYPE_REMOTE;
+        out->status = DRIVE_STATUS_OK;
+        out->encryption = DRIVE_ENC_NOT_QUERIED;
+        break;
+    }
+}
+
+/* 목록을 만들 때 용량은 실패 항목에서 지우지만 암호화 상태(잠김 등)는 그대로 둔다 */
+static void test_list_encryption(void)
+{
+    DriveList list;
+    unsigned long mask = (1UL << 2) | (1UL << 3) | (1UL << 4);
+
+    CHECK(drive_list_build(mask, fake_encrypted, NULL, &list) == 0);
+    CHECK(list.len == 3);
+    CHECK(list.items[0].encryption == DRIVE_ENC_ON && list.items[0].encryption_raw == 1);
+    CHECK(list.items[1].status == DRIVE_STATUS_ERROR && list.items[1].total_bytes == 0);
+    CHECK(list.items[1].encryption == DRIVE_ENC_LOCKED && list.items[1].encryption_raw == 6);
+    CHECK(list.items[2].encryption == DRIVE_ENC_NOT_QUERIED);
+}
+
 /* 존재하지 않는 드라이브 문자를 실제로 조회하면 실패 상태가 되고 프로그램은 계속된다. */
 static void test_query_missing(void)
 {
@@ -236,6 +324,8 @@ static void test_query_missing(void)
     CHECK(d.status != DRIVE_STATUS_OK);
     CHECK(d.error != 0);
     CHECK(d.total_bytes == 0 && d.free_bytes == 0 && d.available_bytes == 0);
+    /* 없는 드라이브는 암호화 상태를 조회하지 않는다 */
+    CHECK(d.encryption == DRIVE_ENC_NOT_QUERIED);
 }
 
 /* 실제 시스템: Windows 가 설치된 드라이브는 반드시 정상 조회돼야 한다. */
@@ -268,11 +358,17 @@ static void test_query_system(void)
             CHECK(d->status == DRIVE_STATUS_OK);
             CHECK(d->total_bytes > 0);
             CHECK(d->fs[0] != L'\0');
+            /* 시스템 드라이브는 관리자 권한 없이도 암호화 상태를 읽을 수 있다 */
+            CHECK(d->encryption != DRIVE_ENC_NOT_QUERIED && d->encryption != DRIVE_ENC_FAILED);
         }
-        printf("%ls %-9ls %-13ls total=%llu free=%llu usage=%u.%u%%\n", d->root,
-               drive_type_name(d->type), drive_status_name(d->status),
+        if (d->type != DRIVE_TYPE_FIXED && d->type != DRIVE_TYPE_REMOVABLE) {
+            CHECK(d->encryption == DRIVE_ENC_NOT_QUERIED);
+        }
+        printf("%ls %-9ls %-13ls total=%llu free=%llu usage=%u.%u%% encryption=%ls(%ld)\n",
+               d->root, drive_type_name(d->type), drive_status_name(d->status),
                (unsigned long long)d->total_bytes, (unsigned long long)d->free_bytes,
-               drive_usage_permille(d) / 10, drive_usage_permille(d) % 10);
+               drive_usage_permille(d) / 10, drive_usage_permille(d) % 10,
+               drive_encryption_name(d->encryption), d->encryption_raw);
     }
     CHECK(found);
     CHECK(drive_list_query(NULL, &error) == -1);
@@ -286,6 +382,8 @@ int main(void)
     test_usage();
     test_names();
     test_list_build();
+    test_encryption_mapping();
+    test_list_encryption();
     test_query_missing();
     test_query_system();
 

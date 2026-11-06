@@ -5,16 +5,18 @@
 - **언어·빌드**: C11, CMake 3.21+, MSVC(`/W4 /utf-8`), 유니코드(`UNICODE`) 빌드
 - **Windows API**: 폴더 열거 `GetFileInformationByHandleEx(FileFullDirectoryInfo)`(미지원 파일 시스템은 `FindFirstFileExW`),
   긴 경로 `\\?\`, 휴지통 이동 `IFileOperation`, 격리 폴더 이동·복원 `MoveFileExW`(같은 볼륨, 덮어쓰기 없음), 드라이브 `GetLogicalDrives`·`GetDiskFreeSpaceExW`,
-  메모리·CPU `GlobalMemoryStatusEx`·`GetSystemTimes`, GUI는 Win32 + Common Controls v6
-- **구조**: UI와 무관한 정적 라이브러리 위에 CLI·GUI를 얹었습니다. 무거운 작업(스캔·탐지·휴지통 이동·측정)은 모두 작업 스레드에서
-  실행하고, GUI 스레드는 `PostMessage`로 결과만 받아 화면을 갱신합니다.
+  암호화 상태 셸 속성(`SHCreateItemFromParsingName`·`IShellItem2::GetProperty`, `System.Volume.BitLockerProtection`),
+  설치 경로 보호 `RegGetValueW`(프로그램 제거 정보), 메모리·CPU `GlobalMemoryStatusEx`·`GetSystemTimes`, GUI는 Win32 + Common Controls v6
+- **구조**: UI와 무관한 정적 라이브러리 위에 CLI·GUI를 얹었습니다. 무거운 작업(스캔·탐지·휴지통 이동·격리 폴더 영구 삭제·드라이브 조회·측정)은
+  모두 작업 스레드에서 실행하고, GUI 스레드는 `PostMessage`로 결과만 받아 화면을 갱신합니다.
 
 ```
                     disk-scanner (CLI)                bytesieve-gui (GUI)
-                     │  cli · jsonl                     │  폴더 스캔 │ 드라이브 │ 정리 후보 │ 공용 캐시 │ 격리 폴더 │ 시스템
+                     │  cli · jsonl                     │  폴더 스캔(+트리맵) │ 드라이브 │ 정리 후보 │ 공용 캐시 │ 격리 폴더 │ 시스템
                      │                                  │
-   scan_history ── scan_model ── scan_job        cleanup_job ── cleanup_trash ── dev_cache   drive   sysmon
-   (변화 추적)     (폴더 트리)   (스캔 스레드)   (탐지 스레드)   (휴지통 이동)    (공용 캐시)  (드라이브) (RAM·CPU)
+   scan_history ── scan_model ── scan_job        cleanup_job ── cleanup_trash ── dev_cache   drive   sysmon   treemap
+   (변화 추적)     (폴더 트리)   (스캔 스레드)   (탐지 스레드)   (휴지통 이동)    (공용 캐시)  (드라이브· (RAM·CPU) (트리맵 배치)
+                                                                                             암호화)
                                                                         │
                                                                     quarantine
                                                                     (격리 폴더)
@@ -26,6 +28,8 @@
                                     path (경로 결합·\\?\ 변환)
 ```
 
+그림에는 주요 모듈만 두었습니다. 내보내기(`scan_export`)·용량 표시(`size_format`) 등은 아래 표를 참고하세요.
+
 | 라이브러리(CMake 대상) | 역할 |
 |---|---|
 | `bytesieve_path` | 경로 결합·정규화, `\\?\` 확장 경로 변환 |
@@ -34,11 +38,11 @@
 | `bytesieve_job` | 스캔 작업 스레드, 진행률 사본, 취소 |
 | `bytesieve_history` | 폴더별 용량 스냅숏 저장·읽기·비교 |
 | `bytesieve_export` | 스캔 결과 CSV·HTML 보고서 내보내기(임시 파일 → 바꿔치기, 64 KiB 버퍼로 나눠 쓰기) |
-| `bytesieve_cleanup_rules` / `bytesieve_cleanup` / `bytesieve_cleanup_job` | 정리 후보 규칙, 탐지 엔진, 탐지 스레드 |
+| `bytesieve_cleanup_rules` / `bytesieve_cleanup` / `bytesieve_cleanup_job` | 정리 후보 규칙(이름·표시 파일)과 시스템·개발 도구 설치 보호 경로(환경 변수·프로그램 제거 정보 레지스트리), 탐지 엔진, 탐지 스레드 |
 | `bytesieve_cleanup_trash` | 삭제 보호 판정, 직전 확인, 휴지통 이동(쓸 수 없으면 격리 폴더로). 항목마다 탐지 경로를 따로 받는 작업도 지원 |
 | `bytesieve_dev_cache` | 공용 개발 캐시(npm·pip·Gradle·Cargo·NuGet) 위치 탐지(환경 변수·설정 파일·기본 위치, 캐시 구조 확인), 용량 세기, 작업 스레드 |
 | `bytesieve_quarantine` | 드라이브별 격리 폴더: 같은 볼륨 안 이동, 기록(원자적 쓰기), 목록·불일치 판정, 복원, 영구 삭제 |
-| `bytesieve_drive` / `bytesieve_sysmon` / `bytesieve_format` | 드라이브 조회, RAM·CPU 측정, 용량 표시 문자열 |
+| `bytesieve_drive` / `bytesieve_sysmon` / `bytesieve_format` | 드라이브 조회(용량, BitLocker 상태: 셸 속성 `System.Volume.BitLockerProtection`), RAM·CPU 측정, 용량 표시 문자열 |
 | `bytesieve_treemap` | 스퀘어리파이드 트리맵 배치(순수 계산, GUI 트리맵 보기 `gui_treemap`이 사용) |
 | `bytesieve_cli` / `bytesieve_jsonl` | CLI 인자 해석·출력, JSON Lines 직렬화 |
 
@@ -56,6 +60,7 @@
 
 - 취소 요청은 폴더를 열기 직전과 폴더 하나를 읽는 도중 256개 항목마다 확인합니다.
 - 진행률 알림은 100ms 간격으로 제한하고, 작업 중 창을 닫으면 작업을 취소하고 스레드가 끝날 때까지 기다린 뒤 종료합니다.
+- 격리 폴더 영구 삭제 중에 창을 닫으면 지우고 있던 파일까지만 지우고 멈춘 뒤 종료합니다(남은 파일·기록은 보존).
 
 ## 병렬 미리 열거
 
