@@ -225,6 +225,9 @@ static void test_status(void)
     CHECK(quarantine_status_from_error(ERROR_HANDLE_DISK_FULL) == QUARANTINE_NO_SPACE);
     CHECK(quarantine_status_from_error(ERROR_NOT_SAME_DEVICE) == QUARANTINE_OTHER_VOLUME);
     CHECK(quarantine_status_from_error(ERROR_GEN_FAILURE) == QUARANTINE_FAILED);
+    CHECK(quarantine_status_from_error(ERROR_CANCELLED) == QUARANTINE_CANCELLED);
+    CHECK(wcscmp(quarantine_status_name(QUARANTINE_CANCELLED), L"cancelled") == 0);
+    CHECK(quarantine_status_text(QUARANTINE_CANCELLED)[0] != L'\0');
     CHECK(wcscmp(quarantine_status_name(QUARANTINE_CONFLICT), L"conflict") == 0);
     CHECK(quarantine_status_text(QUARANTINE_NO_SPACE)[0] != L'\0');
     CHECK(wcscmp(cleanup_trash_status_name(CLEANUP_TRASH_QUARANTINED), L"quarantined") == 0);
@@ -651,6 +654,71 @@ static void test_purge(void)
 
 /* ---- 정리(cleanup_trash)·탐지·폴더 스캔과의 연동 ---- */
 
+/* 영구 삭제 진행 알림: 지운 수·용량을 세고, stop_after 번째 알림에서 멈춰 달라고 한다. */
+typedef struct {
+    unsigned calls;
+    unsigned stop_after; /* 0 이면 멈추지 않음 */
+    uint64_t bytes;
+} PurgeCounter;
+
+static int count_purge(uint64_t bytes, void *ctx)
+{
+    PurgeCounter *c = ctx;
+
+    c->calls++;
+    c->bytes += bytes;
+    return c->stop_after != 0 && c->calls >= c->stop_after;
+}
+
+static void test_purge_progress_and_cancel(void)
+{
+    QuarantineList list;
+    PurgeCounter c;
+    const QuarantineEntry *e;
+    uint32_t code = 0;
+
+    quarantine_list_init(&list);
+    CHECK(reset_root());
+    /* 파일 4개(각 4바이트)와 하위 폴더 1개 */
+    CHECK(make_dir(L"proj") && make_dir(L"proj\\node_modules") &&
+          make_dir(L"proj\\node_modules\\sub") && write_text(L"proj\\node_modules\\a.js", "aaaa") &&
+          write_text(L"proj\\node_modules\\b.js", "bbbb") &&
+          write_text(L"proj\\node_modules\\sub\\c.js", "cccc") &&
+          write_text(L"proj\\node_modules\\sub\\d.js", "dddd"));
+    CHECK_Q(move_rel(L"proj\\node_modules", 1, 16, NULL, NULL), QUARANTINE_OK);
+    CHECK(list_root(&list) == 1);
+
+    /* 두 번째 파일을 지운 뒤 멈춤: 남은 파일·기록은 그대로이고 목록에 정상 항목으로 남는다 */
+    memset(&c, 0, sizeof(c));
+    c.stop_after = 2;
+    e = &list.items[0];
+    CHECK_Q(quarantine_purge_with(e, count_purge, &c, &code), QUARANTINE_CANCELLED);
+    CHECK(code == ERROR_CANCELLED && c.calls == 2 && c.bytes == 8);
+    CHECK(path_exists(e->item) && path_exists(e->entry));
+    CHECK(list_root(&list) == 1);
+    e = &list.items[0];
+    CHECK(e->state == QUARANTINE_ENTRY_OK && e->restore != NULL);
+
+    /* 다시 영구 삭제하면 남은 것을 모두 지우고 진행 알림은 남은 파일 용량을 모두 센다 */
+    memset(&c, 0, sizeof(c));
+    CHECK_Q(quarantine_purge_with(e, count_purge, &c, &code), QUARANTINE_OK);
+    CHECK(code == 0 && c.bytes == 8);
+    /* 남은 파일 2개 + 폴더 2개(sub, node_modules) */
+    CHECK(c.calls == 4);
+    CHECK(!path_exists(e->item) && !path_exists(e->entry));
+    CHECK(list_root(&list) == 0);
+
+    /* 한 파일 항목도 그 크기를 알린다 */
+    CHECK(write_text(L"one.log", "12345"));
+    CHECK_Q(move_rel(L"one.log", 0, 5, NULL, NULL), QUARANTINE_OK);
+    CHECK(list_root(&list) == 1);
+    memset(&c, 0, sizeof(c));
+    CHECK_Q(quarantine_purge_with(&list.items[0], count_purge, &c, NULL), QUARANTINE_OK);
+    CHECK(c.calls == 1 && c.bytes == 5);
+    CHECK(list_root(&list) == 0);
+    quarantine_list_free(&list);
+}
+
 static void test_cleanup_integration(void)
 {
     CleanupGuard g;
@@ -783,6 +851,7 @@ int main(void)
     test_restore_after_letter_change();
     test_inconsistent();
     test_purge();
+    test_purge_progress_and_cancel();
     test_cleanup_integration();
     remove_tree(g_root);
     CoUninitialize();
