@@ -4,13 +4,13 @@
 ctest --test-dir build -C Debug --output-on-failure
 ```
 
-CTest에 등록된 테스트는 58개입니다.
+CTest에 등록된 테스트는 60개입니다.
 
 | 분류 | 테스트 | 확인 내용 |
 |---|---|---|
 | 단위 테스트(20개) | `path`, `scanner`, `scan_alloc`, `scan_parallel`, `hardlink`, `scan_model`, `scan_history`, `export`, `scan_job`, `jsonl`, `cli`, `drive`, `sysmon`, `size_format`, `treemap`, `cleanup_rules`, `cleanup_scan`, `cleanup_trash`, `dev_cache`, `quarantine` | 아래 참고 |
-| CLI·도구 검사(25개) | `no_args`, `help`, `scan_*`, `cli_*`, `bench_smoke` | 종료 코드, 텍스트·JSONL 출력, 인자 오류, 접근 거부 픽스처, `--track` 기준 → 변경 → 비교(`cli_track`), 성능 측정 도구의 스캐너 진단 출력(`bench_smoke`) |
-| GUI 자체 검사(13개) | `gui_scan`, `gui_cancel`, `gui_missing_dir`, `gui_drives`, `gui_cleanup`, `gui_cleanup_cancel`, `gui_trash`, `gui_quarantine`, `gui_history`, `gui_precise`, `gui_export`, `gui_cache`, `gui_monitor` | 숨긴 창에서 실제 작업을 실행하고 화면 상태를 검증 |
+| CLI·도구 검사(27개) | `no_args`, `help`, `scan_*`, `cli_*`, `bench_smoke` | 종료 코드, 텍스트·JSONL 출력, 인자 오류, 접근 거부 픽스처, 격리 폴더 제외(`cli_skip_quarantine`·`cli_jsonl_skip_quarantine`), `--track` 기준 → 변경 → 비교(`cli_track`), 성능 측정 도구의 스캐너 진단 출력(`bench_smoke`) |
+| GUI 자체 검사(13개) | `gui_scan`, `gui_cancel`, `gui_missing_dir`, `gui_drives`, `gui_cleanup`, `gui_cleanup_cancel`, `gui_trash`, `gui_quarantine`, `gui_history`, `gui_precise`, `gui_export`, `gui_cache`, `gui_monitor` | 숨긴 창에서 실제 작업을 실행하고 화면 상태를 검증(`gui_scan`은 트리맵, `gui_drives`는 암호화 열 포함) |
 
 ## 주요 단위 테스트 범위
 
