@@ -4,11 +4,11 @@
 ctest --test-dir build -C Debug --output-on-failure
 ```
 
-CTest에 등록된 테스트는 57개입니다.
+CTest에 등록된 테스트는 58개입니다.
 
 | 분류 | 테스트 | 확인 내용 |
 |---|---|---|
-| 단위 테스트(19개) | `path`, `scanner`, `scan_alloc`, `scan_parallel`, `hardlink`, `scan_model`, `scan_history`, `export`, `scan_job`, `jsonl`, `cli`, `drive`, `sysmon`, `size_format`, `cleanup_rules`, `cleanup_scan`, `cleanup_trash`, `dev_cache`, `quarantine` | 아래 참고 |
+| 단위 테스트(20개) | `path`, `scanner`, `scan_alloc`, `scan_parallel`, `hardlink`, `scan_model`, `scan_history`, `export`, `scan_job`, `jsonl`, `cli`, `drive`, `sysmon`, `size_format`, `treemap`, `cleanup_rules`, `cleanup_scan`, `cleanup_trash`, `dev_cache`, `quarantine` | 아래 참고 |
 | CLI·도구 검사(25개) | `no_args`, `help`, `scan_*`, `cli_*`, `bench_smoke` | 종료 코드, 텍스트·JSONL 출력, 인자 오류, 접근 거부 픽스처, `--track` 기준 → 변경 → 비교(`cli_track`), 성능 측정 도구의 스캐너 진단 출력(`bench_smoke`) |
 | GUI 자체 검사(13개) | `gui_scan`, `gui_cancel`, `gui_missing_dir`, `gui_drives`, `gui_cleanup`, `gui_cleanup_cancel`, `gui_trash`, `gui_quarantine`, `gui_history`, `gui_precise`, `gui_export`, `gui_cache`, `gui_monitor` | 숨긴 창에서 실제 작업을 실행하고 화면 상태를 검증 |
 
@@ -41,6 +41,10 @@ CTest에 등록된 테스트는 57개입니다.
   영구 삭제(읽기 전용 파일, 안의 정션은 대상 보존, 격리 폴더 밖을 가리키게 꾸민 항목 거부), 영구 삭제 진행 알림(지운 수·용량)과
   도중 취소(남은 파일·기록 보존, 다시 영구 삭제), 정리·탐지·폴더 스캔 연동
 - `drive`·`sysmon`: 가짜 조회 함수로 이동식 드라이브 오류·API 실패·이상값 재현
+- `treemap`: 넓이가 무게에 비례하는지, 영역 안·서로 겹치지 않음·영역을 빈틈없이 채움, 논문 예(6×4에 6,6,4,3,2,2,1) 배치,
+  무게 0·합 0·넓이 0 영역, 64비트에 가까운 큰 값, 무작위 무게 300개(정렬·비정렬)
+- `gui_scan`의 트리맵 검사: 보기를 트리맵으로 바꾸면 목록 대신 보이는지, 블록이 영역 안에 겹치지 않고 용량에 비례하며 합이 기준 폴더와
+  맞는지, 클릭(트리에서 선택)·더블클릭(확대)·Backspace(상위 폴더로)·트리 선택(기준 폴더)이 연동되는지, 색 구분마다 그리기·정리 후보 색
 
 ## GUI 자체 검사 옵션
 

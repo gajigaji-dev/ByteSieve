@@ -15,6 +15,7 @@
 #include "gui_drives.h"
 #include "gui_monitor.h"
 #include "gui_quarantine.h"
+#include "gui_treemap.h"
 #include "path.h"
 #include "scan_export.h"
 #include "scan_history.h"
@@ -60,7 +61,8 @@ enum {
     IDC_EXPORT_CSV,
     IDC_EXPORT_HTML,
     IDC_CACHE,
-    IDC_PRECISE
+    IDC_PRECISE,
+    IDC_TREEMAP
 };
 
 /* 내보내기 형식. */
@@ -84,8 +86,8 @@ enum {
     COL_COUNT
 };
 
-/* 오른쪽 목록 보기(보기 콤보 상자 순서). */
-enum { VIEW_SIZE, VIEW_ALLOC, VIEW_CHANGE, VIEW_UNIQUE, VIEW_DUP, VIEW_COUNT };
+/* 오른쪽 목록 보기(보기 콤보 상자 순서). 트리맵은 목록 대신 트리맵 창을 보인다. */
+enum { VIEW_SIZE, VIEW_ALLOC, VIEW_CHANGE, VIEW_UNIQUE, VIEW_DUP, VIEW_TREEMAP, VIEW_COUNT };
 
 /* 직전 스캔과의 비교·기록 상태. */
 typedef enum {
@@ -124,6 +126,8 @@ typedef struct {
     HWND precise; /* [정밀 스캔(하드 링크)] 체크 상자 */
     HWND autosave, clear_history, export_csv, export_html;
     HWND tabs, drives, cleanup, cache, quarantine, monitor;
+    HWND treemap; /* 보기가 트리맵일 때 목록 자리에 보인다 */
+    int map_syncing; /* 트리맵 조작을 트리에 반영하는 중(트리 선택으로 기준 폴더를 바꾸지 않음) */
     HFONT font;
     int dpi;
 
@@ -254,6 +258,7 @@ static void layout(void)
     tree_w = (w - 2 * m - gap) * 2 / 5;
     MoveWindow(g_app.tree, x + m, y, tree_w, body_h, TRUE);
     MoveWindow(g_app.list, x + m + tree_w + gap, y, w - 2 * m - gap - tree_w, body_h, TRUE);
+    MoveWindow(g_app.treemap, x + m + tree_w + gap, y, w - 2 * m - gap - tree_w, body_h, TRUE);
 
     body_h = rc.bottom - rc.top - 2 * m;
     MoveWindow(g_app.drives, x + m, rc.top + m, w - 2 * m > 0 ? w - 2 * m : 0,
@@ -275,6 +280,15 @@ static int current_tab(void)
     return TabCtrl_GetCurSel(g_app.tabs);
 }
 
+/* 폴더 스캔 탭이 보일 때 오른쪽에는 보기에 따라 순위 목록이나 트리맵 중 하나만 보인다. */
+static void show_view_windows(int show_scan)
+{
+    int map = show_scan && SendMessageW(g_app.view, CB_GETCURSEL, 0, 0) == VIEW_TREEMAP;
+
+    ShowWindow(g_app.list, show_scan && !map ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_app.treemap, map ? SW_SHOW : SW_HIDE);
+}
+
 /* 고른 탭의 컨트롤만 보이게 한다. 드라이브·공용 캐시 탭을 처음 열면 바로 조회하고,
  * 격리 폴더 탭은 열 때마다 목록을 다시 읽으며,
  * 시스템 탭을 처음 열면 측정을 시작한다(이후 탭을 옮겨도 그래프 기록을 위해 계속 측정). */
@@ -293,6 +307,7 @@ static void show_tab(int tab)
     for (i = 0; i < sizeof(scan_controls) / sizeof(scan_controls[0]); i++) {
         ShowWindow(scan_controls[i], show_scan ? SW_SHOW : SW_HIDE);
     }
+    show_view_windows(show_scan);
     ShowWindow(g_app.drives, tab == TAB_DRIVES ? SW_SHOW : SW_HIDE);
     ShowWindow(g_app.cleanup, tab == TAB_CLEANUP ? SW_SHOW : SW_HIDE);
     ShowWindow(g_app.cache, tab == TAB_CACHE ? SW_SHOW : SW_HIDE);
@@ -750,6 +765,8 @@ static void track_history(void)
 
 static void clear_results(void)
 {
+    /* 트리맵은 모델을 가리키므로 해제하기 전에 떼어 낸다. */
+    treemap_view_set_model(g_app.treemap, NULL);
     TreeView_DeleteAllItems(g_app.tree);
     ListView_DeleteAllItems(g_app.list);
     scan_model_free(&g_app.model);
@@ -781,6 +798,7 @@ static void show_results(void)
     if (g_app.model.len == 0) {
         return;
     }
+    treemap_view_set_model(g_app.treemap, &g_app.model);
     root = tree_insert(TVI_ROOT, 0);
     if (root != NULL) {
         tree_populate(root, 0);
@@ -790,8 +808,8 @@ static void show_results(void)
     fill_rank();
 }
 
-/* 순위 목록에서 고른 폴더를 트리에서 펼쳐 보여 준다. */
-static void reveal_in_tree(size_t index)
+/* 순위 목록·트리맵에서 고른 폴더를 트리에서 펼쳐 보여 준다. focus 면 트리로 포커스를 옮긴다. */
+static void reveal_in_tree(size_t index, int focus)
 {
     const ScanNode *n = scan_model_node(&g_app.model, index);
     size_t *chain, depth, i;
@@ -828,8 +846,21 @@ static void reveal_in_tree(size_t index)
     if (item != NULL) {
         TreeView_SelectItem(g_app.tree, item);
         TreeView_EnsureVisible(g_app.tree, item);
-        SetFocus(g_app.tree);
+        if (focus) {
+            SetFocus(g_app.tree);
+        }
     }
+}
+
+/* 트리맵에서 고르거나 확대·축소한 폴더를 트리에도 고른다(트리맵 기준 폴더는 그대로). */
+static void sync_tree_from_map(size_t index)
+{
+    if (!g_app.has_model || index >= g_app.model.len) {
+        return;
+    }
+    g_app.map_syncing = 1;
+    reveal_in_tree(index, 0);
+    g_app.map_syncing = 0;
 }
 
 /* ---- 스캔 ---- */
@@ -1413,6 +1444,81 @@ static int verify_views(void)
     return failures;
 }
 
+static int is_shown(HWND h);
+
+static size_t tree_selection(void)
+{
+    return tree_item_index(TreeView_GetSelection(g_app.tree));
+}
+
+static void select_view(int view)
+{
+    SendMessageW(g_app.view, CB_SETCURSEL, (WPARAM)view, 0);
+    SendMessageW(g_app.hwnd, WM_COMMAND, MAKEWPARAM(IDC_VIEW, CBN_SELCHANGE), (LPARAM)g_app.view);
+}
+
+/*
+ * 트리맵 보기: 고르면 순위 목록 대신 보이고, 트리에서 고른 폴더가 기준 폴더가 되며, 클릭(트리에서
+ * 선택)·더블클릭(확대)·Backspace(상위 폴더로)가 트리와 맞는지, 색 구분 기준마다 화면이 맞는지.
+ * 실패 수.
+ */
+static int verify_treemap(void)
+{
+    int failures = 0, m;
+    size_t first = SCAN_NODE_NONE;
+    POINT pt;
+
+    /* 자체 검사의 창은 숨겨져 WM_SIZE 를 받지 않으므로 직접 배치해 트리맵에 크기를 준다. */
+    layout();
+    select_view(VIEW_TREEMAP);
+    SELF_CHECK(current_view() == VIEW_TREEMAP);
+    SELF_CHECK(is_shown(g_app.treemap) && !is_shown(g_app.list));
+    reveal_in_tree(0, 0);
+    SELF_CHECK(treemap_view_root(g_app.treemap) == 0);
+    failures += treemap_view_verify(g_app.treemap);
+
+    if (scan_model_children(&g_app.model, 0, SCAN_ORDER_SIZE_DESC, &first, 1) > 0 &&
+        g_app.model.nodes[first].total_bytes > 0) {
+        /* 가장 큰 하위 폴더는 클릭할 수 있을 만큼 크게 그려진다 */
+        int ok = treemap_view_block_point(g_app.treemap, first, &pt);
+        SELF_CHECK(ok);
+        if (ok) {
+            LPARAM at = MAKELPARAM(pt.x, pt.y);
+            /* 클릭: 트리에서 고르지만 기준 폴더는 그대로 */
+            SendMessageW(g_app.treemap, WM_LBUTTONDOWN, MK_LBUTTON, at);
+            SendMessageW(g_app.treemap, WM_LBUTTONUP, 0, at);
+            SELF_CHECK(treemap_view_selected(g_app.treemap) == first);
+            SELF_CHECK(tree_selection() == first);
+            SELF_CHECK(treemap_view_root(g_app.treemap) == 0);
+            /* 더블클릭: 그 폴더로 확대, 트리도 그 폴더 */
+            SendMessageW(g_app.treemap, WM_LBUTTONDBLCLK, MK_LBUTTON, at);
+            SELF_CHECK(treemap_view_root(g_app.treemap) == first);
+            SELF_CHECK(tree_selection() == first);
+            failures += treemap_view_verify(g_app.treemap);
+            /* Backspace: 상위 폴더로, 올라온 폴더를 고른 상태로 둔다 */
+            SendMessageW(g_app.treemap, WM_KEYDOWN, VK_BACK, 0);
+            SELF_CHECK(treemap_view_root(g_app.treemap) == 0);
+            SELF_CHECK(tree_selection() == 0);
+            SELF_CHECK(treemap_view_selected(g_app.treemap) == first);
+            /* 트리에서 고르면 그 폴더가 기준 폴더 */
+            reveal_in_tree(first, 0);
+            SELF_CHECK(treemap_view_root(g_app.treemap) == first);
+            reveal_in_tree(0, 0);
+            SELF_CHECK(treemap_view_root(g_app.treemap) == 0);
+        }
+    }
+    for (m = 0; m < TREEMAP_COLOR_COUNT; m++) {
+        treemap_view_set_color(g_app.treemap, (TreemapColorMode)m);
+        SELF_CHECK(treemap_view_color(g_app.treemap) == (TreemapColorMode)m);
+        failures += treemap_view_verify(g_app.treemap);
+    }
+    treemap_view_set_color(g_app.treemap, TREEMAP_COLOR_DEPTH);
+
+    select_view(VIEW_SIZE);
+    SELF_CHECK(is_shown(g_app.list) && !is_shown(g_app.treemap));
+    return failures;
+}
+
 /* --self-test-changes: 변화 목록을 stdout 에 쓴다(검사 스크립트가 확인). */
 static void print_changes(void)
 {
@@ -1614,7 +1720,7 @@ static int verify_screen(void)
                    (size_t)lv.lParam == top);
 
         /* 가장 깊은 순위 항목을 트리에서 찾아 선택할 수 있어야 한다. */
-        reveal_in_tree((size_t)lv.lParam);
+        reveal_in_tree((size_t)lv.lParam, 1);
         SELF_CHECK(tree_item_index(TreeView_GetSelection(g_app.tree)) == (size_t)lv.lParam);
     }
 
@@ -1631,6 +1737,7 @@ static int verify_screen(void)
         SELF_CHECK(wcscmp(cell, expect) == 0);
     }
     failures += verify_views();
+    failures += verify_treemap();
     /* 결과가 있으면(취소된 스캔 포함) 내보낼 수 있다. */
     SELF_CHECK(IsWindowEnabled(g_app.export_csv) == (g_app.model.status != SCAN_FATAL));
     SELF_CHECK(IsWindowEnabled(g_app.export_html) == (g_app.model.status != SCAN_FATAL));
@@ -1875,7 +1982,8 @@ static void create_controls(void)
     {
         static const wchar_t *const views[VIEW_COUNT] = {
             L"용량 순위", L"디스크 사용 순위", L"변화 순위(직전 스캔 대비)",
-            L"중복 제외 용량 순위(정밀 스캔)", L"하드 링크 중복 순위(정밀 스캔)"};
+            L"중복 제외 용량 순위(정밀 스캔)", L"하드 링크 중복 순위(정밀 스캔)",
+            L"트리맵(폴더 용량)"};
         int v;
         for (v = 0; v < VIEW_COUNT; v++) {
             SendMessageW(g_app.view, CB_ADDSTRING, 0, (LPARAM)views[v]);
@@ -1890,6 +1998,7 @@ static void create_controls(void)
     g_app.list = make_child(WC_LISTVIEWW, L"",
                             LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | WS_TABSTOP,
                             WS_EX_CLIENTEDGE, IDC_LIST);
+    g_app.treemap = treemap_view_create(g_app.hwnd, IDC_TREEMAP, g_app.font, g_app.dpi);
 
     SendMessageW(g_app.path, EM_SETCUEBANNER, TRUE, (LPARAM)L"스캔할 폴더 경로");
     SendMessageW(g_app.progress, PBM_SETRANGE32, 0, PROGRESS_RANGE);
@@ -1940,6 +2049,14 @@ static LRESULT on_notify(NMHDR *hdr)
         show_tab(current_tab());
         return 0;
     }
+    /* 트리에서 고른 폴더가 트리맵의 기준 폴더가 된다(트리맵에서 고른 것을 반영할 때는 제외). */
+    if (hdr->idFrom == IDC_TREE && hdr->code == TVN_SELCHANGEDW) {
+        NMTREEVIEWW *tv = (NMTREEVIEWW *)hdr;
+        if (!g_app.map_syncing && g_app.has_model && tv->itemNew.hItem != NULL) {
+            treemap_view_set_root(g_app.treemap, (size_t)tv->itemNew.lParam);
+        }
+        return 0;
+    }
     if (hdr->idFrom == IDC_TREE && hdr->code == TVN_ITEMEXPANDINGW) {
         NMTREEVIEWW *tv = (NMTREEVIEWW *)hdr;
         if (tv->action == TVE_EXPAND && g_app.has_model) {
@@ -1956,7 +2073,7 @@ static LRESULT on_notify(NMHDR *hdr)
             lv.iItem = row;
             SendMessageW(g_app.list, LVM_GETITEMW, 0, (LPARAM)&lv);
             if ((size_t)lv.lParam < g_app.model.len) {
-                reveal_in_tree((size_t)lv.lParam);
+                reveal_in_tree((size_t)lv.lParam, 1);
             }
         }
         return 0;
@@ -1997,6 +2114,14 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         case IDC_VIEW:
             if (HIWORD(wp) == CBN_SELCHANGE) {
                 fill_rank();
+                show_view_windows(current_tab() == TAB_SCAN);
+            }
+            return 0;
+        case IDC_TREEMAP:
+            if (HIWORD(wp) == TMN_SELECT) {
+                sync_tree_from_map(treemap_view_selected(g_app.treemap));
+            } else if (HIWORD(wp) == TMN_ROOT) {
+                sync_tree_from_map(treemap_view_root(g_app.treemap));
             }
             return 0;
         case IDC_AUTOSAVE:
@@ -2254,6 +2379,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmd, int show)
     cache_panel_register(inst);
     quarantine_panel_register(inst);
     monitor_panel_register(inst);
+    treemap_view_register(inst);
 
     memset(&wc, 0, sizeof(wc));
     wc.cbSize = sizeof(wc);
