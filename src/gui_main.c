@@ -15,6 +15,7 @@
 #include "gui_drives.h"
 #include "gui_monitor.h"
 #include "gui_quarantine.h"
+#include "gui_theme.h"
 #include "gui_treemap.h"
 #include "path.h"
 #include "scan_export.h"
@@ -22,6 +23,7 @@
 #include "scan_job.h"
 #include "scan_model.h"
 #include "size_format.h"
+#include "ui_lang.h"
 
 /* 공용 컨트롤 v6(비주얼 스타일). */
 #pragma comment(linker, "\"/manifestdependency:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
@@ -116,8 +118,9 @@ typedef enum {
     SELF_TEST_CLEAR_HISTORY, /* 스캔 → 기록 삭제(확인 창 없이) → 화면 반영 검증·출력 → 종료 */
     SELF_TEST_EXPORT, /* 스캔 → CSV·HTML 내보내기(대화 상자 없이) → 화면 검증·출력 → 종료 */
     SELF_TEST_PRECISE, /* [정밀 스캔] 체크 → 스캔 → 하드 링크 보정 열·보기·분석 줄 검증·출력 → 종료 */
-    SELF_TEST_CACHE   /* 공용 캐시 탭 탐지 → 픽스처 안인지·화면 검증 → 정리 가능한 캐시를 모두
+    SELF_TEST_CACHE,  /* 공용 캐시 탭 탐지 → 픽스처 안인지·화면 검증 → 정리 가능한 캐시를 모두
                        * 휴지통으로(확인 창 없이) → 결과 검증 → 종료 */
+    SELF_TEST_LANG    /* 지정한 언어로 창을 만들어 번역 문구·글꼴·최소 창 크기의 배치 검증 → 종료 */
 } SelfTest;
 
 typedef struct {
@@ -130,6 +133,8 @@ typedef struct {
     int map_syncing; /* 트리맵 조작을 트리에 반영하는 중(트리 선택으로 기준 폴더를 바꾸지 않음) */
     HFONT font;
     int dpi;
+    /* 폴더 스캔 탭 컨트롤 폭: 언어마다 문구 길이가 달라 글자 폭을 재서 정한다(create_controls). */
+    int w_browse, w_scan, w_cancel, w_precise, w_view, w_export, w_autosave, w_clear;
 
     ScanJob *job;
     ScanModel model;
@@ -173,31 +178,66 @@ static double share_of(uint64_t part, uint64_t whole)
 static const wchar_t *flag_label(uint32_t flags)
 {
     if (flags & SCAN_NODE_FAILED) {
-        return L" [읽기 실패]";
+        return ui_text(UI_T_FLAG_FAILED);
     }
     if (flags & SCAN_NODE_CANCELLED) {
-        return L" [취소됨]";
+        return ui_text(UI_T_FLAG_CANCELLED);
     }
     if (flags & SCAN_NODE_INCOMPLETE) {
-        return L" [일부 누락]";
+        return ui_text(UI_T_FLAG_INCOMPLETE);
     }
     if (flags & SCAN_NODE_REPARSE) {
-        return L" [링크]";
+        return ui_text(UI_T_FLAG_REPARSE);
     }
     if (flags & SCAN_NODE_DEPTH_LIMIT) {
-        return L" [깊이 제한]";
+        return ui_text(UI_T_FLAG_DEPTH_LIMIT);
     }
     return L"";
 }
 
 /* ---- 레이아웃 ---- */
 
+/* 경로 칸·진행 막대를 뺀 첫째·둘째 줄의 고정 폭(컨트롤 폭과 간격). */
+static int scan_row_fixed(int gap)
+{
+    return gap + g_app.w_browse + gap + g_app.w_scan + gap + g_app.w_cancel + 2 * gap +
+           g_app.w_precise + gap + g_app.w_view;
+}
+
+static int progress_row_fixed(int gap)
+{
+    return gap + g_app.w_export + gap + g_app.w_export + 2 * gap + g_app.w_autosave + gap +
+           g_app.w_clear;
+}
+
+/* 최소 창 크기: 기본 800×320(96 DPI 기준)에서, 문구가 긴 언어에서도 폴더 스캔 탭의 두 줄이
+ * 탭 영역 안에 들어가도록 넓힌다(경로 칸 80, 진행 막대 40 은 남긴다). */
+static void min_window_size(int *cx, int *cy)
+{
+    RECT frame = {0, 0, 0, 0};
+    int m = scale(8), gap = scale(6), row1, row2, need;
+
+    *cx = scale(800);
+    *cy = scale(320);
+    if (g_app.w_scan == 0) {
+        return; /* 컨트롤을 만들기 전(WM_CREATE 이전) */
+    }
+    row1 = scale(80) + scan_row_fixed(gap);
+    row2 = scale(40) + progress_row_fixed(gap);
+    /* 내용 + 안쪽 여백 + 탭 컨트롤 둘레(창과 탭 사이 4씩, 탭 표시 영역 테두리 여유 8) */
+    need = 2 * m + (row1 > row2 ? row1 : row2) + scale(8) + scale(8);
+    AdjustWindowRectEx(&frame, WS_OVERLAPPEDWINDOW, FALSE, 0);
+    need += frame.right - frame.left;
+    if (need > *cx) {
+        *cx = need;
+    }
+}
+
 static void layout(void)
 {
     RECT rc;
-    int m = scale(8), h = scale(24), bw = scale(84), gap = scale(6), view_w = scale(170);
-    int check_w = scale(150), export_w = scale(104), precise_w = scale(160);
-    int x, w, y, path_w, bar_w, body_h, tree_w;
+    int m = scale(8), h = scale(24), gap = scale(6);
+    int x, w, y, cx, path_w, bar_w, body_h, tree_w;
 
     /* 탭 컨트롤이 창 전체를 차지하고, 각 탭의 컨트롤은 탭의 표시 영역 안에 놓는다. */
     GetClientRect(g_app.hwnd, &rc);
@@ -212,39 +252,43 @@ static void layout(void)
         w = 0;
     }
 
-    /* [경로] [찾아보기] [스캔] [취소]  [v] 정밀 스캔(하드 링크)  [보기 ▼] */
+    /* [경로] [찾아보기] [스캔] [취소]  [v] 정밀 스캔(하드 링크) [보기 ▼]
+     * 단추 폭은 문구에 맞추고(언어마다 다름) 남는 폭은 경로 칸이 쓴다. */
     y = rc.top + m;
-    path_w = w - 2 * m - 3 * (bw + gap) - (precise_w + gap) - (view_w + gap);
+    path_w = w - 2 * m - scan_row_fixed(gap);
     if (path_w < scale(80)) {
         path_w = scale(80);
     }
-    MoveWindow(g_app.path, x + m, y, path_w, h, TRUE);
-    MoveWindow(g_app.browse, x + m + path_w + gap, y, bw, h, TRUE);
-    MoveWindow(g_app.scan, x + m + path_w + gap + (bw + gap), y, bw, h, TRUE);
-    MoveWindow(g_app.cancel, x + m + path_w + gap + 2 * (bw + gap), y, bw, h, TRUE);
-    MoveWindow(g_app.precise, x + m + path_w + gap + 3 * (bw + gap) + gap, y, precise_w, h, TRUE);
+    cx = x + m;
+    MoveWindow(g_app.path, cx, y, path_w, h, TRUE);
+    cx += path_w + gap;
+    MoveWindow(g_app.browse, cx, y, g_app.w_browse, h, TRUE);
+    cx += g_app.w_browse + gap;
+    MoveWindow(g_app.scan, cx, y, g_app.w_scan, h, TRUE);
+    cx += g_app.w_scan + gap;
+    MoveWindow(g_app.cancel, cx, y, g_app.w_cancel, h, TRUE);
+    cx += g_app.w_cancel + 2 * gap;
+    MoveWindow(g_app.precise, cx, y, g_app.w_precise, h, TRUE);
+    cx += g_app.w_precise + gap;
     /* 콤보 상자 높이는 펼친 목록 높이까지 포함한다. */
-    MoveWindow(g_app.view, x + m + path_w + gap + 3 * (bw + gap) + precise_w + gap, y, view_w,
-               scale(160), TRUE);
+    MoveWindow(g_app.view, cx, y, g_app.w_view, scale(160), TRUE);
 
     /* 진행 막대 오른쪽에 내보내기와 기록 설정:
-     * [CSV 내보내기...] [HTML 보고서...]  [v] 스캔 기록 자동 저장  [기록 삭제...] */
+     * [CSV 내보내기...] [HTML 보고서...]  [v] 스캔 기록 자동 저장 [기록 삭제...] */
     y += h + gap;
-    bar_w = w - 2 * m - 2 * (export_w + gap) - check_w - bw - 2 * gap;
+    bar_w = w - 2 * m - progress_row_fixed(gap);
     if (bar_w < scale(40)) {
         bar_w = scale(40);
     }
     MoveWindow(g_app.progress, x + m, y + (h - scale(16)) / 2, bar_w, scale(16), TRUE);
-    {
-        int cx = x + m + bar_w + gap;
-        MoveWindow(g_app.export_csv, cx, y, export_w, h, TRUE);
-        cx += export_w + gap;
-        MoveWindow(g_app.export_html, cx, y, export_w, h, TRUE);
-        cx += export_w + gap + gap;
-        MoveWindow(g_app.autosave, cx, y, check_w, h, TRUE);
-        cx += check_w + gap;
-        MoveWindow(g_app.clear_history, cx, y, bw, h, TRUE);
-    }
+    cx = x + m + bar_w + gap;
+    MoveWindow(g_app.export_csv, cx, y, g_app.w_export, h, TRUE);
+    cx += g_app.w_export + gap;
+    MoveWindow(g_app.export_html, cx, y, g_app.w_export, h, TRUE);
+    cx += g_app.w_export + 2 * gap;
+    MoveWindow(g_app.autosave, cx, y, g_app.w_autosave, h, TRUE);
+    cx += g_app.w_autosave + gap;
+    MoveWindow(g_app.clear_history, cx, y, g_app.w_clear, h, TRUE);
     y += h + gap;
     MoveWindow(g_app.status, x + m, y, w - 2 * m, scale(20), TRUE);
     y += scale(20);
@@ -782,12 +826,24 @@ static void clear_results(void)
 }
 
 /* 정밀 스캔 열(중복 제외·하드 링크 중복)은 정밀 스캔 결과일 때만 보인다. */
+/* 순위 목록 열 머리글 문구(COL_* 순서). */
+static const UiText k_col_text[COL_COUNT] = {
+    UI_T_COL_RANK,   UI_T_COL_FOLDER, UI_T_COL_SIZE,  UI_T_COL_UNIQUE, UI_T_COL_DUP,
+    UI_T_COL_CHANGE, UI_T_COL_ALLOC,  UI_T_COL_FILES, UI_T_COL_SHARE};
+
+/* 열 폭: 기본 폭(96 DPI 기준)과, 머리글 문구가 잘리지 않는 폭 중 큰 값. */
+static int column_width(int col, int base)
+{
+    int need = theme_text_width(g_app.list, g_app.font, ui_text(k_col_text[col])) + scale(16);
+    return scale(base) > need ? scale(base) : need;
+}
+
 static void update_precise_columns(void)
 {
     int on = precise_result();
 
-    ListView_SetColumnWidth(g_app.list, COL_UNIQUE, on ? scale(90) : 0);
-    ListView_SetColumnWidth(g_app.list, COL_DUP, on ? scale(120) : 0);
+    ListView_SetColumnWidth(g_app.list, COL_UNIQUE, on ? column_width(COL_UNIQUE, 90) : 0);
+    ListView_SetColumnWidth(g_app.list, COL_DUP, on ? column_width(COL_DUP, 120) : 0);
 }
 
 static void show_results(void)
@@ -1908,6 +1964,109 @@ static int self_test_quarantine_step(void)
            quarantine_panel_purge(g_app.quarantine, 0);
 }
 
+/* 컨트롤 글자가 expect 와 같은지. */
+static int text_is(HWND h, const wchar_t *expect)
+{
+    wchar_t buf[256];
+    GetWindowTextW(h, buf, (int)(sizeof(buf) / sizeof(buf[0])));
+    return wcscmp(buf, expect) == 0;
+}
+
+/* --self-test-lang: 지금 언어의 번역 문구가 화면에 들어갔는지, 언어별 글꼴을 골랐는지,
+ * 최소 창 크기에서도 폴더 스캔 탭의 단추·체크 상자 문구가 잘리지 않고 탭 영역 안에 있는지 확인한다. */
+static int verify_lang(void)
+{
+    static const UiText tabs[] = {UI_T_NAV_SCAN,  UI_T_NAV_DRIVES,     UI_T_NAV_CLEANUP,
+                                  UI_T_NAV_CACHE, UI_T_NAV_QUARANTINE, UI_T_NAV_MONITOR};
+    static const UiText views[VIEW_COUNT] = {UI_T_VIEW_SIZE,   UI_T_VIEW_ALLOC, UI_T_VIEW_CHANGE,
+                                             UI_T_VIEW_UNIQUE, UI_T_VIEW_DUP,
+                                             UI_T_VIEW_TREEMAP};
+    const struct {
+        HWND h;
+        UiText text;
+        int check; /* 체크 상자면 1 */
+    } controls[] = {
+        {g_app.browse, UI_T_SCAN_BROWSE, 0},       {g_app.scan, UI_T_SCAN_START, 0},
+        {g_app.cancel, UI_T_SCAN_CANCEL, 0},       {g_app.precise, UI_T_SCAN_PRECISE, 1},
+        {g_app.export_csv, UI_T_SCAN_EXPORT_CSV, 0}, {g_app.export_html, UI_T_SCAN_EXPORT_HTML, 0},
+        {g_app.autosave, UI_T_SCAN_AUTOSAVE, 1},   {g_app.clear_history, UI_T_SCAN_CLEAR_HISTORY, 0},
+    };
+    const wchar_t *face = theme_font_face(ui_lang_current());
+    wchar_t buf[256];
+    LOGFONTW lf;
+    RECT area, r;
+    int failures = 0, cx, cy, i;
+
+    for (i = 0; i < (int)(sizeof(tabs) / sizeof(tabs[0])); i++) {
+        TCITEMW item;
+        memset(&item, 0, sizeof(item));
+        item.mask = TCIF_TEXT;
+        item.pszText = buf;
+        item.cchTextMax = (int)(sizeof(buf) / sizeof(buf[0]));
+        buf[0] = L'\0';
+        SendMessageW(g_app.tabs, TCM_GETITEMW, (WPARAM)i, (LPARAM)&item);
+        SELF_CHECK(wcscmp(buf, ui_text(tabs[i])) == 0);
+    }
+    for (i = 0; i < VIEW_COUNT; i++) {
+        buf[0] = L'\0';
+        if (SendMessageW(g_app.view, CB_GETLBTEXTLEN, (WPARAM)i, 0) <
+            (LRESULT)(sizeof(buf) / sizeof(buf[0]))) {
+            SendMessageW(g_app.view, CB_GETLBTEXT, (WPARAM)i, (LPARAM)buf);
+        }
+        SELF_CHECK(wcscmp(buf, ui_text(views[i])) == 0);
+    }
+    for (i = 0; i < COL_COUNT; i++) {
+        LVCOLUMNW col;
+        memset(&col, 0, sizeof(col));
+        col.mask = LVCF_TEXT;
+        col.pszText = buf;
+        col.cchTextMax = (int)(sizeof(buf) / sizeof(buf[0]));
+        buf[0] = L'\0';
+        SendMessageW(g_app.list, LVM_GETCOLUMNW, (WPARAM)i, (LPARAM)&col);
+        SELF_CHECK(wcscmp(buf, ui_text(k_col_text[i])) == 0);
+        /* 보이는 열은 머리글 문구가 잘리지 않는다(정밀 스캔 열은 스캔 전이라 숨김). */
+        if (i != COL_UNIQUE && i != COL_DUP) {
+            SELF_CHECK(ListView_GetColumnWidth(g_app.list, i) >
+                       theme_text_width(g_app.list, g_app.font, buf));
+        }
+    }
+    SELF_CHECK(text_is(g_app.status, ui_text(UI_T_SCAN_READY)));
+
+    memset(&lf, 0, sizeof(lf));
+    SELF_CHECK(GetObjectW(g_app.font, sizeof(lf), &lf) == sizeof(lf));
+    SELF_CHECK(face == NULL || wcscmp(lf.lfFaceName, face) == 0);
+
+    /* 최소 창 크기로 줄여 배치한다(WM_SIZE → layout). */
+    min_window_size(&cx, &cy);
+    SetWindowPos(g_app.hwnd, NULL, 0, 0, cx, cy, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    GetWindowRect(g_app.tabs, &area);
+    MapWindowPoints(NULL, g_app.hwnd, (POINT *)&area, 2);
+    TabCtrl_AdjustRect(g_app.tabs, FALSE, &area);
+    for (i = 0; i < (int)(sizeof(controls) / sizeof(controls[0])); i++) {
+        int need = controls[i].check
+                       ? theme_check_width(g_app.hwnd, g_app.font, ui_text(controls[i].text),
+                                           g_app.dpi, 0)
+                       : theme_button_width(g_app.hwnd, g_app.font, ui_text(controls[i].text),
+                                            g_app.dpi, 0);
+        SELF_CHECK(text_is(controls[i].h, ui_text(controls[i].text)));
+        GetWindowRect(controls[i].h, &r);
+        MapWindowPoints(NULL, g_app.hwnd, (POINT *)&r, 2);
+        SELF_CHECK(r.right - r.left >= need);
+        SELF_CHECK(r.left >= area.left && r.right <= area.right);
+    }
+    GetWindowRect(g_app.view, &r);
+    MapWindowPoints(NULL, g_app.hwnd, (POINT *)&r, 2);
+    SELF_CHECK(r.right <= area.right);
+
+    /* 성공했을 때만 요약을 쓴다(CTest 가 이 줄로 통과를 판정한다). */
+    if (failures == 0) {
+        wprintf(L"lang: %ls, font: %ls, min width: %d\n", ui_lang_name(ui_lang_current()),
+                lf.lfFaceName, cx);
+        fflush(stdout);
+    }
+    return failures == 0 ? 0 : 1;
+}
+
 /* ---- 창 프로시저 ---- */
 
 static HWND make_child(const wchar_t *cls, const wchar_t *text, DWORD style, DWORD ex,
@@ -1922,75 +2081,76 @@ static HWND make_child(const wchar_t *cls, const wchar_t *text, DWORD style, DWO
 static void create_controls(void)
 {
     static const struct {
-        const wchar_t *title;
-        int width;
+        int width; /* 96 DPI 기준 기본 폭. 머리글 문구가 더 길면 넓힌다(column_width). */
         int fmt;
     } cols[COL_COUNT] = {
-        {L"순위", 48, LVCFMT_RIGHT},
-        {L"폴더", 220, LVCFMT_LEFT},
-        {L"용량", 80, LVCFMT_RIGHT},
-        {L"중복 제외", 0, LVCFMT_RIGHT},     /* 정밀 스캔일 때만 보인다 */
-        {L"하드 링크 중복", 0, LVCFMT_RIGHT}, /* 정밀 스캔일 때만 보인다 */
-        {L"변화", 110, LVCFMT_RIGHT},
-        {L"디스크 사용", 84, LVCFMT_RIGHT},
-        {L"파일 수", 64, LVCFMT_RIGHT},
-        {L"비율", 56, LVCFMT_RIGHT},
+        {48, LVCFMT_RIGHT},  /* 순위 */
+        {220, LVCFMT_LEFT},  /* 폴더 */
+        {80, LVCFMT_RIGHT},  /* 용량 */
+        {0, LVCFMT_RIGHT},   /* 중복 제외: 정밀 스캔일 때만 보인다 */
+        {0, LVCFMT_RIGHT},   /* 하드 링크 중복: 정밀 스캔일 때만 보인다 */
+        {110, LVCFMT_RIGHT}, /* 변화 */
+        {84, LVCFMT_RIGHT},  /* 디스크 사용 */
+        {64, LVCFMT_RIGHT},  /* 파일 수 */
+        {56, LVCFMT_RIGHT},  /* 비율 */
     };
-    NONCLIENTMETRICSW ncm;
-    int i;
+    static const UiText tabs[] = {UI_T_NAV_SCAN,  UI_T_NAV_DRIVES,     UI_T_NAV_CLEANUP,
+                                  UI_T_NAV_CACHE, UI_T_NAV_QUARANTINE, UI_T_NAV_MONITOR};
+    static const UiText views[VIEW_COUNT] = {UI_T_VIEW_SIZE,   UI_T_VIEW_ALLOC, UI_T_VIEW_CHANGE,
+                                             UI_T_VIEW_UNIQUE, UI_T_VIEW_DUP,
+                                             UI_T_VIEW_TREEMAP};
+    int i, view_text_w = 0;
 
-    memset(&ncm, 0, sizeof(ncm));
-    ncm.cbSize = sizeof(ncm);
-    SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
-    g_app.font = CreateFontIndirectW(&ncm.lfMessageFont);
+    /* 언어에 맞는 UI 글꼴(한자 모양이 언어마다 달라 글꼴 이름을 고른다). 실패하면 시스템 글꼴. */
+    g_app.font = theme_create_ui_font(ui_lang_current());
+    if (g_app.font == NULL) {
+        NONCLIENTMETRICSW ncm;
+        memset(&ncm, 0, sizeof(ncm));
+        ncm.cbSize = sizeof(ncm);
+        SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
+        g_app.font = CreateFontIndirectW(&ncm.lfMessageFont);
+    }
 
     g_app.tabs = make_child(WC_TABCONTROLW, L"", WS_CLIPSIBLINGS | WS_TABSTOP, 0, IDC_TABS);
-    {
+    for (i = 0; i < (int)(sizeof(tabs) / sizeof(tabs[0])); i++) {
         TCITEMW tab;
         memset(&tab, 0, sizeof(tab));
         tab.mask = TCIF_TEXT;
-        tab.pszText = L"폴더 스캔";
-        SendMessageW(g_app.tabs, TCM_INSERTITEMW, TAB_SCAN, (LPARAM)&tab);
-        tab.pszText = L"드라이브";
-        SendMessageW(g_app.tabs, TCM_INSERTITEMW, TAB_DRIVES, (LPARAM)&tab);
-        tab.pszText = L"정리 후보";
-        SendMessageW(g_app.tabs, TCM_INSERTITEMW, TAB_CLEANUP, (LPARAM)&tab);
-        tab.pszText = L"공용 캐시";
-        SendMessageW(g_app.tabs, TCM_INSERTITEMW, TAB_CACHE, (LPARAM)&tab);
-        tab.pszText = L"격리 폴더";
-        SendMessageW(g_app.tabs, TCM_INSERTITEMW, TAB_QUARANTINE, (LPARAM)&tab);
-        tab.pszText = L"시스템";
-        SendMessageW(g_app.tabs, TCM_INSERTITEMW, TAB_MONITOR, (LPARAM)&tab);
+        tab.pszText = (wchar_t *)ui_text(tabs[i]);
+        SendMessageW(g_app.tabs, TCM_INSERTITEMW, (WPARAM)i, (LPARAM)&tab);
     }
 
     g_app.path = make_child(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE,
                             IDC_PATH);
-    g_app.browse = make_child(L"BUTTON", L"찾아보기...", BS_PUSHBUTTON | WS_TABSTOP, 0,
-                              IDC_BROWSE);
-    g_app.scan = make_child(L"BUTTON", L"스캔", BS_DEFPUSHBUTTON | WS_TABSTOP, 0, IDC_SCAN);
-    g_app.cancel = make_child(L"BUTTON", L"취소", BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_CANCEL);
+    g_app.browse = make_child(L"BUTTON", ui_text(UI_T_SCAN_BROWSE), BS_PUSHBUTTON | WS_TABSTOP,
+                              0, IDC_BROWSE);
+    g_app.scan = make_child(L"BUTTON", ui_text(UI_T_SCAN_START), BS_DEFPUSHBUTTON | WS_TABSTOP,
+                            0, IDC_SCAN);
+    g_app.cancel = make_child(L"BUTTON", ui_text(UI_T_SCAN_CANCEL), BS_PUSHBUTTON | WS_TABSTOP,
+                              0, IDC_CANCEL);
     /* 정밀 스캔: 하드 링크로 같은 실제 파일을 여러 번 세지 않게 보정한다(조금 느리고 메모리를 더 씀). */
-    g_app.precise = make_child(L"BUTTON", L"정밀 스캔(하드 링크)", BS_AUTOCHECKBOX | WS_TABSTOP,
-                               0, IDC_PRECISE);
+    g_app.precise = make_child(L"BUTTON", ui_text(UI_T_SCAN_PRECISE),
+                               BS_AUTOCHECKBOX | WS_TABSTOP, 0, IDC_PRECISE);
     g_app.progress = make_child(PROGRESS_CLASSW, L"", PBS_SMOOTH, 0, IDC_PROGRESS);
-    g_app.status = make_child(L"STATIC", L"폴더를 선택하고 [스캔]을 누르세요.",
+    g_app.status = make_child(L"STATIC", ui_text(UI_T_SCAN_READY),
                               SS_LEFTNOWORDWRAP | SS_PATHELLIPSIS, 0, IDC_STATUS);
     g_app.analysis = make_child(L"STATIC", L"", SS_LEFTNOWORDWRAP | SS_ENDELLIPSIS, 0,
                                 IDC_ANALYSIS);
     g_app.view = make_child(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 0,
                             IDC_VIEW);
-    {
-        static const wchar_t *const views[VIEW_COUNT] = {
-            L"용량 순위", L"디스크 사용 순위", L"변화 순위(직전 스캔 대비)",
-            L"중복 제외 용량 순위(정밀 스캔)", L"하드 링크 중복 순위(정밀 스캔)",
-            L"트리맵(폴더 용량)"};
-        int v;
-        for (v = 0; v < VIEW_COUNT; v++) {
-            SendMessageW(g_app.view, CB_ADDSTRING, 0, (LPARAM)views[v]);
+    for (i = 0; i < VIEW_COUNT; i++) {
+        int tw = theme_text_width(g_app.view, g_app.font, ui_text(views[i]));
+        if (tw > view_text_w) {
+            view_text_w = tw;
         }
-        SendMessageW(g_app.view, CB_SETCURSEL, VIEW_SIZE, 0);
-        SendMessageW(g_app.view, CB_SETDROPPEDWIDTH, (WPARAM)scale(240), 0);
+        SendMessageW(g_app.view, CB_ADDSTRING, 0, (LPARAM)ui_text(views[i]));
     }
+    SendMessageW(g_app.view, CB_SETCURSEL, VIEW_SIZE, 0);
+    /* 펼친 목록은 가장 긴 보기 이름이 다 보이게(스크롤 막대·여백 포함). */
+    SendMessageW(g_app.view, CB_SETDROPPEDWIDTH,
+                 (WPARAM)(view_text_w + scale(32) > scale(240) ? view_text_w + scale(32)
+                                                                : scale(240)),
+                 0);
     g_app.tree = make_child(WC_TREEVIEWW, L"",
                             TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT |
                                 TVS_SHOWSELALWAYS | WS_TABSTOP,
@@ -2000,27 +2160,47 @@ static void create_controls(void)
                             WS_EX_CLIENTEDGE, IDC_LIST);
     g_app.treemap = treemap_view_create(g_app.hwnd, IDC_TREEMAP, g_app.font, g_app.dpi);
 
-    SendMessageW(g_app.path, EM_SETCUEBANNER, TRUE, (LPARAM)L"스캔할 폴더 경로");
+    SendMessageW(g_app.path, EM_SETCUEBANNER, TRUE, (LPARAM)ui_text(UI_T_SCAN_PATH_CUE));
     SendMessageW(g_app.progress, PBM_SETRANGE32, 0, PROGRESS_RANGE);
     ListView_SetExtendedListViewStyle(g_app.list, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
     for (i = 0; i < COL_COUNT; i++) {
         LVCOLUMNW col;
         memset(&col, 0, sizeof(col));
         col.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_FMT;
-        col.pszText = (wchar_t *)cols[i].title;
-        col.cx = scale(cols[i].width);
+        col.pszText = (wchar_t *)ui_text(k_col_text[i]);
+        col.cx = cols[i].width > 0 ? column_width(i, cols[i].width) : 0;
         col.fmt = cols[i].fmt;
         SendMessageW(g_app.list, LVM_INSERTCOLUMNW, (WPARAM)i, (LPARAM)&col);
     }
     /* 탭 순서가 화면 순서와 같도록 왼쪽 것부터 만든다. */
-    g_app.export_csv = make_child(L"BUTTON", L"CSV 내보내기...", BS_PUSHBUTTON | WS_TABSTOP, 0,
-                                  IDC_EXPORT_CSV);
-    g_app.export_html = make_child(L"BUTTON", L"HTML 보고서...", BS_PUSHBUTTON | WS_TABSTOP, 0,
-                                   IDC_EXPORT_HTML);
-    g_app.autosave = make_child(L"BUTTON", L"스캔 기록 자동 저장", BS_AUTOCHECKBOX | WS_TABSTOP,
-                                0, IDC_AUTOSAVE);
-    g_app.clear_history = make_child(L"BUTTON", L"기록 삭제...", BS_PUSHBUTTON | WS_TABSTOP, 0,
-                                     IDC_CLEAR_HISTORY);
+    g_app.export_csv = make_child(L"BUTTON", ui_text(UI_T_SCAN_EXPORT_CSV),
+                                  BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_EXPORT_CSV);
+    g_app.export_html = make_child(L"BUTTON", ui_text(UI_T_SCAN_EXPORT_HTML),
+                                   BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_EXPORT_HTML);
+    g_app.autosave = make_child(L"BUTTON", ui_text(UI_T_SCAN_AUTOSAVE),
+                                BS_AUTOCHECKBOX | WS_TABSTOP, 0, IDC_AUTOSAVE);
+    g_app.clear_history = make_child(L"BUTTON", ui_text(UI_T_SCAN_CLEAR_HISTORY),
+                                     BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_CLEAR_HISTORY);
+
+    /* 컨트롤 폭: 예전 고정 폭을 최소로 두고(한국어 화면은 그대로), 문구가 더 길면 넓힌다. */
+    g_app.w_browse = theme_button_width(g_app.hwnd, g_app.font, ui_text(UI_T_SCAN_BROWSE),
+                                        g_app.dpi, scale(84));
+    g_app.w_scan = theme_button_width(g_app.hwnd, g_app.font, ui_text(UI_T_SCAN_START),
+                                      g_app.dpi, scale(84));
+    g_app.w_cancel = theme_button_width(g_app.hwnd, g_app.font, ui_text(UI_T_SCAN_CANCEL),
+                                        g_app.dpi, scale(84));
+    g_app.w_clear = theme_button_width(g_app.hwnd, g_app.font, ui_text(UI_T_SCAN_CLEAR_HISTORY),
+                                       g_app.dpi, scale(84));
+    g_app.w_export = theme_button_width(g_app.hwnd, g_app.font, ui_text(UI_T_SCAN_EXPORT_CSV),
+                                        g_app.dpi, scale(104));
+    g_app.w_export = theme_button_width(g_app.hwnd, g_app.font, ui_text(UI_T_SCAN_EXPORT_HTML),
+                                        g_app.dpi, g_app.w_export);
+    g_app.w_precise = theme_check_width(g_app.hwnd, g_app.font, ui_text(UI_T_SCAN_PRECISE),
+                                        g_app.dpi, scale(160));
+    g_app.w_autosave = theme_check_width(g_app.hwnd, g_app.font, ui_text(UI_T_SCAN_AUTOSAVE),
+                                         g_app.dpi, scale(150));
+    /* 보기 콤보 상자는 고른 보기 이름이 보통 다 보이는 폭(긴 이름은 펼친 목록에서 다 보임). */
+    g_app.w_view = scale(170);
     {
         /* 저장된 설정을 읽는다(없거나 읽을 수 없으면 켬). */
         wchar_t dir[MAX_PATH * 2];
@@ -2091,10 +2271,13 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_SIZE:
         layout();
         return 0;
-    case WM_GETMINMAXINFO:
-        ((MINMAXINFO *)lp)->ptMinTrackSize.x = scale(800);
-        ((MINMAXINFO *)lp)->ptMinTrackSize.y = scale(320);
+    case WM_GETMINMAXINFO: {
+        int cx, cy;
+        min_window_size(&cx, &cy);
+        ((MINMAXINFO *)lp)->ptMinTrackSize.x = cx;
+        ((MINMAXINFO *)lp)->ptMinTrackSize.y = cy;
         return 0;
+    }
     case WM_COMMAND:
         switch (LOWORD(wp)) {
         case IDC_BROWSE:
@@ -2289,6 +2472,10 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
  *   bytesieve-gui --self-test-export <dir> <prefix>
  *                                         스캔 후 <prefix>.csv·<prefix>.html 로 내보내고(대화 상자 없음)
  *                                         화면을 검증한 뒤 폴더 수를 stdout 에 쓰고 종료
+ *   bytesieve-gui --self-test-lang <tag>  <tag> 언어(ko, en, ja, zh-Hans)로 창을 만들어 번역 문구·글꼴과
+ *                                         최소 창 크기에서 단추 문구가 잘리지 않는지 검증하고 종료
+ *
+ * 다른 자체 검사는 화면 문구를 한국어로 확인하므로 표시 언어를 한국어로 고정한다.
  */
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmd, int show)
 {
@@ -2299,6 +2486,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmd, int show)
     wchar_t **argv;
     const wchar_t *target = NULL;
     const wchar_t *cleanup_target = NULL;
+    const wchar_t *lang_tag = NULL;
+    UiLang lang = UI_LANG_KO;
     int argc = 0;
 
     (void)prev;
@@ -2350,6 +2539,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmd, int show)
         g_app.cache_root = argv[2];
     } else if (argv != NULL && argc >= 2 && wcscmp(argv[1], L"--self-test-monitor") == 0) {
         g_app.self_test = SELF_TEST_MONITOR;
+    } else if (argv != NULL && argc >= 3 && wcscmp(argv[1], L"--self-test-lang") == 0) {
+        g_app.self_test = SELF_TEST_LANG;
+        lang_tag = argv[2];
     } else if (argv != NULL && argc >= 2) {
         target = argv[1];
     }
@@ -2362,6 +2554,19 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmd, int show)
             _wfreopen_s(&f, L"CONOUT$", L"w", stderr);
         }
     }
+
+    /* 표시 언어: 자체 검사는 화면 문구를 한국어로 확인하므로 한국어로 고정한다
+     * (--self-test-lang 은 지정한 언어). 평소에는 환경 변수 → 설치 언어 → Windows 표시 언어 순. */
+    if (g_app.self_test == SELF_TEST_LANG) {
+        if (!ui_lang_from_tag(lang_tag, &lang)) {
+            fwprintf(stderr, L"self-test failed: unsupported language '%ls'\n", lang_tag);
+            LocalFree(argv);
+            return 1;
+        }
+    } else if (g_app.self_test == SELF_TEST_NONE) {
+        lang = ui_lang_detect();
+    }
+    ui_lang_set(lang);
 
     SetProcessDPIAware();
     screen = GetDC(NULL);
@@ -2397,6 +2602,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmd, int show)
         LocalFree(argv);
         return 1;
     }
+    /* Windows 11 이면 둥근 모서리·Mica 제목 표시줄(지원하지 않으면 그대로). */
+    theme_apply_frame(g_app.hwnd);
     /* 자체 검사는 화면에 띄우지 않고(컨트롤은 그대로 동작) 진행한다. */
     ShowWindow(g_app.hwnd, g_app.self_test != SELF_TEST_NONE ? SW_HIDE : show);
     UpdateWindow(g_app.hwnd);
@@ -2415,6 +2622,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmd, int show)
                 DestroyWindow(g_app.hwnd);
             }
         }
+    }
+    if (g_app.self_test == SELF_TEST_LANG) {
+        g_app.self_test_exit = verify_lang();
+        DestroyWindow(g_app.hwnd);
     }
     if (g_app.self_test == SELF_TEST_PRECISE) {
         /* 사용자가 [정밀 스캔]을 체크한 것과 같다. */
