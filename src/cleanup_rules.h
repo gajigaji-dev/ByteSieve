@@ -64,8 +64,18 @@ int cleanup_dir_rule(const wchar_t *name, CleanupDirRule *rule);
 /* 폴더 이름이 규칙에 맞으면 유형, 아니면 CLEANUP_NONE(표시 파일 조건은 보지 않는다). */
 CleanupCategory cleanup_classify_dir(const wchar_t *name);
 
-/* 파일 이름이 규칙(*.tmp, *.log)에 맞으면 유형, 아니면 CLEANUP_NONE. */
+/*
+ * 파일 이름이 규칙(*.tmp, *.log)에 맞으면 유형, 아니면 CLEANUP_NONE.
+ * 이름이 숫자 6자리 이상뿐인 *.log("000003.log")는 LevelDB(Chrome·Edge·VS Code 등 Chromium/
+ * Electron 앱의 저장소)의 쓰기 로그라 아직 합쳐지지 않은 데이터가 들어 있으므로 로그로 보지 않는다.
+ */
 CleanupCategory cleanup_classify_file(const wchar_t *name);
+
+/*
+ * LevelDB 데이터베이스 폴더의 표시 파일인지(CURRENT, LOCK, MANIFEST-*). 정리 후보 탐지는 이런
+ * 파일이 있는 폴더의 *.log 를 후보로 삼지 않는다.
+ */
+int cleanup_is_leveldb_marker(const wchar_t *name);
 
 /*
  * 이름이 흔해서 프로젝트 폴더 안에 있는지로 신뢰도를 매기는 유형인지
@@ -124,6 +134,15 @@ int cleanup_protect_add(CleanupProtect *p, const wchar_t *path);
  * 찾지 못한 항목은 건너뛴다. 추가한 개수를 반환한다.
  */
 size_t cleanup_protect_add_system(CleanupProtect *p);
+
+/*
+ * 정리 후보 탐지에서 들어가지 않을 앱 데이터 폴더를 추가한다: %LOCALAPPDATA%·%APPDATA%·
+ * %USERPROFILE%\AppData\LocalLow 바로 아래의 앱별 폴더(브라우저·편집기의 데이터베이스·설정이
+ * 있어 이름이 *.log 여도 데이터일 수 있음). 각 폴더의 Temp 와 이미 목록에 있는 경로는 넣지 않는다.
+ * 지금 있는 하위 폴더를 읽어 넣으므로 탐지 직전에 부른다. 정리 후보 탐지 전용이며, 공용 캐시
+ * (npm·pip 캐시가 %LOCALAPPDATA% 아래에 있음)는 이 목록을 쓰지 않는다. 추가한 개수를 반환한다.
+ */
+size_t cleanup_protect_add_app_data(CleanupProtect *p);
 
 /*
  * 프로그램 설치 경로 하나를 추가한다. 레지스트리 등 외부 값을 받으므로 cleanup_protect_add 보다

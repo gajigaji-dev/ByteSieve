@@ -32,6 +32,7 @@ typedef struct {
     wchar_t *cur_dir;  /* 표시용 경로 */
     size_t cur_first;  /* 이 폴더에서 처음 만든 항목 번호 */
     unsigned cur_markers; /* 이 폴더의 프로젝트 표시 파일이 가리키는 개발 환경(비트) */
+    int cur_leveldb;      /* 이 폴더에 LevelDB 표시 파일(CURRENT 등)이 있음 */
 } DetectCtx;
 
 void cleanup_result_init(CleanupResult *r)
@@ -143,6 +144,7 @@ static uintptr_t on_entry(const ScanEntry *entry, uintptr_t parent, int will_des
 
     if (!entry->is_dir) {
         c->cur_markers |= cleanup_marker_ecos(entry->name);
+        c->cur_leveldb |= cleanup_is_leveldb_marker(entry->name);
         category = cleanup_classify_file(entry->name);
         if (category != CLEANUP_NONE &&
             add_item(c, entry->name, category, 0, entry->size, 1) != ITEM_NONE) {
@@ -171,6 +173,7 @@ static void on_dir_begin(const ScanDirInfo *dir, void *ctx)
     c->cur_dir = path_strip_extended(dir->path);
     c->cur_first = c->r->len;
     c->cur_markers = 0;
+    c->cur_leveldb = 0;
 
     if (c->progress != NULL) {
         CleanupProgress p;
@@ -213,6 +216,16 @@ static void on_dir_end(const ScanDirInfo *dir, ScanStatus result, void *ctx)
     for (i = c->cur_first; i < c->r->len; i++) {
         CleanupItem *item = &c->r->items[i];
         CleanupDirRule rule;
+        /*
+         * LevelDB 폴더(Chrome·Edge·VS Code 등의 저장소)의 *.log 는 아직 합쳐지지 않은 데이터를
+         * 담은 쓰기 로그다. 표시 파일은 로그보다 뒤에 열거될 수 있어 여기서 버린다.
+         */
+        if (!(item->flags & CLEANUP_ITEM_DIR) && item->category == CLEANUP_LOG &&
+            c->cur_leveldb) {
+            item->flags |= ITEM_REJECTED;
+            c->found_bytes -= item->bytes;
+            continue;
+        }
         if (!(item->flags & CLEANUP_ITEM_DIR) ||
             !cleanup_dir_rule(base_name(item->path), &rule)) {
             continue;

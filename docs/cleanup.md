@@ -8,10 +8,16 @@
 | 빌드 결과물 | `dist`, `build`, `out`, `cmake-build-*`, `target`\*, `bin`\*, `obj`\* | – |
 | 개발 캐시 | `.cache`, `.next`, `.nuxt`, `.vite`, `.parcel-cache`, `.turbo`, `.svelte-kit`, `.angular`, `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.tox`, `.nox`, `.hypothesis`, `.gradle`\*, `.vs`\* | – |
 | 임시 파일 | `.tmp`, `.temp` | `*.tmp` |
-| 로그 | – | `*.log` |
+| 로그 | – | `*.log`\*\* |
 
 \* 같은 폴더에 해당 프로젝트 표시 파일이 있을 때만 후보입니다(`target`: `Cargo.toml`·`pom.xml`, `bin`·`obj`·`.vs`: `*.csproj`·`*.fsproj`·`*.vbproj`·`*.sln`,
 `.gradle`: Gradle·Maven 파일). 그래서 사용자 폴더의 `bin`이나 홈의 `.gradle`(설정·인증 정보 포함)은 후보가 되지 않습니다.
+
+\*\* LevelDB 데이터베이스의 쓰기 로그는 이름이 `.log`여도 후보가 아닙니다. Chrome·Edge·VS Code 등 Chromium/Electron 앱이 로컬 저장소·
+IndexedDB·확장 상태·세션을 LevelDB로 저장하며, 아직 본 파일에 합쳐지지 않은 데이터가 이 파일에 있어 지우면 데이터가 사라질 수 있습니다.
+
+- 이름이 숫자 6자리 이상뿐인 `.log`(`000003.log`)는 로그로 보지 않습니다. 날짜만으로 이름을 지은 로그(`20261106.log`)도 함께 빠집니다.
+- 같은 폴더에 LevelDB 표시 파일(`CURRENT`·`LOCK`·`MANIFEST-*`)이 있으면 그 폴더의 `*.log`는 모두 후보에서 뺍니다.
 
 개발 환경은 폴더 이름(예: `__pycache__` → Python)이나 같은 폴더의 표시 파일(`package.json`, `pyproject.toml`·`requirements.txt`,
 `Cargo.toml`, `pom.xml`·`build.gradle`, `*.csproj`·`*.sln`, `CMakeLists.txt`·`Makefile`, `go.mod`)로 정하고, 정할 수 없으면 '일반'입니다.
@@ -53,6 +59,17 @@
 레지스트리 값은 앞뒤 공백·따옴표를 벗기고 `X:\폴더` 꼴의 로컬 절대 경로만 받습니다. 볼륨 루트(`D:\`)는 드라이브 전체가 보호되어
 탐지가 멈추지 않도록 받지 않습니다. 사용자가 보호 경로 안을 직접 탐지 경로로 고르면 항목은 보여 주되 모두 보호 표시를 붙여 옮기지 않습니다.
 압축 파일로 푼 VS Code(포터블)처럼 위 어디에도 등록되지 않은 위치는 알 수 없습니다.
+
+### 앱 데이터 폴더
+
+[정리 후보] 탭의 탐지는 위 목록에 더해 **앱 데이터 폴더 안의 앱별 폴더**에도 들어가지 않습니다(`cleanup_protect_add_app_data`).
+브라우저·편집기·IDE가 데이터베이스(LevelDB 등)·설정·내려받은 도구를 두는 곳이라, 이름이 `*.log`·`node_modules`여도 데이터나 도구의
+일부일 수 있기 때문입니다(예: Chrome·Edge 저장소, VS Code 세션 저장소, JetBrains IDE가 내려받은 도구의 `node_modules`).
+
+- 대상: `%LOCALAPPDATA%`·`%APPDATA%`·`%USERPROFILE%\AppData\LocalLow` 바로 아래의 폴더(탐지를 시작할 때 있는 것). 그 아래 `Temp`는
+  임시 폴더라 계속 탐지합니다.
+- 앱 폴더 안을 직접 탐지 경로로 고르면 보호 경로와 같이 항목은 보여 주되 보호 표시를 붙여 옮기지 않습니다.
+- [공용 캐시] 탭은 이 목록을 쓰지 않습니다. npm·pip 캐시가 `%LOCALAPPDATA%` 아래에 있어서이며, 그 탭은 캐시 구조를 확인한 폴더만 다룹니다.
 
 ## 공용 개발 캐시
 

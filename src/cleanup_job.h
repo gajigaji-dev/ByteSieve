@@ -11,7 +11,8 @@
  *   - cleanup_job_progress 로 최신 진행률 스냅샷을 복사해 가고
  *   - cleanup_job_cancel 로 멈추게 하고
  *   - cleanup_job_finish 로 스레드를 기다린 뒤 결과를 넘겨받는다.
- * 보호 경로는 시작할 때 현재 시스템 기준(cleanup_protect_add_system)으로 만든다.
+ * 보호 경로는 시작할 때 현재 시스템 기준(cleanup_protect_add_system)과 앱 데이터 폴더
+ * (cleanup_protect_add_app_data: %LOCALAPPDATA%·%APPDATA% 아래 앱별 폴더, Temp 제외)로 만든다.
  * notify 는 작업 스레드에서 호출되므로 막히지 않아야 한다(예: PostMessage).
  */
 
