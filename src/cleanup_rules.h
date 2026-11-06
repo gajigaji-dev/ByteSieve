@@ -97,7 +97,8 @@ const wchar_t *cleanup_eco_name(CleanupEco eco);
 const wchar_t *cleanup_category_name(CleanupCategory category);
 
 /*
- * 시스템 보호 경로 목록. 탐색 중 이 경로와 같은 폴더를 만나면 들어가지 않는다.
+ * 시스템·프로그램 보호 경로 목록. 탐색 중 이 경로와 같은 폴더를 만나면 들어가지 않으므로
+ * 그 아래의 파일·폴더(실행 파일, 설치 폴더 안의 node_modules·__pycache__ 등)는 후보가 되지 않는다.
  * 경로는 확장 접두사 없이, 끝 구분자 없이 저장한다("C:\Windows").
  */
 typedef struct {
@@ -113,10 +114,31 @@ void cleanup_protect_free(CleanupProtect *p);
 int cleanup_protect_add(CleanupProtect *p, const wchar_t *path);
 
 /*
- * 현재 시스템의 보호 경로를 추가한다: Windows 폴더, Program Files(x86 포함), ProgramData.
+ * 현재 시스템의 보호 경로를 추가한다:
+ *   - Windows 폴더, %ProgramFiles%·%ProgramFiles(x86)%·%ProgramW6432%, %ProgramData%
+ *   - %LOCALAPPDATA%\Programs(사용자별 설치 프로그램: VS Code 사용자 설치, Python 등)
+ *   - %USERPROFILE%\.vscode\extensions, \.vscode-insiders\extensions(설치한 VS Code 확장)
+ *   - 프로그램 제거 정보(레지스트리 Uninstall, HKLM 64·32비트와 HKCU)에 등록된 Visual Studio·
+ *     VS Code 설치 경로(InstallLocation). 기본 위치가 아닌 곳(D:\VS 등)에 설치한 경우를 위한 것이며,
+ *     cleanup_protect_add_install 의 조건을 통과한 경로만 넣는다.
  * 찾지 못한 항목은 건너뛴다. 추가한 개수를 반환한다.
  */
 size_t cleanup_protect_add_system(CleanupProtect *p);
+
+/*
+ * 프로그램 설치 경로 하나를 추가한다. 레지스트리 등 외부 값을 받으므로 cleanup_protect_add 보다
+ * 엄격하다: 앞뒤 공백·따옴표를 벗기고 "X:\폴더..." 꼴의 로컬 절대 경로만 받으며, 볼륨 루트는
+ * 받지 않는다(드라이브 전체가 보호되어 탐지가 멈추는 것을 막음). "."·".."·'/' 는 정규화한다.
+ * 성공 0, 받지 않은 경로·실패 -1.
+ */
+int cleanup_protect_add_install(CleanupProtect *p, const wchar_t *path);
+
+/*
+ * 프로그램 제거 정보의 표시 이름이 보호할 개발 도구인지(대소문자 무시):
+ * "Microsoft Visual Studio"(VS Code·Installer·이전 버전 포함) 또는 "Visual Studio "로 시작
+ * (Visual Studio Community/Professional/Enterprise/Build Tools 2017 이후).
+ */
+int cleanup_is_dev_tool_product(const wchar_t *display_name);
 
 /*
  * dir 바로 아래의 name 폴더가 보호 대상인지.

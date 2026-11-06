@@ -4,11 +4,11 @@
 ctest --test-dir build -C Debug --output-on-failure
 ```
 
-CTest에 등록된 테스트는 57개입니다.
+CTest에 등록된 테스트는 58개입니다.
 
 | 분류 | 테스트 | 확인 내용 |
 |---|---|---|
-| 단위 테스트(19개) | `path`, `scanner`, `scan_alloc`, `scan_parallel`, `hardlink`, `scan_model`, `scan_history`, `export`, `scan_job`, `jsonl`, `cli`, `drive`, `sysmon`, `size_format`, `cleanup_rules`, `cleanup_scan`, `cleanup_trash`, `dev_cache`, `quarantine` | 아래 참고 |
+| 단위 테스트(20개) | `path`, `scanner`, `scan_alloc`, `scan_parallel`, `hardlink`, `scan_model`, `scan_history`, `export`, `scan_job`, `jsonl`, `cli`, `drive`, `sysmon`, `size_format`, `treemap`, `cleanup_rules`, `cleanup_scan`, `cleanup_trash`, `dev_cache`, `quarantine` | 아래 참고 |
 | CLI·도구 검사(25개) | `no_args`, `help`, `scan_*`, `cli_*`, `bench_smoke` | 종료 코드, 텍스트·JSONL 출력, 인자 오류, 접근 거부 픽스처, `--track` 기준 → 변경 → 비교(`cli_track`), 성능 측정 도구의 스캐너 진단 출력(`bench_smoke`) |
 | GUI 자체 검사(13개) | `gui_scan`, `gui_cancel`, `gui_missing_dir`, `gui_drives`, `gui_cleanup`, `gui_cleanup_cancel`, `gui_trash`, `gui_quarantine`, `gui_history`, `gui_precise`, `gui_export`, `gui_cache`, `gui_monitor` | 숨긴 창에서 실제 작업을 실행하고 화면 상태를 검증 |
 
@@ -26,17 +26,27 @@ CTest에 등록된 테스트는 57개입니다.
   자동 저장 설정(기본값·저장 후 다시 읽기·손상된 설정·쓰기 실패), 기록 삭제(형식에 맞는 스냅숏만 삭제, 사용 중인 파일이 있어도 나머지 계속, 설정·다른 파일 보존)
 - `export`: CSV(UTF-8 BOM, CRLF, 머리글·행 수, 크기 내림차순, 쉼표가 든 이름, `=`로 시작하는 이름의 수식 방지, 64 KiB 쓰기 버퍼를 넘는 큰 결과),
   HTML(구역, 이름 이스케이프, 순위 표 100행 제한, 통계), 실패(없는 폴더, 빈·실패한 스캔, 다른 프로그램이 연 파일에서 기존 내용 보존·임시 파일 없음)
-- `cleanup_scan`·`cleanup_rules`: 중첩 항목, 확인됨/추정, 개발 환경 분류, 표시 파일이 없는 `bin`·`.gradle`, 보호 경로, 필터, 취소
-- `cleanup_trash`: 보호 판정 규칙과 **실제 휴지통 이동·거부**(테스트가 넣은 휴지통 항목만 지워 사용자 휴지통은 그대로 둠)
+- `cleanup_scan`·`cleanup_rules`: 중첩 항목, 확인됨/추정, 개발 환경 분류, 표시 파일이 없는 `bin`·`.gradle`, 보호 경로, 필터, 취소.
+  개발 도구 설치 경로: 사용자 폴더·`ProgramFiles`를 픽스처로 돌려 VS Code 사용자 설치(`%LOCALAPPDATA%\Programs`)·확장(`.vscode\extensions`)·
+  Visual Studio(`Program Files`, 레지스트리처럼 따옴표가 붙은 다른 위치) 안의 실행 파일·`node_modules`·`out`·`__pycache__`·`*.log`가
+  후보가 아닌지(직접 탐지와 작업 스레드), 설치 폴더 안을 직접 고르면 모두 보호 표시인지, 설치 경로 값 검사(볼륨 루트·상대·UNC 거부)와 제품 이름 판정
+- `cleanup_trash`: 보호 판정 규칙(설치 폴더 안의 실행 파일·하위 폴더는 보호, 그 상위는 중요 경로)과 **실제 휴지통 이동·거부**(테스트가 넣은 휴지통 항목만 지워 사용자 휴지통은 그대로 둠)
 - `dev_cache`: `USERPROFILE`·`LOCALAPPDATA`·`APPDATA`를 임시 픽스처로 돌리고 도구 환경 변수를 지워 실제 캐시를 보지 않는다.
   기본 위치(없음·있음, NuGet `v3-cache`·`http-cache` 둘 다), 용량·파일 수, 도구 폴더 자체·`.cargo\bin`·`gradle.properties` 제외,
   환경 변수·`.npmrc`(`${VAR}`)·`pip.ini`(구역·상대 경로)·`NuGet.Config`(상대 경로), 캐시 구조가 아닌 폴더·파일·정션·바꾸지 못한 변수,
-  세기 전·취소 뒤 정리 거부, 중요 경로 거부, 항목별 탐지 경로로 판정하는 휴지통 작업(밖·없음), 작업 스레드·취소
+  세기 전·취소 뒤 정리 거부, 중요 경로 거부, 프로그램 설치 경로 안의 캐시(Visual Studio `NuGetPackages`, `Programs\nodejs` 안 npm 캐시) 거부, 항목별 탐지 경로로 판정하는 휴지통 작업(밖·없음), 작업 스레드·취소
 - `quarantine`: 임시 폴더를 가짜 볼륨으로 써서 격리 이동·목록, 같은 이름 여러 번 격리, 이동 실패(사용 중·없음·다른 볼륨)
   뒤 원래 항목 보존, 격리 폴더가 정션일 때 거부, 복원(같은 이름은 덮어쓰지 않음, 다른 이름 복원, 없어진 상위 폴더,
   드라이브 문자 변경), 기록 불일치(파일 없음·기록 손상·`moving` 상태·볼륨 밖 상대 경로·사용자가 넣은 파일)에서 파일 보존,
-  영구 삭제(읽기 전용 파일, 안의 정션은 대상 보존, 격리 폴더 밖을 가리키게 꾸민 항목 거부), 정리·탐지·폴더 스캔 연동
-- `drive`·`sysmon`: 가짜 조회 함수로 이동식 드라이브 오류·API 실패·이상값 재현
+  영구 삭제(읽기 전용 파일, 안의 정션은 대상 보존, 격리 폴더 밖을 가리키게 꾸민 항목 거부), 영구 삭제 진행 알림(지운 수·용량)과
+  도중 취소(남은 파일·기록 보존, 다시 영구 삭제), 정리·탐지·폴더 스캔 연동
+- `drive`·`sysmon`: 가짜 조회 함수로 이동식 드라이브 오류·API 실패·이상값 재현. 암호화: 셸 속성 값 → 상태 변환(알려진 값·모르는 값·값 없음),
+  상태마다 식별자·화면 문구, 목록을 만들 때 실패 항목의 용량은 지우고 암호화 상태(잠김)는 남기는지, 실제 시스템 드라이브는 관리자 권한 없이
+  상태를 읽고 네트워크·광학·없는 드라이브는 조회하지 않는지(`gui_drives`도 암호화 열 문구를 확인)
+- `treemap`: 넓이가 무게에 비례하는지, 영역 안·서로 겹치지 않음·영역을 빈틈없이 채움, 논문 예(6×4에 6,6,4,3,2,2,1) 배치,
+  무게 0·합 0·넓이 0 영역, 64비트에 가까운 큰 값, 무작위 무게 300개(정렬·비정렬)
+- `gui_scan`의 트리맵 검사: 보기를 트리맵으로 바꾸면 목록 대신 보이는지, 블록이 영역 안에 겹치지 않고 용량에 비례하며 합이 기준 폴더와
+  맞는지, 클릭(트리에서 선택)·더블클릭(확대)·Backspace(상위 폴더로)·트리 선택(기준 폴더)이 연동되는지, 색 구분마다 그리기·정리 후보 색
 
 ## GUI 자체 검사 옵션
 

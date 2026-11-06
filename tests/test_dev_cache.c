@@ -393,6 +393,53 @@ static void test_overrides(void)
     clear_tool_env();
 }
 
+/*
+ * 캐시 위치가 프로그램 설치 경로 안이면(Visual Studio 의 NuGetPackages, 사용자별 설치한 Node.js 안의
+ * npm 캐시 등) 캐시 구조가 맞아도 정리하지 않는다. LOCALAPPDATA 는 main 에서 local 로 돌려 두었다.
+ */
+static void test_protected_install(void)
+{
+    DevCacheList l;
+    CleanupGuard guard;
+    DevCache *c;
+    wchar_t pf86[MAX_PATH];
+    DWORD n = GetEnvironmentVariableW(L"ProgramFiles(x86)", pf86, MAX_PATH);
+
+    CHECK(make(L"pf86\\Microsoft Visual Studio\\Shared\\NuGetPackages\\newtonsoft.json\\13.0.1\\"
+               L".nupkg.metadata",
+               10));
+    CHECK(make(L"local\\Programs\\nodejs\\node_cache\\_cacache\\index", 20));
+    set_env(L"ProgramFiles(x86)", L"pf86");
+    set_env(L"NUGET_PACKAGES", L"pf86\\Microsoft Visual Studio\\Shared\\NuGetPackages");
+    set_env(L"npm_config_cache", L"local\\Programs\\nodejs\\node_cache");
+
+    dev_cache_list_init(&l);
+    cleanup_guard_init(&guard);
+    cleanup_guard_add_system(&guard);
+    CHECK(dev_cache_detect(&l) == 0);
+
+    c = find(&l, DEV_CACHE_NUGET_PACKAGES, 0);
+    CHECK(c->status == DEV_CACHE_FOUND &&
+          is_at(c->path, L"pf86\\Microsoft Visual Studio\\Shared\\NuGetPackages"));
+    dev_cache_measure(c, NULL, NULL);
+    CHECK(c->measured && !c->incomplete);
+    CHECK(dev_cache_check(&guard, c) == CLEANUP_TRASH_DENY_PROTECTED);
+
+    c = find(&l, DEV_CACHE_NPM, 0);
+    CHECK(c->status == DEV_CACHE_FOUND && is_at(c->path, L"local\\Programs\\nodejs\\node_cache"));
+    dev_cache_measure(c, NULL, NULL);
+    CHECK(c->measured && !c->incomplete);
+    CHECK(dev_cache_check(&guard, c) == CLEANUP_TRASH_DENY_PROTECTED);
+
+    /* 보호 목록이 없으면 같은 캐시가 정리 후보다(보호 경로 때문에 거부됐음을 확인) */
+    CHECK(dev_cache_check(NULL, c) == CLEANUP_TRASH_PENDING);
+
+    cleanup_guard_free(&guard);
+    dev_cache_list_free(&l);
+    SetEnvironmentVariableW(L"ProgramFiles(x86)", n > 0 && n < MAX_PATH ? pf86 : NULL);
+    clear_tool_env();
+}
+
 /* 정리 연동: 항목마다 다른 탐지 경로로 판정한다(파일 시스템은 바꾸지 않는 경우만). */
 static void test_trash_each(void)
 {
@@ -506,6 +553,7 @@ int main(void)
     test_job();
     test_overrides();
     test_trash_each();
+    test_protected_install();
     remove_tree(g_root);
 
     if (g_failures != 0) {

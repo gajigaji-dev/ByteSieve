@@ -50,10 +50,11 @@ target_include_directories(bytesieve_job PUBLIC src)
 target_link_libraries(bytesieve_job PUBLIC bytesieve_model)
 bytesieve_configure(bytesieve_job)
 
-# 정리 후보 탐지 규칙(이름 분류·프로젝트 표시 파일·시스템 보호 경로). 파일 시스템에 접근하지 않는다.
+# 정리 후보 탐지 규칙(이름 분류·프로젝트 표시 파일·시스템·프로그램 보호 경로). 파일 시스템에 접근하지 않는다
+# (보호 경로는 환경 변수와 프로그램 제거 정보 레지스트리에서 읽는다).
 add_library(bytesieve_cleanup_rules STATIC src/cleanup_rules.c)
 target_include_directories(bytesieve_cleanup_rules PUBLIC src)
-target_link_libraries(bytesieve_cleanup_rules PUBLIC bytesieve_path)
+target_link_libraries(bytesieve_cleanup_rules PUBLIC bytesieve_path advapi32)
 bytesieve_configure(bytesieve_cleanup_rules)
 
 # 정리 후보 탐지 엔진(scan_tree_ex 기반). 읽기 전용이며 아무것도 삭제·수정하지 않는다.
@@ -88,6 +89,11 @@ target_include_directories(bytesieve_dev_cache PUBLIC src)
 target_link_libraries(bytesieve_dev_cache PUBLIC bytesieve_cleanup_trash shell32 ole32)
 bytesieve_configure(bytesieve_dev_cache)
 
+# 스퀘어리파이드 트리맵 배치(순수 계산). GUI 폴더 스캔 탭의 트리맵 보기가 쓴다.
+add_library(bytesieve_treemap STATIC src/treemap.c)
+target_include_directories(bytesieve_treemap PUBLIC src)
+bytesieve_configure(bytesieve_treemap)
+
 # 용량 표시 문자열("1.50 KiB"). GUI 의 스캔 화면과 드라이브 대시보드가 함께 쓴다.
 add_library(bytesieve_format STATIC src/size_format.c)
 target_include_directories(bytesieve_format PUBLIC src)
@@ -102,6 +108,8 @@ bytesieve_configure(bytesieve_export)
 # 논리 드라이브 목록·용량 조회(GetLogicalDrives, GetDiskFreeSpaceExW). 스캐너와 독립.
 add_library(bytesieve_drive STATIC src/drive.c)
 target_include_directories(bytesieve_drive PUBLIC src)
+# 암호화 상태: 셸 속성(System.Volume.BitLockerProtection)
+target_link_libraries(bytesieve_drive PUBLIC ole32 shell32 propsys)
 bytesieve_configure(bytesieve_drive)
 
 # RAM·CPU 사용률 측정(GlobalMemoryStatusEx, GetSystemTimes). UI 와 독립.
@@ -114,8 +122,9 @@ bytesieve_configure(bytesieve_sysmon)
 # 격리 폴더 탭(휴지통 없는 드라이브에서 격리한 항목의 복원·영구 삭제),
 # 시스템 탭(RAM·CPU 실시간 사용률 막대·그래프).
 add_executable(bytesieve-gui WIN32 src/gui_main.c src/gui_drives.c src/gui_cleanup.c
-               src/gui_cache.c src/gui_quarantine.c src/gui_monitor.c)
+               src/gui_cache.c src/gui_quarantine.c src/gui_monitor.c src/gui_treemap.c)
 target_link_libraries(bytesieve-gui PRIVATE bytesieve_job bytesieve_history bytesieve_export
+                      bytesieve_treemap
                       bytesieve_drive bytesieve_format bytesieve_cleanup_job
                       bytesieve_cleanup_trash bytesieve_dev_cache bytesieve_sysmon comctl32
                       comdlg32 shell32 ole32)
@@ -286,6 +295,11 @@ add_executable(test_size_format tests/test_size_format.c)
 target_link_libraries(test_size_format PRIVATE bytesieve_format)
 bytesieve_configure(test_size_format)
 add_test(NAME size_format COMMAND test_size_format)
+
+add_executable(test_treemap tests/test_treemap.c)
+target_link_libraries(test_treemap PRIVATE bytesieve_treemap)
+bytesieve_configure(test_treemap)
+add_test(NAME treemap COMMAND test_treemap)
 
 add_executable(test_cleanup_rules tests/test_cleanup_rules.c)
 target_link_libraries(test_cleanup_rules PRIVATE bytesieve_cleanup_rules)

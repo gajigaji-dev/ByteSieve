@@ -606,12 +606,78 @@ static void test_job_snapshot(void)
     free(pb);
 }
 
+/*
+ * 개발 도구 설치 경로: 실행 파일·하위 폴더·설치 폴더 자체는 보호, 그 상위는 중요 경로로 거부.
+ * 사용자 폴더 환경 변수를 가짜 값으로 돌린다(경로만 판정하므로 폴더가 없어도 된다).
+ */
+static void test_guard_dev_tools(void)
+{
+    CleanupGuard g;
+    wchar_t local[MAX_PATH], home[MAX_PATH], pf[MAX_PATH], drive[4], buf[2 * MAX_PATH];
+    DWORD nl = GetEnvironmentVariableW(L"LOCALAPPDATA", local, MAX_PATH);
+    DWORD nh = GetEnvironmentVariableW(L"USERPROFILE", home, MAX_PATH);
+    DWORD np = GetEnvironmentVariableW(L"ProgramFiles", pf, MAX_PATH);
+    const uint32_t D = CLEANUP_ITEM_DIR;
+
+    SetEnvironmentVariableW(L"LOCALAPPDATA", L"C:\\fx\\home\\AppData\\Local");
+    SetEnvironmentVariableW(L"USERPROFILE", L"C:\\fx\\home");
+    cleanup_guard_init(&g);
+    cleanup_guard_add_system(&g);
+
+    /* VS Code 사용자 설치(%LOCALAPPDATA%\Programs) */
+    CHECK_STATUS(check(&g, L"C:\\fx\\home\\AppData\\Local",
+                       L"C:\\fx\\home\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe", 0),
+                 CLEANUP_TRASH_DENY_PROTECTED);
+    CHECK_STATUS(check(&g, L"C:\\fx\\home\\AppData\\Local",
+                       L"C:\\fx\\home\\AppData\\Local\\Programs\\Microsoft VS "
+                       L"Code\\resources\\app\\node_modules",
+                       D),
+                 CLEANUP_TRASH_DENY_PROTECTED);
+    CHECK_STATUS(check(&g, L"C:\\fx\\home\\AppData\\Local",
+                       L"C:\\fx\\home\\AppData\\Local\\Programs", D),
+                 CLEANUP_TRASH_DENY_PROTECTED);
+    CHECK_STATUS(check(&g, L"C:\\fx\\home\\AppData", L"C:\\fx\\home\\AppData\\Local", D),
+                 CLEANUP_TRASH_DENY_CRITICAL);
+    CHECK_STATUS(check(&g, L"C:\\fx\\home\\AppData\\Local",
+                       L"C:\\fx\\home\\AppData\\Local\\Temp\\x.tmp", 0),
+                 CLEANUP_TRASH_PENDING);
+
+    /* 설치한 VS Code 확장 */
+    CHECK_STATUS(check(&g, L"C:\\fx\\home",
+                       L"C:\\fx\\home\\.vscode\\extensions\\ms-python.python-1.0\\node_modules", D),
+                 CLEANUP_TRASH_DENY_PROTECTED);
+    CHECK_STATUS(check(&g, L"C:\\fx\\home", L"C:\\fx\\home\\.vscode", D),
+                 CLEANUP_TRASH_DENY_CRITICAL);
+    CHECK_STATUS(check(&g, L"C:\\fx\\home", L"C:\\fx\\home\\proj\\.vscode", D),
+                 CLEANUP_TRASH_PENDING);
+    CHECK_STATUS(check(&g, L"C:\\fx\\home", L"C:\\fx\\home\\proj\\node_modules", D),
+                 CLEANUP_TRASH_PENDING);
+
+    /* Program Files 아래의 VS Code 시스템 설치·Visual Studio */
+    if (np > 0 && np < MAX_PATH && pf[1] == L':') {
+        wcsncpy_s(drive, 4, pf, 3);
+        swprintf(buf, sizeof(buf) / sizeof(buf[0]), L"%ls\\Microsoft VS Code\\Code.exe", pf);
+        CHECK_STATUS(check(&g, drive, buf, 0), CLEANUP_TRASH_DENY_PROTECTED);
+        swprintf(buf, sizeof(buf) / sizeof(buf[0]),
+                 L"%ls\\Microsoft Visual Studio\\2022\\Community\\Common7\\IDE", pf);
+        CHECK_STATUS(check(&g, drive, buf, D), CLEANUP_TRASH_DENY_PROTECTED);
+        swprintf(buf, sizeof(buf) / sizeof(buf[0]),
+                 L"%ls\\Microsoft Visual Studio\\2022\\Community\\Common7\\IDE\\devenv.exe", pf);
+        CHECK_STATUS(check(&g, drive, buf, 0), CLEANUP_TRASH_DENY_PROTECTED);
+    }
+    cleanup_guard_free(&g);
+
+    SetEnvironmentVariableW(L"LOCALAPPDATA", nl > 0 && nl < MAX_PATH ? local : NULL);
+    SetEnvironmentVariableW(L"USERPROFILE", nh > 0 && nh < MAX_PATH ? home : NULL);
+}
+
 int main(void)
 {
     HRESULT init = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
 
     test_guard_rules();
     test_guard_system();
+    test_guard_dev_tools();
     if (FAILED(init) || !setup_fixture()) {
         fprintf(stderr, "fixture setup failed (error %lu)\n", GetLastError());
         remove_tree(g_root);

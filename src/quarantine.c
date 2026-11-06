@@ -39,6 +39,8 @@ const wchar_t *quarantine_status_text(QuarantineStatus status)
         return L"다른 드라이브라 옮길 수 없음";
     case QUARANTINE_FAILED:
         return L"실패";
+    case QUARANTINE_CANCELLED:
+        return L"취소함";
     default:
         return L"";
     }
@@ -63,6 +65,8 @@ const wchar_t *quarantine_status_name(QuarantineStatus status)
         return L"bad_store";
     case QUARANTINE_OTHER_VOLUME:
         return L"other_volume";
+    case QUARANTINE_CANCELLED:
+        return L"cancelled";
     default:
         return L"failed";
     }
@@ -92,6 +96,8 @@ QuarantineStatus quarantine_status_from_error(uint32_t error)
         return QUARANTINE_NO_SPACE;
     case ERROR_NOT_SAME_DEVICE:
         return QUARANTINE_OTHER_VOLUME;
+    case ERROR_CANCELLED:
+        return QUARANTINE_CANCELLED;
     default:
         return QUARANTINE_FAILED;
     }
@@ -987,18 +993,32 @@ wchar_t *quarantine_alternate_path(const wchar_t *path, int is_dir)
 
 /* ---- 영구 삭제 ---- */
 
-/*
- * path 를 지운다(확장 경로). 재분석 지점은 따라가지 않고 링크만 지운다.
- * 지우지 못한 것이 있어도 나머지는 계속 지우고 첫 오류를 반환한다.
- */
-static DWORD delete_tree(const wchar_t *ext)
-{
-    DWORD attrs = GetFileAttributesW(ext), first = 0;
+/* 영구 삭제 진행 알림·멈춤. */
+typedef struct {
+    quarantine_purge_fn fn;
+    void *ctx;
+    int stopped;
+} PurgeProgress;
 
-    if (attrs == INVALID_FILE_ATTRIBUTES) {
-        DWORD err = GetLastError();
-        return err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND ? 0 : err;
+/* 하나를 지웠음을 알린다. 멈춰 달라고 하면 1. */
+static int purge_step(PurgeProgress *pp, uint64_t bytes)
+{
+    if (!pp->stopped && pp->fn != NULL && pp->fn(bytes, pp->ctx) != 0) {
+        pp->stopped = 1;
     }
+    return pp->stopped;
+}
+
+/*
+ * path(확장 경로, 속성 attrs)를 지운다. 재분석 지점은 따라가지 않고 링크만 지운다.
+ * 지우지 못한 것이 있어도 나머지는 계속 지우고 첫 오류를 반환한다. 멈춰 달라고 하면 남은
+ * 것은 그대로 두고 ERROR_CANCELLED. 하위 항목의 속성은 찾을 때 받은 값을 써서 파일마다
+ * 속성을 다시 읽지 않는다(느린 USB 에서 시간이 크게 준다).
+ */
+static DWORD delete_tree_at(const wchar_t *ext, DWORD attrs, uint64_t bytes, PurgeProgress *pp)
+{
+    DWORD first = 0;
+
     if (attrs & FILE_ATTRIBUTE_READONLY) {
         SetFileAttributesW(ext, attrs & ~FILE_ATTRIBUTE_READONLY);
     }
@@ -1023,9 +1043,16 @@ static DWORD delete_tree(const wchar_t *ext)
                 if (wcscmp(fd->cFileName, L".") == 0 || wcscmp(fd->cFileName, L"..") == 0) {
                     continue;
                 }
+                if (pp->stopped) {
+                    break;
+                }
                 child = path_join(ext, fd->cFileName);
-                err = child != NULL ? delete_tree(child) : ERROR_NOT_ENOUGH_MEMORY;
-                if (err != 0 && first == 0) {
+                err = child != NULL
+                          ? delete_tree_at(child, fd->dwFileAttributes,
+                                           ((uint64_t)fd->nFileSizeHigh << 32) | fd->nFileSizeLow,
+                                           pp)
+                          : ERROR_NOT_ENOUGH_MEMORY;
+                if (err != 0 && err != ERROR_CANCELLED && first == 0) {
                     first = err;
                 }
                 free(child);
@@ -1035,14 +1062,34 @@ static DWORD delete_tree(const wchar_t *ext)
         free(fd);
         free(pattern);
     }
+    if (pp->stopped) {
+        /* 멈춤: 이 폴더는 남은 것이 있으므로 지우지 않는다. */
+        return first != 0 ? first : ERROR_CANCELLED;
+    }
     if (attrs & FILE_ATTRIBUTE_DIRECTORY) {
         if (!RemoveDirectoryW(ext) && first == 0) {
             first = GetLastError();
         }
-    } else if (!DeleteFileW(ext) && first == 0) {
-        first = GetLastError();
+        purge_step(pp, 0);
+    } else {
+        if (!DeleteFileW(ext) && first == 0) {
+            first = GetLastError();
+        }
+        purge_step(pp, bytes);
     }
     return first;
+}
+
+static DWORD delete_tree(const wchar_t *ext, PurgeProgress *pp)
+{
+    WIN32_FILE_ATTRIBUTE_DATA info;
+
+    if (!GetFileAttributesExW(ext, GetFileExInfoStandard, &info)) {
+        DWORD err = GetLastError();
+        return err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND ? 0 : err;
+    }
+    return delete_tree_at(ext, info.dwFileAttributes,
+                          ((uint64_t)info.nFileSizeHigh << 32) | info.nFileSizeLow, pp);
 }
 
 /* e 가 격리 폴더 바로 아래 항목이고, 격리 폴더가 링크가 아닌 실제 폴더인지. */
@@ -1070,8 +1117,19 @@ static int purge_allowed(const QuarantineEntry *e)
 
 QuarantineStatus quarantine_purge(const QuarantineEntry *e, uint32_t *code)
 {
+    return quarantine_purge_with(e, NULL, NULL, code);
+}
+
+QuarantineStatus quarantine_purge_with(const QuarantineEntry *e, quarantine_purge_fn fn, void *ctx,
+                                       uint32_t *code)
+{
+    PurgeProgress pp;
     wchar_t *ext;
     DWORD err = 0;
+
+    pp.fn = fn;
+    pp.ctx = ctx;
+    pp.stopped = 0;
 
     if (code != NULL) {
         *code = 0;
@@ -1097,7 +1155,7 @@ QuarantineStatus quarantine_purge(const QuarantineEntry *e, uint32_t *code)
     if (ext == NULL) {
         return fail(code, ERROR_NOT_ENOUGH_MEMORY);
     }
-    err = delete_tree(ext);
+    err = delete_tree(ext, &pp);
     free(ext);
     if (err != 0) {
         return fail(code, err);

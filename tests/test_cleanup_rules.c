@@ -233,6 +233,145 @@ static void test_protect_system(void)
     cleanup_protect_free(&p);
 }
 
+/* 레지스트리 등에서 받은 설치 경로는 로컬 절대 경로만, 볼륨 루트는 받지 않는다. */
+static void test_protect_install(void)
+{
+    CleanupProtect p;
+
+    cleanup_protect_init(&p);
+    CHECK(cleanup_protect_add_install(&p, L" \"D:\\VS\\2022\\Community\\\" ") == 0);
+    CHECK(cleanup_protect_add_install(&p, L"E:/Tools/./Microsoft VS Code/") == 0);
+    CHECK(cleanup_protect_add_install(&p, L"F:\\a\\..\\Code") == 0);
+    CHECK(p.len == 3);
+    CHECK(p.len == 3 && wcscmp(p.paths[0], L"D:\\VS\\2022\\Community") == 0);
+    CHECK(p.len == 3 && wcscmp(p.paths[1], L"E:\\Tools\\Microsoft VS Code") == 0);
+    CHECK(p.len == 3 && wcscmp(p.paths[2], L"F:\\Code") == 0);
+    CHECK(cleanup_protect_add_install(&p, L"d:\\vs\\2022\\community") == 0); /* 중복 */
+    CHECK(p.len == 3);
+
+    CHECK(cleanup_protect_add_install(&p, L"D:\\") == -1);
+    CHECK(cleanup_protect_add_install(&p, L"\"D:\\\"") == -1);
+    CHECK(cleanup_protect_add_install(&p, L"D:") == -1);
+    CHECK(cleanup_protect_add_install(&p, L"D:\\x\\..") == -1);
+    CHECK(cleanup_protect_add_install(&p, L"D:\\.") == -1);
+    CHECK(cleanup_protect_add_install(&p, L"D:VS") == -1);
+    CHECK(cleanup_protect_add_install(&p, L"VS\\2022") == -1);
+    CHECK(cleanup_protect_add_install(&p, L"\\VS\\2022") == -1);
+    CHECK(cleanup_protect_add_install(&p, L"\\\\srv\\share\\VS") == -1);
+    CHECK(cleanup_protect_add_install(&p, L"\\\\?\\C:\\VS") == -1);
+    CHECK(cleanup_protect_add_install(&p, L"") == -1);
+    CHECK(cleanup_protect_add_install(&p, L"\"\"") == -1);
+    CHECK(cleanup_protect_add_install(&p, NULL) == -1);
+    CHECK(cleanup_protect_add_install(NULL, L"D:\\VS") == -1);
+    CHECK(p.len == 3);
+
+    /* 설치 폴더 안의 실행 파일과 하위 폴더 */
+    CHECK(cleanup_protect_contains(&p, L"D:\\VS\\2022\\Community\\Common7\\IDE\\devenv.exe"));
+    CHECK(cleanup_protect_contains(&p, L"D:\\VS\\2022\\Community\\Common7\\IDE\\Extensions"));
+    CHECK(cleanup_protect_contains(&p, L"E:\\Tools\\Microsoft VS Code\\Code.exe"));
+    CHECK(cleanup_protect_match(&p, L"E:\\Tools", L"Microsoft VS Code"));
+    CHECK(!cleanup_protect_contains(&p, L"D:\\VS\\2022"));
+    CHECK(!cleanup_protect_contains(&p, L"D:\\VS\\2022\\Community2\\x"));
+    cleanup_protect_free(&p);
+}
+
+static void test_dev_tool_product(void)
+{
+    CHECK(cleanup_is_dev_tool_product(L"Microsoft Visual Studio Code"));
+    CHECK(cleanup_is_dev_tool_product(L"Microsoft Visual Studio Code (User)"));
+    CHECK(cleanup_is_dev_tool_product(L"Microsoft Visual Studio Code Insiders"));
+    CHECK(cleanup_is_dev_tool_product(L"Microsoft Visual Studio Installer"));
+    CHECK(cleanup_is_dev_tool_product(L"microsoft visual studio community 2015"));
+    CHECK(cleanup_is_dev_tool_product(L"Visual Studio Community 2022"));
+    CHECK(cleanup_is_dev_tool_product(L"Visual Studio Build Tools 2022"));
+    CHECK(cleanup_is_dev_tool_product(L"Visual Studio Enterprise 2026"));
+    CHECK(!cleanup_is_dev_tool_product(L"Microsoft Visual C++ 2015-2022 Redistributable (x64)"));
+    CHECK(!cleanup_is_dev_tool_product(L"Visual Studio"));
+    CHECK(!cleanup_is_dev_tool_product(L"VisualStudio Community"));
+    CHECK(!cleanup_is_dev_tool_product(L"Notepad++"));
+    CHECK(!cleanup_is_dev_tool_product(L""));
+    CHECK(!cleanup_is_dev_tool_product(NULL));
+}
+
+/* 환경 변수 값을 저장한다(없으면 빈 문자열과 0). */
+static int save_env(const wchar_t *name, wchar_t *buf, DWORD cap)
+{
+    DWORD n = GetEnvironmentVariableW(name, buf, cap);
+
+    if (n == 0 || n >= cap) {
+        buf[0] = L'\0';
+        return 0;
+    }
+    return 1;
+}
+
+/*
+ * 개발 도구 설치 경로: VS Code(사용자·시스템 설치, 확장), Visual Studio 기본 위치.
+ * 사용자 폴더를 가짜 값으로 돌려 실제 시스템과 무관하게 확인한다(파일 시스템은 보지 않음).
+ */
+static void test_protect_dev_tools(void)
+{
+    CleanupProtect p;
+    wchar_t local[MAX_PATH], home[MAX_PATH], pf[MAX_PATH], pf86[MAX_PATH], buf[2 * MAX_PATH];
+    int had_local = save_env(L"LOCALAPPDATA", local, MAX_PATH);
+    int had_home = save_env(L"USERPROFILE", home, MAX_PATH);
+    int had_pf = save_env(L"ProgramFiles", pf, MAX_PATH);
+    int had_pf86 = save_env(L"ProgramFiles(x86)", pf86, MAX_PATH);
+
+    SetEnvironmentVariableW(L"LOCALAPPDATA", L"Q:\\fx\\home\\AppData\\Local");
+    SetEnvironmentVariableW(L"USERPROFILE", L"Q:\\fx\\home");
+    cleanup_protect_init(&p);
+    cleanup_protect_add_system(&p);
+
+    /* %LOCALAPPDATA%\Programs: VS Code 사용자 설치의 실행 파일·하위 폴더 */
+    CHECK(cleanup_protect_match(&p, L"Q:\\fx\\home\\AppData\\Local", L"Programs"));
+    CHECK(cleanup_protect_contains(
+        &p, L"Q:\\fx\\home\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe"));
+    CHECK(cleanup_protect_contains(&p, L"Q:\\fx\\home\\AppData\\Local\\Programs\\Microsoft VS "
+                                       L"Code\\resources\\app\\node_modules"));
+    CHECK(cleanup_protect_contains(
+        &p, L"Q:\\fx\\home\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\__pycache__"));
+    CHECK(!cleanup_protect_contains(&p, L"Q:\\fx\\home\\AppData\\Local\\Temp\\x.tmp"));
+    CHECK(!cleanup_protect_contains(&p, L"Q:\\fx\\home\\AppData\\Local\\Programs2"));
+
+    /* 설치한 VS Code 확장(안에 node_modules·package.json·out 이 있음) */
+    CHECK(cleanup_protect_match(&p, L"Q:\\fx\\home\\.vscode", L"extensions"));
+    CHECK(cleanup_protect_contains(
+        &p, L"Q:\\fx\\home\\.vscode\\extensions\\ms-python.python-2026.1.0\\node_modules"));
+    CHECK(cleanup_protect_contains(
+        &p, L"Q:\\fx\\home\\.vscode-insiders\\extensions\\x.y-1.0.0\\out"));
+    CHECK(!cleanup_protect_contains(&p, L"Q:\\fx\\home\\.vscode\\argv.json"));
+    CHECK(!cleanup_protect_contains(&p, L"Q:\\fx\\home\\proj\\.vscode\\extensions"));
+
+    /* VS Code 시스템 설치·Visual Studio 기본 위치(Program Files 아래) */
+    if (had_pf) {
+        swprintf(buf, sizeof(buf) / sizeof(buf[0]), L"%ls\\Microsoft VS Code\\Code.exe", pf);
+        CHECK(cleanup_protect_contains(&p, buf));
+        swprintf(buf, sizeof(buf) / sizeof(buf[0]),
+                 L"%ls\\Microsoft Visual Studio\\2022\\Community\\Common7\\IDE\\devenv.exe", pf);
+        CHECK(cleanup_protect_contains(&p, buf));
+        swprintf(buf, sizeof(buf) / sizeof(buf[0]),
+                 L"%ls\\Microsoft Visual Studio\\2022\\Community\\MSBuild\\Current\\Bin", pf);
+        CHECK(cleanup_protect_contains(&p, buf));
+    }
+    if (had_pf86) {
+        swprintf(buf, sizeof(buf) / sizeof(buf[0]),
+                 L"%ls\\Microsoft Visual Studio\\Installer\\setup.exe", pf86);
+        CHECK(cleanup_protect_contains(&p, buf));
+    }
+    /* 레지스트리에서 읽은 설치 경로도 볼륨 루트는 없다(드라이브 전체 보호 방지). */
+    {
+        size_t i;
+        for (i = 0; i < p.len; i++) {
+            CHECK(wcslen(p.paths[i]) > 2);
+        }
+    }
+    cleanup_protect_free(&p);
+
+    SetEnvironmentVariableW(L"LOCALAPPDATA", had_local ? local : NULL);
+    SetEnvironmentVariableW(L"USERPROFILE", had_home ? home : NULL);
+}
+
 int main(void)
 {
     test_classify_dir();
@@ -243,6 +382,9 @@ int main(void)
     test_protect_match();
     test_protect_contains();
     test_protect_system();
+    test_protect_install();
+    test_dev_tool_product();
+    test_protect_dev_tools();
 
     if (g_failures != 0) {
         fprintf(stderr, "%d check(s) failed\n", g_failures);

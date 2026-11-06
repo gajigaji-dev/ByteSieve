@@ -20,7 +20,8 @@
  *   1. 경로 판정(cleanup_guard_check, 파일 시스템 접근 없음)
  *      - 로컬 드라이브의 절대 경로("X:\...")만, MAX_PATH 미만만(휴지통이 긴 경로를 지원하지 않음)
  *      - 탐지 경로 안쪽(탐지 경로 자체는 아님)
- *      - 시스템 보호 경로(Windows·Program Files·ProgramData·볼륨 루트 시스템 폴더)와 같거나 그 아래가 아님
+ *      - 보호 경로(cleanup_protect_add_system: Windows·Program Files·ProgramData·사용자별 설치 프로그램·
+ *        Visual Studio·VS Code 설치 경로, 볼륨 루트 시스템 폴더)와 같거나 그 아래가 아님
  *      - 중요 경로(볼륨 루트, 사용자 프로필, 바탕 화면·문서 등 알려진 폴더, Users 폴더,
  *        실행 중인 프로그램 폴더, 보호 경로)와 같거나 그 상위가 아님
  *      - 하위를 다 읽지 못한 항목(CLEANUP_ITEM_INCOMPLETE)·보호 경로 안 탐지 결과가 아님
@@ -43,7 +44,7 @@ typedef enum {
     CLEANUP_TRASH_QUARANTINED,  /* 휴지통 대신 같은 드라이브의 격리 폴더로 옮김 */
     CLEANUP_TRASH_DENY_PATH,    /* 휴지통이 다룰 수 없는 경로(상대·네트워크·너무 김) */
     CLEANUP_TRASH_DENY_OUTSIDE, /* 탐지 경로 밖이거나 탐지 경로 자체 */
-    CLEANUP_TRASH_DENY_PROTECTED, /* 시스템 보호 경로이거나 그 안(격리 폴더 포함) */
+    CLEANUP_TRASH_DENY_PROTECTED, /* 시스템·프로그램 보호 경로이거나 그 안(격리 폴더 포함) */
     CLEANUP_TRASH_DENY_CRITICAL,  /* 중요 경로이거나 그 상위 */
     CLEANUP_TRASH_DENY_INCOMPLETE, /* 하위를 다 읽지 못한 항목 */
     CLEANUP_TRASH_DENY_DRIVE,   /* 고정·이동식 드라이브가 아님(네트워크·CD 등) */
@@ -56,7 +57,7 @@ typedef enum {
     CLEANUP_TRASH_STATUS_COUNT
 } CleanupTrashStatus;
 
-/* 화면용 짧은 설명("휴지통으로 이동됨", "시스템 보호 경로" 등). */
+/* 화면용 짧은 설명("휴지통으로 이동됨", "시스템·프로그램 보호 경로" 등). */
 const wchar_t *cleanup_trash_status_text(CleanupTrashStatus status);
 
 /* 식별자 이름("moved", "deny_protected" 등). */

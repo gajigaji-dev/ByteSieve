@@ -1,9 +1,16 @@
 #define WIN32_LEAN_AND_MEAN
+#define COBJMACROS
 #include <windows.h>
+#include <objbase.h>
+#include <propsys.h>
+#include <shobjidl.h>
 
 #include <string.h>
 
 #include "drive.h"
+
+/* 탐색기가 드라이브의 BitLocker 상태(자물쇠 아이콘)에 쓰는 셸 속성. */
+#define BITLOCKER_PROPERTY L"System.Volume.BitLockerProtection"
 
 int drive_root_from_letter(wchar_t letter, wchar_t *buf, size_t len)
 {
@@ -91,6 +98,121 @@ static void set_failure(DriveInfo *out, DWORD error)
     out->available_bytes = 0;
 }
 
+DriveEncryption drive_encryption_from_bitlocker(int has_value, long value)
+{
+    if (!has_value) {
+        return DRIVE_ENC_NONE;
+    }
+    switch (value) {
+    case 0:
+        return DRIVE_ENC_NONE;
+    case 1:
+        return DRIVE_ENC_ON;
+    case 2:
+        return DRIVE_ENC_OFF;
+    case 3:
+        return DRIVE_ENC_ENCRYPTING;
+    case 4:
+        return DRIVE_ENC_DECRYPTING;
+    case 5:
+        return DRIVE_ENC_SUSPENDED;
+    case 6:
+        return DRIVE_ENC_LOCKED;
+    case 8:
+        return DRIVE_ENC_PENDING;
+    default:
+        return DRIVE_ENC_UNKNOWN;
+    }
+}
+
+int drive_encryption_is_encrypted(DriveEncryption enc)
+{
+    return enc == DRIVE_ENC_ON || enc == DRIVE_ENC_LOCKED || enc == DRIVE_ENC_SUSPENDED ||
+           enc == DRIVE_ENC_PENDING || enc == DRIVE_ENC_DECRYPTING;
+}
+
+/* 정수형 PROPVARIANT 의 값. 정수가 아니면 0. */
+static int propvariant_long(const PROPVARIANT *pv, long *value)
+{
+    switch (pv->vt) {
+    case VT_I4:
+    case VT_INT:
+        *value = pv->lVal;
+        return 1;
+    case VT_UI4:
+    case VT_UINT:
+        *value = (long)pv->ulVal;
+        return 1;
+    case VT_I2:
+        *value = pv->iVal;
+        return 1;
+    case VT_UI2:
+        *value = pv->uiVal;
+        return 1;
+    case VT_UI1:
+        *value = pv->bVal;
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+/*
+ * 로컬·이동식 드라이브의 BitLocker 상태를 셸 속성으로 읽는다(관리자 권한 불필요). 드라이브가
+ * 잠겨 용량을 읽지 못해도 조회한다. 작업 스레드에서도 쓰므로 COM 을 여기서 초기화·정리한다.
+ */
+static void query_encryption(DriveInfo *out)
+{
+    PROPERTYKEY key;
+    IShellItem2 *item = NULL;
+    PROPVARIANT pv;
+    HRESULT init, hr;
+    long value = -1;
+    int has_value = 0;
+
+    out->encryption = DRIVE_ENC_NOT_QUERIED;
+    out->encryption_raw = -1;
+    out->encryption_error = 0;
+    if ((out->type != DRIVE_TYPE_FIXED && out->type != DRIVE_TYPE_REMOVABLE) ||
+        out->status == DRIVE_STATUS_MISSING) {
+        return;
+    }
+    init = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    hr = PSGetPropertyKeyFromName(BITLOCKER_PROPERTY, &key);
+    if (SUCCEEDED(hr)) {
+        hr = SHCreateItemFromParsingName(out->root, NULL, &IID_IShellItem2, (void **)&item);
+    }
+    if (SUCCEEDED(hr)) {
+        PropVariantInit(&pv);
+        hr = IShellItem2_GetProperty(item, &key, &pv);
+        if (SUCCEEDED(hr)) {
+            has_value = propvariant_long(&pv, &value);
+            if (!has_value && pv.vt != VT_EMPTY) {
+                /* 정수가 아닌 값: 뜻을 모른다. */
+                out->encryption = DRIVE_ENC_UNKNOWN;
+            }
+        }
+        PropVariantClear(&pv);
+        IShellItem2_Release(item);
+    }
+    if (FAILED(hr)) {
+        out->encryption = DRIVE_ENC_FAILED;
+        out->encryption_error = (long)hr;
+    } else if (out->encryption != DRIVE_ENC_UNKNOWN) {
+        out->encryption = drive_encryption_from_bitlocker(has_value, value);
+        out->encryption_raw = has_value ? value : -1;
+    }
+    /* 용량도 못 읽고(미디어 없음 등) 암호화 정보도 없으면 판단하지 않은 것으로 둔다. */
+    if (out->status != DRIVE_STATUS_OK &&
+        (out->encryption == DRIVE_ENC_NONE || out->encryption == DRIVE_ENC_FAILED)) {
+        out->encryption = DRIVE_ENC_NOT_QUERIED;
+        out->encryption_error = 0;
+    }
+    if (init == S_OK || init == S_FALSE) {
+        CoUninitialize();
+    }
+}
+
 void drive_query_system(DriveInfo *out, void *ctx)
 {
     ULARGE_INTEGER avail, total, free_bytes;
@@ -126,6 +248,7 @@ void drive_query_system(DriveInfo *out, void *ctx)
             out->fs[0] = L'\0';
         }
     }
+    query_encryption(out);
 
     if (mode_set) {
         SetThreadErrorMode(old_mode, NULL);
@@ -251,5 +374,61 @@ const wchar_t *drive_status_name(DriveStatus status)
         return L"disconnected";
     default:
         return L"error";
+    }
+}
+
+const wchar_t *drive_encryption_name(DriveEncryption enc)
+{
+    switch (enc) {
+    case DRIVE_ENC_NOT_QUERIED:
+        return L"not_queried";
+    case DRIVE_ENC_NONE:
+        return L"none";
+    case DRIVE_ENC_OFF:
+        return L"off";
+    case DRIVE_ENC_ON:
+        return L"on";
+    case DRIVE_ENC_LOCKED:
+        return L"locked";
+    case DRIVE_ENC_ENCRYPTING:
+        return L"encrypting";
+    case DRIVE_ENC_DECRYPTING:
+        return L"decrypting";
+    case DRIVE_ENC_SUSPENDED:
+        return L"suspended";
+    case DRIVE_ENC_PENDING:
+        return L"pending";
+    case DRIVE_ENC_FAILED:
+        return L"failed";
+    default:
+        return L"unknown";
+    }
+}
+
+const wchar_t *drive_encryption_text(DriveEncryption enc)
+{
+    switch (enc) {
+    case DRIVE_ENC_NOT_QUERIED:
+        return L"-";
+    case DRIVE_ENC_NONE:
+        return L"정보 없음";
+    case DRIVE_ENC_OFF:
+        return L"암호화 안 됨";
+    case DRIVE_ENC_ON:
+        return L"BitLocker 켜짐";
+    case DRIVE_ENC_LOCKED:
+        return L"BitLocker 잠김";
+    case DRIVE_ENC_ENCRYPTING:
+        return L"BitLocker 암호화 중";
+    case DRIVE_ENC_DECRYPTING:
+        return L"BitLocker 해독 중";
+    case DRIVE_ENC_SUSPENDED:
+        return L"BitLocker 일시 중단(보호 꺼짐)";
+    case DRIVE_ENC_PENDING:
+        return L"BitLocker 활성화 대기";
+    case DRIVE_ENC_FAILED:
+        return L"조회 실패";
+    default:
+        return L"알 수 없음";
     }
 }

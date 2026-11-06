@@ -678,6 +678,159 @@ static void test_ecosystems(void)
     remove_tree(g_root_ext);
 }
 
+/*
+ * 개발 도구 설치 경로 픽스처. 사용자 폴더·Program Files 환경 변수를 이 아래로 돌려
+ * cleanup_protect_add_system 이 실제로 만드는 보호 목록으로 확인한다.
+ */
+static int setup_dev_tools_fixture(void)
+{
+    wchar_t tmp[MAX_PATH];
+
+    if (GetTempPathW(MAX_PATH, tmp) == 0) {
+        return 0;
+    }
+    swprintf(g_root, MAX_PATH, L"%lsbytesieve_cleanup_dev_%lu", tmp,
+             (unsigned long)GetCurrentProcessId());
+    swprintf(g_root_ext, MAX_PATH, L"\\\\?\\%ls", g_root);
+    remove_tree(g_root_ext);
+    if (!CreateDirectoryW(g_root_ext, NULL)) {
+        return 0;
+    }
+    return /* %LOCALAPPDATA%\Programs: VS Code 사용자 설치, Python */
+           make_dir(L"local") && make_dir(L"local\\Programs") &&
+           make_dir(L"local\\Programs\\Microsoft VS Code") &&
+           write_file(L"local\\Programs\\Microsoft VS Code\\Code.exe", 31) &&
+           write_file(L"local\\Programs\\Microsoft VS Code\\debug.log", 32) &&
+           make_dir(L"local\\Programs\\Microsoft VS Code\\resources") &&
+           make_dir(L"local\\Programs\\Microsoft VS Code\\resources\\app") &&
+           write_file(L"local\\Programs\\Microsoft VS Code\\resources\\app\\package.json", 2) &&
+           make_dir(L"local\\Programs\\Microsoft VS Code\\resources\\app\\node_modules") &&
+           write_file(L"local\\Programs\\Microsoft VS Code\\resources\\app\\node_modules\\a.js",
+                      33) &&
+           make_dir(L"local\\Programs\\Microsoft VS Code\\resources\\app\\out") &&
+           write_file(L"local\\Programs\\Microsoft VS Code\\resources\\app\\out\\main.js", 34) &&
+           make_dir(L"local\\Programs\\Python") && make_dir(L"local\\Programs\\Python\\Lib") &&
+           make_dir(L"local\\Programs\\Python\\Lib\\__pycache__") &&
+           write_file(L"local\\Programs\\Python\\Lib\\__pycache__\\os.pyc", 35) &&
+           /* 보호 경로가 아닌 같은 사용자 폴더의 임시 파일은 그대로 후보 */
+           make_dir(L"local\\Temp") && write_file(L"local\\Temp\\x.tmp", 36) &&
+           /* 설치한 VS Code 확장 */
+           make_dir(L"home") && make_dir(L"home\\.vscode") &&
+           make_dir(L"home\\.vscode\\extensions") &&
+           make_dir(L"home\\.vscode\\extensions\\ms-python.python-2026.1.0") &&
+           write_file(L"home\\.vscode\\extensions\\ms-python.python-2026.1.0\\package.json", 2) &&
+           make_dir(L"home\\.vscode\\extensions\\ms-python.python-2026.1.0\\node_modules") &&
+           write_file(L"home\\.vscode\\extensions\\ms-python.python-2026.1.0\\node_modules\\b.js",
+                      37) &&
+           /* %ProgramFiles%: Visual Studio 기본 위치 */
+           make_dir(L"pf") && make_dir(L"pf\\Microsoft Visual Studio") &&
+           make_dir(L"pf\\Microsoft Visual Studio\\2022") &&
+           make_dir(L"pf\\Microsoft Visual Studio\\2022\\Community") &&
+           make_dir(L"pf\\Microsoft Visual Studio\\2022\\Community\\Common7") &&
+           make_dir(L"pf\\Microsoft Visual Studio\\2022\\Community\\Common7\\IDE") &&
+           write_file(L"pf\\Microsoft Visual Studio\\2022\\Community\\Common7\\IDE\\devenv.exe",
+                      38) &&
+           write_file(L"pf\\Microsoft Visual Studio\\2022\\Community\\Common7\\IDE\\setup.log",
+                      39) &&
+           /* 레지스트리 InstallLocation 으로 알게 되는 다른 위치의 Visual Studio */
+           make_dir(L"VS2022") && write_file(L"VS2022\\devenv.exe", 40) &&
+           make_dir(L"VS2022\\Extensions") && make_dir(L"VS2022\\Extensions\\y") &&
+           write_file(L"VS2022\\Extensions\\y\\package.json", 2) &&
+           make_dir(L"VS2022\\Extensions\\y\\node_modules") &&
+           write_file(L"VS2022\\Extensions\\y\\node_modules\\d.js", 41) &&
+           make_dir(L"VS2022\\Python") && make_dir(L"VS2022\\Python\\__pycache__") &&
+           write_file(L"VS2022\\Python\\__pycache__\\m.pyc", 42) &&
+           /* 보호 경로 밖의 일반 프로젝트는 그대로 후보 */
+           make_dir(L"proj") && write_file(L"proj\\package.json", 2) &&
+           make_dir(L"proj\\node_modules") && write_file(L"proj\\node_modules\\e.js", 43);
+}
+
+/* 개발 도구 설치 경로와 그 안의 실행 파일·하위 폴더는 정리 후보가 아니다. */
+static void test_dev_tools(void)
+{
+    static const wchar_t *const vars[] = {L"LOCALAPPDATA", L"USERPROFILE", L"ProgramFiles"};
+    static const wchar_t *const rels[] = {L"local", L"home", L"pf"};
+    static const wchar_t *const protected_items[] = {
+        L"local\\Programs\\Microsoft VS Code\\debug.log",
+        L"local\\Programs\\Microsoft VS Code\\resources\\app\\node_modules",
+        L"local\\Programs\\Microsoft VS Code\\resources\\app\\out",
+        L"local\\Programs\\Python\\Lib\\__pycache__",
+        L"home\\.vscode\\extensions\\ms-python.python-2026.1.0\\node_modules",
+        L"pf\\Microsoft Visual Studio\\2022\\Community\\Common7\\IDE\\setup.log",
+    };
+    wchar_t saved[3][MAX_PATH], install[MAX_PATH + 8];
+    int had[3];
+    CleanupProtect protect;
+    CleanupResult r;
+    CleanupJob *job;
+    wchar_t *vscode;
+    size_t i;
+
+    if (!setup_dev_tools_fixture()) {
+        CHECK(0);
+        remove_tree(g_root_ext);
+        return;
+    }
+    for (i = 0; i < 3; i++) {
+        DWORD n = GetEnvironmentVariableW(vars[i], saved[i], MAX_PATH);
+        wchar_t *p = path_join(g_root, rels[i]);
+        had[i] = n > 0 && n < MAX_PATH;
+        SetEnvironmentVariableW(vars[i], p);
+        free(p);
+    }
+
+    /* 보호 목록: 시스템 기준 + 레지스트리처럼 따옴표·끝 구분자가 붙은 설치 경로 */
+    cleanup_protect_init(&protect);
+    cleanup_protect_add_system(&protect);
+    swprintf(install, sizeof(install) / sizeof(install[0]), L"\"%ls\\VS2022\\\"", g_root);
+    CHECK(cleanup_protect_add_install(&protect, install) == 0);
+
+    cleanup_result_init(&r);
+    CHECK(cleanup_scan(&r, g_root, &protect, NULL, NULL, NULL) == SCAN_COMPLETE);
+    CHECK(!r.root_protected);
+    CHECK_U64(r.len, 2);
+    CHECK(find_item(&r, L"local\\Temp\\x.tmp") != NULL);
+    CHECK(find_item(&r, L"proj\\node_modules") != NULL);
+    CHECK_U64(r.total_bytes, 36 + 43);
+    /* Programs, .vscode\extensions, pf, VS2022 에는 들어가지 않는다 */
+    CHECK_U64(r.report.excluded_dir_count, 4);
+    for (i = 0; i < sizeof(protected_items) / sizeof(protected_items[0]); i++) {
+        CHECK(find_item(&r, protected_items[i]) == NULL);
+    }
+    CHECK(find_item(&r, L"VS2022\\Extensions\\y\\node_modules") == NULL);
+    CHECK(find_item(&r, L"VS2022\\Python\\__pycache__") == NULL);
+    cleanup_result_free(&r);
+
+    /* 설치 폴더 안을 직접 고르면 항목마다 보호 표시가 붙는다(정리 판정에서 거부) */
+    vscode = path_join(g_root, L"local\\Programs\\Microsoft VS Code");
+    CHECK(cleanup_scan(&r, vscode, &protect, NULL, NULL, NULL) == SCAN_COMPLETE);
+    CHECK(r.root_protected);
+    CHECK_U64(r.len, 3);
+    for (i = 0; i < r.len; i++) {
+        CHECK(r.items[i].flags & CLEANUP_ITEM_PROTECTED);
+    }
+    cleanup_result_free(&r);
+    free(vscode);
+    cleanup_protect_free(&protect);
+
+    /* GUI 가 쓰는 작업 스레드도 같은 보호 목록(cleanup_protect_add_system)으로 탐지한다 */
+    job = cleanup_job_start(g_root, 0, NULL, NULL);
+    CHECK(job != NULL);
+    if (job != NULL) {
+        CHECK(cleanup_job_finish(job, &r) == SCAN_COMPLETE);
+        CHECK(find_item(&r, L"proj\\node_modules") != NULL);
+        for (i = 0; i < sizeof(protected_items) / sizeof(protected_items[0]); i++) {
+            CHECK(find_item(&r, protected_items[i]) == NULL);
+        }
+        cleanup_result_free(&r);
+    }
+
+    for (i = 0; i < 3; i++) {
+        SetEnvironmentVariableW(vars[i], had[i] ? saved[i] : NULL);
+    }
+    remove_tree(g_root_ext);
+}
+
 int main(void)
 {
     if (!setup_fixture()) {
@@ -693,6 +846,7 @@ int main(void)
     test_job();
     teardown_fixture();
     test_ecosystems();
+    test_dev_tools();
 
     if (g_failures != 0) {
         fprintf(stderr, "%d check(s) failed\n", g_failures);

@@ -16,6 +16,10 @@
 
 #define QUARANTINE_PANEL_CLASS L"ByteSieveQuarantinePanel"
 #define WM_APP_PURGE_DONE (WM_APP + 1)
+#define WM_APP_PURGE_PROGRESS (WM_APP + 2)
+
+#define PROGRESS_INTERVAL_MS 100
+#define PROGRESS_RANGE 1000
 
 /* 확인 창·결과 창에 나열하는 최대 항목 수(나머지는 "외 n개"). */
 #define CONFIRM_LIST_MAX 12
@@ -25,7 +29,9 @@ enum {
     IDC_Q_REFRESH = 100,
     IDC_Q_RESTORE,
     IDC_Q_PURGE,
+    IDC_Q_CANCEL,
     IDC_Q_OPEN,
+    IDC_Q_PROGRESS,
     IDC_Q_SUMMARY,
     IDC_Q_INFO,
     IDC_Q_LIST,
@@ -40,7 +46,10 @@ typedef struct {
     int dpi;
 } PanelParams;
 
-/* 영구 삭제 작업(스레드가 끝날 때까지 entries 는 바뀌지 않는다). */
+/*
+ * 영구 삭제 작업(스레드가 끝날 때까지 entries 는 바뀌지 않는다). 진행 값은 작업 스레드가
+ * 쓰고 UI 스레드가 읽는다. 취소는 지우고 있던 파일까지만 지우고 멈춘다.
+ */
 typedef struct {
     HANDLE thread;
     HWND hwnd;
@@ -49,13 +58,23 @@ typedef struct {
     size_t count;
     QuarantineStatus *status;
     uint32_t *code;
+    uint64_t total_bytes; /* 고른 항목의 기록된 용량 합 */
+
+    volatile LONG cancel;
+    volatile LONG current;  /* 지우고 있는 항목(rows 의 위치) */
+    volatile LONG done;     /* 끝난 항목 수 */
+    volatile LONG64 removed; /* 지운 파일·폴더 수 */
+    volatile LONG64 bytes;   /* 지운 파일 용량 */
+    ULONGLONG last_notify;   /* 작업 스레드만 쓴다 */
 } PurgeJob;
 
 typedef struct {
     HWND hwnd;
-    HWND refresh, restore, purge, open, summary, info, list, status;
+    HWND refresh, restore, purge, cancel, open, summary, progress, info, list, status;
     HFONT font;
     int dpi;
+    int progress_pos;
+    int purge_finished; /* 마지막 영구 삭제가 취소 없이 끝났으면 1(자체 검사용) */
 
     wchar_t *root; /* NULL 이면 모든 드라이브 */
     QuarantineList entries;
@@ -168,6 +187,7 @@ static void update_buttons(QuarantinePanel *p)
     EnableWindow(p->refresh, !busy);
     EnableWindow(p->restore, !busy && any);
     EnableWindow(p->purge, !busy && any);
+    EnableWindow(p->cancel, busy && !p->job->cancel);
     EnableWindow(p->open, p->entries.len > 0);
 }
 
@@ -432,16 +452,97 @@ size_t quarantine_panel_restore(HWND panel, int interactive)
 
 /* ---- 영구 삭제 ---- */
 
+/* 지운 것을 세고, 최대 PROGRESS_INTERVAL_MS 마다 한 번 화면에 알린다. 취소했으면 1. */
+static int on_purge_step(uint64_t bytes, void *ctx)
+{
+    PurgeJob *job = ctx;
+    ULONGLONG now = GetTickCount64();
+
+    InterlockedIncrement64(&job->removed);
+    InterlockedAdd64(&job->bytes, (LONG64)bytes);
+    if (now - job->last_notify >= PROGRESS_INTERVAL_MS) {
+        job->last_notify = now;
+        PostMessageW(job->hwnd, WM_APP_PURGE_PROGRESS, 0, 0);
+    }
+    return job->cancel != 0;
+}
+
 static unsigned __stdcall purge_thread(void *arg)
 {
     PurgeJob *job = arg;
     size_t i;
 
     for (i = 0; i < job->count; i++) {
-        job->status[i] = quarantine_purge(&job->entries[job->rows[i]], &job->code[i]);
+        if (job->cancel) {
+            /* 시작하지 않은 항목은 그대로 둔다(code 0 = 아무것도 지우지 않음). */
+            job->status[i] = QUARANTINE_CANCELLED;
+            job->code[i] = 0;
+            continue;
+        }
+        InterlockedExchange(&job->current, (LONG)i);
+        PostMessageW(job->hwnd, WM_APP_PURGE_PROGRESS, 0, 0);
+        job->status[i] = quarantine_purge_with(&job->entries[job->rows[i]], on_purge_step, job,
+                                               &job->code[i]);
+        InterlockedIncrement(&job->done);
     }
     PostMessageW(job->hwnd, WM_APP_PURGE_DONE, 0, 0);
     return 0;
+}
+
+/*
+ * 진행바와 상태 줄: 끝난 항목 수와 기록된 용량 대비 지운 용량 중 큰 쪽으로 채운다. 기록된
+ * 용량이 실제보다 작을 수 있으므로 용량 기준은 지우고 있는 항목의 구간 끝을 넘지 않는다.
+ */
+static void update_purge_progress(QuarantinePanel *p)
+{
+    PurgeJob *job = p->job;
+    const QuarantineEntry *e;
+    wchar_t text[MAX_PATH + 160], size[32];
+    uint64_t bytes;
+    size_t current, done;
+    int pos;
+
+    if (job == NULL || job->cancel) {
+        return;
+    }
+    bytes = (uint64_t)job->bytes;
+    done = (size_t)job->done;
+    current = (size_t)job->current;
+    pos = (int)(done * PROGRESS_RANGE / job->count);
+    if (job->total_bytes > 0 && done < job->count) {
+        int limit = (int)((done + 1) * PROGRESS_RANGE / job->count) - 1;
+        int by_bytes = bytes >= job->total_bytes
+                           ? PROGRESS_RANGE
+                           : (int)((double)bytes * PROGRESS_RANGE / (double)job->total_bytes);
+        if (by_bytes > limit) {
+            by_bytes = limit;
+        }
+        if (by_bytes > pos) {
+            pos = by_bytes;
+        }
+    }
+    if (pos > p->progress_pos) {
+        p->progress_pos = pos;
+        SendMessageW(p->progress, PBM_SETPOS, (WPARAM)pos, 0);
+    }
+    e = &job->entries[job->rows[current < job->count ? current : job->count - 1]];
+    format_size(bytes, size, 32);
+    swprintf(text, sizeof(text) / sizeof(text[0]),
+             L"영구 삭제하는 중... 항목 %u/%u · 지운 파일·폴더 %llu개(%ls) · %ls",
+             (unsigned)(done < job->count ? done + 1 : job->count), (unsigned)job->count,
+             (unsigned long long)job->removed, size, e->original != NULL ? e->original : e->item);
+    SetWindowTextW(p->status, text);
+}
+
+static void cancel_purge(QuarantinePanel *p)
+{
+    if (p->job == NULL || p->job->cancel) {
+        return;
+    }
+    InterlockedExchange(&p->job->cancel, 1);
+    update_buttons(p);
+    SetWindowTextW(p->status, L"영구 삭제를 멈추는 중... 지우고 있던 파일까지만 지우고, 남은 "
+                              L"파일은 격리 폴더에 그대로 둡니다.");
 }
 
 static void job_free(PurgeJob *job)
@@ -534,12 +635,16 @@ int quarantine_panel_purge(HWND panel, int confirm)
     }
     job = calloc(1, sizeof(*job));
     if (job != NULL) {
+        size_t i;
         job->hwnd = panel;
         job->entries = p->entries.items;
         job->rows = rows;
         job->count = count;
         job->status = calloc(count, sizeof(*job->status));
         job->code = calloc(count, sizeof(*job->code));
+        for (i = 0; i < count; i++) {
+            job->total_bytes += p->entries.items[rows[i]].bytes;
+        }
     }
     if (job == NULL || job->status == NULL || job->code == NULL) {
         if (job == NULL) {
@@ -556,8 +661,11 @@ int quarantine_panel_purge(HWND panel, int confirm)
         return 0;
     }
     p->job = job;
+    p->purge_finished = 0;
+    p->progress_pos = 0;
+    SendMessageW(p->progress, PBM_SETPOS, 0, 0);
     update_buttons(p);
-    SetWindowTextW(p->status, L"영구 삭제하는 중...");
+    update_purge_progress(p);
     return 1;
 }
 
@@ -565,7 +673,7 @@ static void finish_purge(QuarantinePanel *p, int interactive)
 {
     PurgeJob *job = p->job;
     PendingNote *pending;
-    size_t i, done = 0, failed = 0, len = 0;
+    size_t i, done = 0, failed = 0, cancelled = 0, len = 0;
     wchar_t text[256];
 
     if (job == NULL) {
@@ -575,25 +683,48 @@ static void finish_purge(QuarantinePanel *p, int interactive)
     CloseHandle(job->thread);
     p->job = NULL;
     pending = calloc(job->count > 0 ? job->count : 1, sizeof(*pending));
+    /* 실패를 먼저 모은다(실패 창은 앞의 failed 개만 보여 준다). 취소는 결과 열에만 남긴다. */
     for (i = 0; i < job->count; i++) {
-        if (job->status[i] == QUARANTINE_OK) {
+        QuarantineStatus st = job->status[i];
+        if (st == QUARANTINE_OK) {
             done++;
+        } else if (st == QUARANTINE_CANCELLED) {
+            cancelled++;
         } else {
             failed++;
             if (pending != NULL) {
                 pending[len].entry = path_dup(job->entries[job->rows[i]].entry);
-                pending[len++].note = result_note(L"영구 삭제하지 못함", job->status[i],
-                                                  job->code[i]);
+                pending[len++].note = result_note(L"영구 삭제하지 못함", st, job->code[i]);
             }
         }
     }
-    swprintf(text, sizeof(text) / sizeof(text[0]), L"영구 삭제 완료: 성공 %u개 · 실패 %u개",
-             (unsigned)done, (unsigned)failed);
+    for (i = 0; i < job->count && pending != NULL; i++) {
+        if (job->status[i] == QUARANTINE_CANCELLED) {
+            pending[len].entry = path_dup(job->entries[job->rows[i]].entry);
+            pending[len++].note =
+                path_dup(job->code[i] != 0
+                             ? L"취소함: 일부 파일만 지웠습니다. 남은 파일과 기록은 격리 폴더에 "
+                               L"그대로 있습니다."
+                             : L"취소함: 지우지 않았습니다.");
+        }
+    }
+    if (cancelled > 0) {
+        swprintf(text, sizeof(text) / sizeof(text[0]),
+                 L"영구 삭제 취소: 성공 %u개 · 취소 %u개(남은 항목은 격리 폴더에 그대로) · "
+                 L"실패 %u개",
+                 (unsigned)done, (unsigned)cancelled, (unsigned)failed);
+    } else {
+        swprintf(text, sizeof(text) / sizeof(text[0]), L"영구 삭제 완료: 성공 %u개 · 실패 %u개",
+                 (unsigned)done, (unsigned)failed);
+    }
+    p->purge_finished = cancelled == 0;
+    p->progress_pos = cancelled == 0 ? PROGRESS_RANGE : 0;
+    SendMessageW(p->progress, PBM_SETPOS, (WPARAM)p->progress_pos, 0);
     if (interactive && failed > 0 && pending != NULL) {
         show_failures(p, L"영구 삭제 결과",
                       L"일부 항목을 영구 삭제하지 못했습니다. 지우지 못한 파일은 격리 폴더에 "
                       L"남아 있습니다.",
-                      pending, len, failed);
+                      pending, failed, failed);
     }
     job_free(job);
     reload(p, pending, len);
@@ -675,10 +806,14 @@ static void panel_layout(QuarantinePanel *p)
     x += bw + gap;
     MoveWindow(p->purge, x, y, wide, h, TRUE);
     x += wide + gap;
+    MoveWindow(p->cancel, x, y, bw, h, TRUE);
+    x += bw + gap;
     MoveWindow(p->open, x, y, wide, h, TRUE);
     x += wide + gap * 2;
     MoveWindow(p->summary, x, y + pscale(p, 4), w - x > 0 ? w - x : 0, pscale(p, 20), TRUE);
     y += h + gap;
+    MoveWindow(p->progress, 0, y, w, pscale(p, 16), TRUE);
+    y += pscale(p, 16) + gap;
     MoveWindow(p->info, 0, y, w, pscale(p, 20), TRUE);
     y += pscale(p, 20);
     MoveWindow(p->status, 0, y, w, pscale(p, 20), TRUE);
@@ -715,10 +850,13 @@ static void panel_create_controls(QuarantinePanel *p)
                              IDC_Q_RESTORE);
     p->purge = panel_child(p, L"BUTTON", L"영구 삭제(&P)...", BS_PUSHBUTTON | WS_TABSTOP, 0,
                            IDC_Q_PURGE);
+    p->cancel = panel_child(p, L"BUTTON", L"취소", BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_Q_CANCEL);
     p->open = panel_child(p, L"BUTTON", L"격리 폴더 열기", BS_PUSHBUTTON | WS_TABSTOP, 0,
                           IDC_Q_OPEN);
     p->summary = panel_child(p, L"STATIC", L"", SS_LEFTNOWORDWRAP | SS_ENDELLIPSIS, 0,
                              IDC_Q_SUMMARY);
+    p->progress = panel_child(p, PROGRESS_CLASSW, L"", PBS_SMOOTH, 0, IDC_Q_PROGRESS);
+    SendMessageW(p->progress, PBM_SETRANGE32, 0, PROGRESS_RANGE);
     p->info = panel_child(p, L"STATIC",
                           L"휴지통이 없는 드라이브(USB 등)에서 정리한 항목을 같은 드라이브의 "
                           L"격리 폴더(.bytesieve-trash)에 보관합니다. 복원은 덮어쓰지 않으며, "
@@ -778,6 +916,9 @@ static LRESULT CALLBACK panel_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         case IDC_Q_PURGE:
             quarantine_panel_purge(hwnd, 1);
             return 0;
+        case IDC_Q_CANCEL:
+            cancel_purge(p);
+            return 0;
         case IDC_Q_OPEN:
             open_location(p);
             return 0;
@@ -798,14 +939,24 @@ static LRESULT CALLBACK panel_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         }
         break;
     }
+    case WM_APP_PURGE_PROGRESS:
+        if (p != NULL) {
+            update_purge_progress(p);
+        }
+        return 0;
     case WM_APP_PURGE_DONE:
         if (p != NULL) {
             finish_purge(p, IsWindowVisible(hwnd));
         }
         return 0;
     case WM_DESTROY:
-        /* 진행 중인 영구 삭제는 끝날 때까지 기다린다(중간에 멈추면 일부만 지워진다). */
+        /*
+         * 진행 중인 영구 삭제는 멈추고, 지우고 있던 파일까지만 끝나기를 기다린다. 남은 파일과
+         * 기록은 격리 폴더에 그대로 남아 다음에 다시 영구 삭제할 수 있다. (끝까지 기다리면 큰
+         * 폴더에서 창이 응답 없음이 된다.)
+         */
         if (p != NULL && p->job != NULL) {
+            InterlockedExchange(&p->job->cancel, 1);
             WaitForSingleObject(p->job->thread, INFINITE);
             CloseHandle(p->job->thread);
             job_free(p->job);
@@ -950,5 +1101,9 @@ int quarantine_panel_verify(HWND panel, size_t expect_rows, size_t expect_ok)
     GetWindowTextW(p->summary, buf, MAX_PATH + 64);
     PANEL_CHECK(wcsncmp(buf, L"격리 항목 ", wcslen(L"격리 항목 ")) == 0);
     PANEL_CHECK(IsWindowEnabled(p->open) == (p->entries.len > 0));
+    PANEL_CHECK(!IsWindowEnabled(p->cancel));
+    /* 영구 삭제가 끝났으면 진행바가 끝까지 찬다. */
+    PANEL_CHECK(!p->purge_finished ||
+                SendMessageW(p->progress, PBM_GETPOS, 0, 0) == PROGRESS_RANGE);
     return failures;
 }
