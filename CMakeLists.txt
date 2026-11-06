@@ -108,6 +108,8 @@ bytesieve_configure(bytesieve_export)
 # 논리 드라이브 목록·용량 조회(GetLogicalDrives, GetDiskFreeSpaceExW). 스캐너와 독립.
 add_library(bytesieve_drive STATIC src/drive.c)
 target_include_directories(bytesieve_drive PUBLIC src)
+# 암호화 상태: 셸 속성(System.Volume.BitLockerProtection)
+target_link_libraries(bytesieve_drive PUBLIC ole32 shell32 propsys)
 bytesieve_configure(bytesieve_drive)
 
 # RAM·CPU 사용률 측정(GlobalMemoryStatusEx, GetSystemTimes). UI 와 독립.
