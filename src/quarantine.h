@@ -38,6 +38,7 @@ typedef enum {
     QUARANTINE_BAD_STORE,     /* 격리 폴더를 만들 수 없거나 링크·파일로 바뀌었거나 기록이 없음 */
     QUARANTINE_OTHER_VOLUME,  /* 다른 볼륨(이름 바꾸기로 옮길 수 없음) */
     QUARANTINE_FAILED,        /* 그 밖의 실패(code 참고) */
+    QUARANTINE_CANCELLED,     /* 사용자가 멈춤(영구 삭제: 남은 파일·기록은 그대로) */
     QUARANTINE_STATUS_COUNT
 } QuarantineStatus;
 
@@ -137,5 +138,20 @@ wchar_t *quarantine_alternate_path(const wchar_t *path, int is_dir);
  * BAD_STORE 로 거부한다. 일부만 지웠으면 실패를 반환하고 남은 항목은 다음 목록에 보인다.
  */
 QuarantineStatus quarantine_purge(const QuarantineEntry *e, uint32_t *code);
+
+/*
+ * 영구 삭제 진행 알림. 파일(또는 링크)을 하나 지울 때마다 그 크기로, 폴더를 하나 지울 때마다
+ * 0 으로 부른다(quarantine_purge_with 를 부른 스레드에서). 0 이 아닌 값을 반환하면 남은 것을
+ * 지우지 않고 멈춘다.
+ */
+typedef int (*quarantine_purge_fn)(uint64_t bytes, void *ctx);
+
+/*
+ * quarantine_purge 와 같지만 진행을 알리고 도중에 멈출 수 있다(fn 은 NULL 가능). 멈추면
+ * CANCELLED 와 code=ERROR_CANCELLED 를 반환하며, 이미 지운 파일 외의 남은 파일과 기록은
+ * 그대로 두어 다음 목록에 보인다.
+ */
+QuarantineStatus quarantine_purge_with(const QuarantineEntry *e, quarantine_purge_fn fn, void *ctx,
+                                       uint32_t *code);
 
 #endif /* BYTESIEVE_QUARANTINE_H */
