@@ -6,7 +6,7 @@
 - **Windows API**: 폴더 열거 `GetFileInformationByHandleEx(FileFullDirectoryInfo)`(미지원 파일 시스템은 `FindFirstFileExW`),
   긴 경로 `\\?\`, 휴지통 이동 `IFileOperation`, 격리 폴더 이동·복원 `MoveFileExW`(같은 볼륨, 덮어쓰기 없음), 드라이브 `GetLogicalDrives`·`GetDiskFreeSpaceExW`,
   암호화 상태 셸 속성(`SHCreateItemFromParsingName`·`IShellItem2::GetProperty`, `System.Volume.BitLockerProtection`),
-  설치 경로 보호 `RegGetValueW`(프로그램 제거 정보), 메모리·CPU `GlobalMemoryStatusEx`·`GetSystemTimes`, GUI는 Win32 + Common Controls v6
+  설치 경로 보호 `RegGetValueW`(프로그램 제거 정보), 메모리·CPU `GlobalMemoryStatusEx`·`GetSystemTimes`, GUI는 Win32 + Common Controls v6(창 외곽은 DWM `DwmSetWindowAttribute`)
 - **구조**: UI와 무관한 정적 라이브러리 위에 CLI·GUI를 얹었습니다. 무거운 작업(스캔·탐지·휴지통 이동·격리 폴더 영구 삭제·드라이브 조회·측정)은
   모두 작업 스레드에서 실행하고, GUI 스레드는 `PostMessage`로 결과만 받아 화면을 갱신합니다.
 
@@ -45,6 +45,10 @@
 | `bytesieve_drive` / `bytesieve_sysmon` / `bytesieve_format` | 드라이브 조회(용량, BitLocker 상태: 셸 속성 `System.Volume.BitLockerProtection`), RAM·CPU 측정, 용량 표시 문자열 |
 | `bytesieve_treemap` | 스퀘어리파이드 트리맵 배치(순수 계산, GUI 트리맵 보기 `gui_treemap`이 사용) |
 | `bytesieve_cli` / `bytesieve_jsonl` | CLI 인자 해석·출력, JSON Lines 직렬화 |
+| `bytesieve_ui_lang` | GUI 표시 언어(한국어·영어·일본어·중국어 간체) 번역 문자열 표와 언어 결정(환경 변수 → 레지스트리 → Windows 표시 언어). 창과 무관 |
+
+GUI 안의 `gui_theme`은 창 외곽(DWM 둥근 모서리·Mica), 언어별 UI 글꼴, 글자 폭에 맞춘 컨트롤 크기를 맡습니다.
+설계와 단계는 [ui-design.md](ui-design.md)를 참고하세요.
 
 실행 파일은 `disk-scanner`(CLI), `bytesieve-gui`(GUI), `bytesieve-bench`(성능 측정 도구)입니다.
 

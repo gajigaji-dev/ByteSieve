@@ -6,6 +6,25 @@ build\Debug\bytesieve-gui.exe C:\Users\me\Projects     # 폴더를 지정하면 
 ```
 
 창은 여섯 탭(폴더 스캔·드라이브·정리 후보·공용 캐시·격리 폴더·시스템)으로 나뉩니다.
+Windows 11에서는 창 모서리가 둥글고 제목 표시줄에 Mica 배경이 적용됩니다.
+
+## 표시 언어
+
+한국어·영어·일본어·중국어 간체로 표시합니다. 언어는 시작할 때 다음 순서로 정합니다.
+
+1. 환경 변수 `BYTESIEVE_LANG`(`ko`, `en`, `ja`, `zh-Hans`. `ja-JP`·`zh-CN`처럼 지역을 붙여도 됨)
+2. 레지스트리 `HKCU\Software\ByteSieve`의 `Language` 값(설치 프로그램이 설치 언어로 기록)
+3. Windows 표시 언어(그 밖의 언어와 중국어 번체는 영어)
+
+```powershell
+$env:BYTESIEVE_LANG = "ja"; build\Debug\bytesieve-gui.exe
+```
+
+- 글꼴은 언어에 맞춰 고릅니다(한국어 Malgun Gothic, 영어 Segoe UI Variable Text, 일본어 Yu Gothic UI, 중국어 Microsoft YaHei UI).
+  크기는 Windows 텍스트 크기 설정을 따릅니다.
+- 단추 폭과 최소 창 크기는 문구 길이에 맞춰 정하므로 영어처럼 긴 문구도 잘리지 않습니다.
+- **지금 번역된 범위**: 탭 이름, 폴더 스캔 탭의 단추·체크 상자·입력 칸 안내·보기 목록·순위 목록 열·폴더 상태 표시(`[읽기 실패]` 등).
+  상태 줄 문구, 다른 탭, 확인 창, HTML 보고서는 아직 한국어입니다([ui-design.md](ui-design.md)의 단계 참고).
 
 ## 폴더 스캔
 

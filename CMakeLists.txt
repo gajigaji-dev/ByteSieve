@@ -117,17 +117,26 @@ add_library(bytesieve_sysmon STATIC src/sysmon.c)
 target_include_directories(bytesieve_sysmon PUBLIC src)
 bytesieve_configure(bytesieve_sysmon)
 
+# 화면 표시 언어(한국어·영어·일본어·중국어 간체)와 번역 문자열 표, 언어 결정
+# (환경 변수 → 설치 프로그램이 기록한 레지스트리 값 → Windows 표시 언어). 창과 무관하다.
+add_library(bytesieve_ui_lang STATIC src/ui_lang.c)
+target_include_directories(bytesieve_ui_lang PUBLIC src)
+target_link_libraries(bytesieve_ui_lang PUBLIC advapi32)
+bytesieve_configure(bytesieve_ui_lang)
+
 # Win32 GUI: 폴더 스캔 탭(진행률 표시줄, 폴더 트리, 용량 순위), 드라이브 대시보드 탭,
 # 정리 후보 탭(개발 캐시·빌드 결과물·임시·로그 탐지, 선택 항목 휴지통 이동),
 # 격리 폴더 탭(휴지통 없는 드라이브에서 격리한 항목의 복원·영구 삭제),
 # 시스템 탭(RAM·CPU 실시간 사용률 막대·그래프).
-add_executable(bytesieve-gui WIN32 src/gui_main.c src/gui_drives.c src/gui_cleanup.c
-               src/gui_cache.c src/gui_quarantine.c src/gui_monitor.c src/gui_treemap.c)
+# gui_theme: Windows 11 창 외곽(DWM), 언어별 UI 글꼴, 글자 폭에 맞춘 컨트롤 크기.
+add_executable(bytesieve-gui WIN32 src/gui_main.c src/gui_theme.c src/gui_drives.c
+               src/gui_cleanup.c src/gui_cache.c src/gui_quarantine.c src/gui_monitor.c
+               src/gui_treemap.c)
 target_link_libraries(bytesieve-gui PRIVATE bytesieve_job bytesieve_history bytesieve_export
-                      bytesieve_treemap
+                      bytesieve_treemap bytesieve_ui_lang
                       bytesieve_drive bytesieve_format bytesieve_cleanup_job
                       bytesieve_cleanup_trash bytesieve_dev_cache bytesieve_sysmon comctl32
-                      comdlg32 shell32 ole32)
+                      comdlg32 shell32 ole32 dwmapi)
 bytesieve_configure(bytesieve-gui)
 
 # 대용량 폴더 스캔의 실행 시간·메모리 측정 도구.
@@ -303,6 +312,12 @@ target_link_libraries(test_size_format PRIVATE bytesieve_format)
 bytesieve_configure(test_size_format)
 add_test(NAME size_format COMMAND test_size_format)
 
+# 표시 언어: 모든 번역이 채워졌는지, 언어마다 서식 지정자가 같은지, 언어 태그·LANGID 해석, 환경 변수 우선.
+add_executable(test_ui_lang tests/test_ui_lang.c)
+target_link_libraries(test_ui_lang PRIVATE bytesieve_ui_lang)
+bytesieve_configure(test_ui_lang)
+add_test(NAME ui_lang COMMAND test_ui_lang)
+
 add_executable(test_treemap tests/test_treemap.c)
 target_link_libraries(test_treemap PRIVATE bytesieve_treemap)
 bytesieve_configure(test_treemap)
@@ -389,6 +404,12 @@ add_test(NAME gui_cache
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/gui_cache_check.cmake)
 # 시스템 탭: 몇 초 동안 RAM·CPU 를 측정해 화면·1초 갱신 간격·측정 실패 표시를 확인한다.
 add_test(NAME gui_monitor COMMAND bytesieve-gui --self-test-monitor)
+# 표시 언어: 언어마다 창을 만들어 번역 문구·언어별 글꼴, 최소 창 크기에서 단추 문구가 잘리지 않고
+# 탭 영역 안에 있는지 확인한다(문구가 긴 언어에서 배치가 깨지지 않게).
+foreach(lang ko en ja zh-Hans)
+    add_test(NAME gui_lang_${lang} COMMAND bytesieve-gui --self-test-lang ${lang})
+    set_tests_properties(gui_lang_${lang} PROPERTIES PASS_REGULAR_EXPRESSION "lang: ${lang}, font: ")
+endforeach()
 set_tests_properties(gui_scan gui_cancel gui_missing_dir gui_drives gui_cleanup
                      gui_cleanup_cancel gui_trash gui_quarantine gui_monitor gui_history
                      gui_export gui_cache gui_precise PROPERTIES TIMEOUT 120)
