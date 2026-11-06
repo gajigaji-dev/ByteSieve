@@ -116,6 +116,22 @@ CleanupCategory cleanup_classify_dir(const wchar_t *name)
     return cleanup_dir_rule(name, &rule) ? rule.category : CLEANUP_NONE;
 }
 
+/* 이름이 숫자 min_digits 자 이상과 suffix 로만 이뤄졌는지("000003.log"). */
+static int is_numbered(const wchar_t *name, const wchar_t *suffix, size_t min_digits)
+{
+    size_t n = wcslen(name), s = wcslen(suffix), i;
+
+    if (n < s + min_digits || !has_suffix(name, suffix)) {
+        return 0;
+    }
+    for (i = 0; i < n - s; i++) {
+        if (name[i] < L'0' || name[i] > L'9') {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 CleanupCategory cleanup_classify_file(const wchar_t *name)
 {
     if (name == NULL) {
@@ -124,10 +140,17 @@ CleanupCategory cleanup_classify_file(const wchar_t *name)
     if (has_suffix(name, L".tmp")) {
         return CLEANUP_TEMP;
     }
-    if (has_suffix(name, L".log")) {
+    /* LevelDB 쓰기 로그("%06llu.log")는 데이터이므로 로그가 아니다. */
+    if (has_suffix(name, L".log") && !is_numbered(name, L".log", 6)) {
         return CLEANUP_LOG;
     }
     return CLEANUP_NONE;
+}
+
+int cleanup_is_leveldb_marker(const wchar_t *name)
+{
+    return name != NULL &&
+           (name_eq(name, L"CURRENT") || name_eq(name, L"LOCK") || has_prefix(name, L"MANIFEST-"));
 }
 
 int cleanup_needs_marker(CleanupCategory category)
@@ -507,6 +530,71 @@ size_t cleanup_protect_add_system(CleanupProtect *p)
     add_uninstall_dev_tools(p, HKEY_LOCAL_MACHINE, KEY_WOW64_64KEY);
     add_uninstall_dev_tools(p, HKEY_LOCAL_MACHINE, KEY_WOW64_32KEY);
     add_uninstall_dev_tools(p, HKEY_CURRENT_USER, 0);
+    return p->len - before;
+}
+
+/* dir 바로 아래의 폴더(Temp 제외)를 목록에 넣는다. 읽지 못하면 건너뛴다. */
+static void add_app_folders(CleanupProtect *p, const wchar_t *dir)
+{
+    wchar_t *pattern = path_join(dir, L"*");
+    wchar_t *ext = pattern != NULL ? path_to_extended(pattern) : NULL;
+    WIN32_FIND_DATAW fd;
+    HANDLE find = INVALID_HANDLE_VALUE;
+
+    memset(&fd, 0, sizeof(fd));
+    if (ext != NULL) {
+        find = FindFirstFileExW(ext, FindExInfoBasic, &fd, FindExSearchLimitToDirectories, NULL,
+                                0);
+    }
+    if (find != INVALID_HANDLE_VALUE) {
+        do {
+            wchar_t *child;
+            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ||
+                wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0 ||
+                name_eq(fd.cFileName, L"Temp")) {
+                continue;
+            }
+            child = path_join(dir, fd.cFileName);
+            if (child != NULL) {
+                cleanup_protect_add(p, child);
+            }
+            free(child);
+        } while (FindNextFileW(find, &fd));
+        FindClose(find);
+    }
+    free(ext);
+    free(pattern);
+}
+
+size_t cleanup_protect_add_app_data(CleanupProtect *p)
+{
+    static const struct {
+        const wchar_t *var;
+        const wchar_t *tail; /* NULL 이면 변수 값 그대로 */
+    } roots[] = {
+        {L"LOCALAPPDATA", NULL},
+        {L"APPDATA", NULL},
+        {L"USERPROFILE", L"AppData\\LocalLow"},
+    };
+    wchar_t buf[MAX_PATH];
+    size_t before, i;
+
+    if (p == NULL) {
+        return 0;
+    }
+    before = p->len;
+    for (i = 0; i < sizeof(roots) / sizeof(roots[0]); i++) {
+        DWORD n = GetEnvironmentVariableW(roots[i].var, buf, MAX_PATH);
+        wchar_t *dir;
+        if (n == 0 || n >= MAX_PATH) {
+            continue;
+        }
+        dir = roots[i].tail != NULL ? path_join(buf, roots[i].tail) : path_dup(buf);
+        if (dir != NULL) {
+            add_app_folders(p, dir);
+        }
+        free(dir);
+    }
     return p->len - before;
 }
 

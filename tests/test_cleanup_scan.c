@@ -745,6 +745,142 @@ static int setup_dev_tools_fixture(void)
            make_dir(L"proj\\node_modules") && write_file(L"proj\\node_modules\\e.js", 43);
 }
 
+/*
+ * 앱 데이터·LevelDB 픽스처: local=%LOCALAPPDATA%, roaming=%APPDATA%, home=%USERPROFILE%.
+ * 브라우저·편집기의 LevelDB 쓰기 로그(000003.log)와 앱별 폴더의 로그는 데이터일 수 있다.
+ */
+static int setup_app_data_fixture(void)
+{
+    wchar_t tmp[MAX_PATH];
+
+    if (GetTempPathW(MAX_PATH, tmp) == 0) {
+        return 0;
+    }
+    swprintf(g_root, MAX_PATH, L"%lsbytesieve_cleanup_appdata_%lu", tmp,
+             (unsigned long)GetCurrentProcessId());
+    swprintf(g_root_ext, MAX_PATH, L"\\\\?\\%ls", g_root);
+    remove_tree(g_root_ext);
+    if (!CreateDirectoryW(g_root_ext, NULL)) {
+        return 0;
+    }
+    return /* Chrome 저장소(LevelDB)와 진짜 로그 */
+           make_dir(L"local") && make_dir(L"local\\Google") &&
+           make_dir(L"local\\Google\\Chrome") && write_file(L"local\\Google\\Chrome\\debug.log", 11) &&
+           make_dir(L"local\\Google\\Chrome\\leveldb") &&
+           write_file(L"local\\Google\\Chrome\\leveldb\\000003.log", 12) &&
+           write_file(L"local\\Google\\Chrome\\leveldb\\CURRENT", 1) &&
+           write_file(L"local\\Google\\Chrome\\leveldb\\MANIFEST-000001", 1) &&
+           /* IDE 가 내려받아 쓰는 도구(package.json + node_modules) */
+           make_dir(L"local\\JetBrains") && make_dir(L"local\\JetBrains\\tool") &&
+           write_file(L"local\\JetBrains\\tool\\package.json", 2) &&
+           make_dir(L"local\\JetBrains\\tool\\node_modules") &&
+           write_file(L"local\\JetBrains\\tool\\node_modules\\t.js", 13) &&
+           /* 임시 폴더는 그대로 후보 */
+           make_dir(L"local\\Temp") && write_file(L"local\\Temp\\y.tmp", 14) &&
+           /* VS Code 사용자 데이터: 진짜 로그와 세션 저장소(LevelDB) */
+           make_dir(L"roaming") && make_dir(L"roaming\\Code") &&
+           make_dir(L"roaming\\Code\\logs") && write_file(L"roaming\\Code\\logs\\main.log", 15) &&
+           make_dir(L"roaming\\Code\\Session Storage") &&
+           write_file(L"roaming\\Code\\Session Storage\\000004.log", 16) &&
+           /* %USERPROFILE%\AppData\LocalLow */
+           make_dir(L"home") && make_dir(L"home\\AppData") &&
+           make_dir(L"home\\AppData\\LocalLow") && make_dir(L"home\\AppData\\LocalLow\\Vendor") &&
+           write_file(L"home\\AppData\\LocalLow\\Vendor\\game.log", 17) &&
+           /* 앱 데이터 밖의 LevelDB(Electron 앱 데이터를 프로젝트에 둔 경우 등) */
+           make_dir(L"proj") && make_dir(L"proj\\db") &&
+           write_file(L"proj\\db\\000005.log", 18) && write_file(L"proj\\db\\other.log", 19) &&
+           write_file(L"proj\\db\\CURRENT", 1) && make_dir(L"proj\\db2") &&
+           write_file(L"proj\\db2\\debug.log", 20) && write_file(L"proj\\db2\\LOCK", 1) &&
+           make_dir(L"proj\\numbered") && write_file(L"proj\\numbered\\123456.log", 21) &&
+           /* 일반 로그는 그대로 후보 */
+           make_dir(L"proj\\logs") && write_file(L"proj\\logs\\server.log", 22);
+}
+
+/* 앱 데이터 폴더와 LevelDB 저장소의 *.log 는 정리 후보가 아니다(데이터 유실 방지). */
+static void test_app_data(void)
+{
+    static const wchar_t *const vars[] = {L"LOCALAPPDATA", L"APPDATA", L"USERPROFILE"};
+    static const wchar_t *const rels[] = {L"local", L"roaming", L"home"};
+    static const wchar_t *const leveldb_logs[] = {
+        L"local\\Google\\Chrome\\leveldb\\000003.log",
+        L"roaming\\Code\\Session Storage\\000004.log",
+        L"proj\\db\\000005.log",
+        L"proj\\db\\other.log",
+        L"proj\\db2\\debug.log",
+        L"proj\\numbered\\123456.log",
+    };
+    wchar_t saved[3][MAX_PATH];
+    int had[3];
+    CleanupProtect protect;
+    CleanupResult r;
+    CleanupJob *job;
+    wchar_t *google;
+    size_t i;
+
+    if (!setup_app_data_fixture()) {
+        CHECK(0);
+        remove_tree(g_root_ext);
+        return;
+    }
+    for (i = 0; i < 3; i++) {
+        DWORD n = GetEnvironmentVariableW(vars[i], saved[i], MAX_PATH);
+        wchar_t *p = path_join(g_root, rels[i]);
+        had[i] = n > 0 && n < MAX_PATH;
+        SetEnvironmentVariableW(vars[i], p);
+        free(p);
+    }
+    cleanup_result_init(&r);
+
+    /* 앱 데이터 목록 없이도 LevelDB 쓰기 로그와 LevelDB 폴더의 *.log 는 후보가 아니다 */
+    cleanup_protect_init(&protect);
+    cleanup_protect_add_system(&protect);
+    CHECK(cleanup_scan(&r, g_root, &protect, NULL, NULL, NULL) == SCAN_COMPLETE);
+    for (i = 0; i < sizeof(leveldb_logs) / sizeof(leveldb_logs[0]); i++) {
+        CHECK(find_item(&r, leveldb_logs[i]) == NULL);
+    }
+    CHECK(find_item(&r, L"proj\\logs\\server.log") != NULL);
+    /* 앱별 폴더의 진짜 로그·도구는 이 목록만으로는 후보가 된다(아래 앱 데이터 목록이 막는다) */
+    CHECK(find_item(&r, L"roaming\\Code\\logs\\main.log") != NULL);
+    CHECK(find_item(&r, L"local\\JetBrains\\tool\\node_modules") != NULL);
+    cleanup_result_free(&r);
+
+    /* 앱 데이터 목록: 앱별 폴더 4개(Google, JetBrains, Code, LocalLow\Vendor), Temp 는 넣지 않음 */
+    CHECK_U64(cleanup_protect_add_app_data(&protect), 4);
+    CHECK(cleanup_scan(&r, g_root, &protect, NULL, NULL, NULL) == SCAN_COMPLETE);
+    CHECK_U64(r.len, 2);
+    CHECK(find_item(&r, L"local\\Temp\\y.tmp") != NULL);
+    CHECK(find_item(&r, L"proj\\logs\\server.log") != NULL);
+    CHECK_U64(r.total_bytes, 14 + 22);
+    cleanup_result_free(&r);
+
+    /* 앱 폴더 안을 직접 고르면 보여 주되 보호 표시(정리 판정에서 거부) */
+    google = path_join(g_root, L"local\\Google");
+    CHECK(cleanup_scan(&r, google, &protect, NULL, NULL, NULL) == SCAN_COMPLETE);
+    CHECK(r.root_protected);
+    CHECK_U64(r.len, 1);
+    CHECK(r.len == 1 && (r.items[0].flags & CLEANUP_ITEM_PROTECTED));
+    CHECK(find_item(&r, L"local\\Google\\Chrome\\debug.log") != NULL);
+    cleanup_result_free(&r);
+    free(google);
+    cleanup_protect_free(&protect);
+
+    /* GUI 가 쓰는 작업 스레드도 앱 데이터 목록으로 탐지한다 */
+    job = cleanup_job_start(g_root, 0, NULL, NULL);
+    CHECK(job != NULL);
+    if (job != NULL) {
+        CHECK(cleanup_job_finish(job, &r) == SCAN_COMPLETE);
+        CHECK_U64(r.len, 2);
+        CHECK(find_item(&r, L"local\\Temp\\y.tmp") != NULL);
+        CHECK(find_item(&r, L"proj\\logs\\server.log") != NULL);
+        cleanup_result_free(&r);
+    }
+
+    for (i = 0; i < 3; i++) {
+        SetEnvironmentVariableW(vars[i], had[i] ? saved[i] : NULL);
+    }
+    remove_tree(g_root_ext);
+}
+
 /* 개발 도구 설치 경로와 그 안의 실행 파일·하위 폴더는 정리 후보가 아니다. */
 static void test_dev_tools(void)
 {
@@ -847,6 +983,7 @@ int main(void)
     teardown_fixture();
     test_ecosystems();
     test_dev_tools();
+    test_app_data();
 
     if (g_failures != 0) {
         fprintf(stderr, "%d check(s) failed\n", g_failures);

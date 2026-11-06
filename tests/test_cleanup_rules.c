@@ -58,6 +58,20 @@ static void test_classify_file(void)
     CHECK(cleanup_classify_file(L"log") == CLEANUP_NONE);
     CHECK(cleanup_classify_file(L"node_modules") == CLEANUP_NONE);
     CHECK(cleanup_classify_file(NULL) == CLEANUP_NONE);
+
+    /* LevelDB 쓰기 로그(숫자 6자리 이상)는 데이터라 로그가 아니다 */
+    CHECK(cleanup_classify_file(L"000003.log") == CLEANUP_NONE);
+    CHECK(cleanup_classify_file(L"1234567.LOG") == CLEANUP_NONE);
+    CHECK(cleanup_classify_file(L"12345.log") == CLEANUP_LOG);
+    CHECK(cleanup_classify_file(L"000003a.log") == CLEANUP_LOG);
+    CHECK(cleanup_classify_file(L"app-000003.log") == CLEANUP_LOG);
+
+    CHECK(cleanup_is_leveldb_marker(L"CURRENT"));
+    CHECK(cleanup_is_leveldb_marker(L"LOCK"));
+    CHECK(cleanup_is_leveldb_marker(L"MANIFEST-000001"));
+    CHECK(!cleanup_is_leveldb_marker(L"current.txt"));
+    CHECK(!cleanup_is_leveldb_marker(L"server.log"));
+    CHECK(!cleanup_is_leveldb_marker(NULL));
 }
 
 static void test_markers(void)
