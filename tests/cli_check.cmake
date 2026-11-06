@@ -2,12 +2,14 @@
 #
 #   cmake -DEXE=<disk-scanner> -DARGS="a|b|c" -DEXPECT_EXIT=<n>
 #         [-DEXPECT_STDOUT=<regex>] [-DEXPECT_STDERR=<regex>]
-#         [-DDENY_FIXTURE=<dir>] -P cli_check.cmake
+#         [-DDENY_FIXTURE=<dir>] [-DQUARANTINE_FIXTURE=<dir>] -P cli_check.cmake
 #
 # ARGS 는 '|' 로 구분한다(CTest 인자에서 ';' 는 목록 구분자라서).
 # 정규식은 '|' 로 나눠 각각이 모두 일치해야 한다.
 # DENY_FIXTURE 가 있으면 <dir>\ok\f.txt 와 접근 거부된 <dir>\locked\ 를 만들고
 # 실행 뒤 지운다(ARGS 의 @FIXTURE@ 는 <dir> 로 바뀐다).
+# QUARANTINE_FIXTURE 가 있으면 <dir>\keep.txt(5바이트)와 격리 폴더
+# <dir>\.bytesieve-trash\20261101-000000-1\f\big.bin(1000바이트)을 만들고 실행 뒤 지운다.
 
 if(NOT DEFINED EXE OR NOT DEFINED EXPECT_EXIT)
     message(FATAL_ERROR "EXE and EXPECT_EXIT are required")
@@ -31,6 +33,15 @@ if(DEFINED DENY_FIXTURE)
     string(REPLACE "@FIXTURE@" "${fixture_native}" args "${args}")
 endif()
 
+if(DEFINED QUARANTINE_FIXTURE)
+    file(TO_NATIVE_PATH "${QUARANTINE_FIXTURE}" fixture_native)
+    file(REMOVE_RECURSE "${QUARANTINE_FIXTURE}")
+    file(WRITE "${QUARANTINE_FIXTURE}/keep.txt" "12345")
+    string(REPEAT "x" 1000 thousand)
+    file(WRITE "${QUARANTINE_FIXTURE}/.bytesieve-trash/20261101-000000-1/f/big.bin" "${thousand}")
+    string(REPLACE "@FIXTURE@" "${fixture_native}" args "${args}")
+endif()
+
 execute_process(COMMAND "${EXE}" ${args}
                 RESULT_VARIABLE rc
                 OUTPUT_VARIABLE out
@@ -40,6 +51,9 @@ if(DEFINED DENY_FIXTURE)
     execute_process(COMMAND icacls "${fixture_native}\\locked" /remove:d "*S-1-1-0"
                     OUTPUT_QUIET ERROR_QUIET)
     file(REMOVE_RECURSE "${DENY_FIXTURE}")
+endif()
+if(DEFINED QUARANTINE_FIXTURE)
+    file(REMOVE_RECURSE "${QUARANTINE_FIXTURE}")
 endif()
 
 set(failed FALSE)
