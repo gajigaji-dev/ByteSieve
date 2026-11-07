@@ -56,7 +56,7 @@ $env:BYTESIEVE_LANG = "ja"; build\Debug\bytesieve-gui.exe
 
 ## 폴더 스캔
 
-![폴더 스캔 화면(예전 위쪽 탭 배치): 폴더 트리와 용량 순위, 직전 스캔 대비 변화](screenshots/scan.png)
+![폴더 스캔: 폴더 트리와 용량 순위, 직전 스캔 대비 변화](screenshots/scan.png)
 
 - 경로를 입력하거나 [찾아보기]로 고른 뒤 [스캔] (또는 Enter). 스캔 중에는 [취소]로 멈출 수 있고, 그때까지 읽은 결과를 보여 줍니다.
 - 상태 줄: 파일·폴더 수, 용량, 오류 수, 현재 폴더. 둘째 줄: 디스크 분석(디스크 사용, 클러스터 낭비·압축 등)과 직전 스캔 대비 변화 요약.
@@ -69,7 +69,7 @@ $env:BYTESIEVE_LANG = "ja"; build\Debug\bytesieve-gui.exe
 
 보기 콤보 상자에서 **트리맵(폴더 용량)** 을 고르면 오른쪽 목록 자리에 트리맵이 나옵니다.
 
-![트리맵 보기: 색 구분 '정리 후보'](screenshots/treemap.png)
+![트리맵 보기: 기준 폴더와 하위 폴더를 용량에 비례하는 사각형으로](screenshots/treemap.png)
 
 - 왼쪽 트리에서 고른 폴더(기준 폴더)를 사각형 하나로 보고, 하위 폴더를 용량에 비례하는 사각형으로 나눕니다(스퀘어리파이드 배치라
   정사각형에 가깝게 나뉨). 충분히 큰 폴더는 제목 줄 아래에 그 하위 폴더를 한 단계 더 보여 줍니다(2단계).
@@ -129,7 +129,7 @@ $env:BYTESIEVE_LANG = "ja"; build\Debug\bytesieve-gui.exe
 
 ## 드라이브
 
-![드라이브 화면(예전 위쪽 탭 배치): 사용률 막대와 BitLocker 상태](screenshots/drives.png)
+![드라이브: 사용률 막대와 BitLocker 상태](screenshots/drives.png)
 
 드라이브별 문자·이름·종류·파일 시스템·암호화·전체·사용·여유 용량과 사용률 막대(90% 이상 빨간색). 미디어가 없거나 분리된 드라이브는
 상태와 오류 코드로 표시합니다. 페이지를 처음 열 때와 [새로고침] (Alt+R) 때 작업 스레드에서 조회합니다.
@@ -207,6 +207,8 @@ CLI `disk-scanner clean system`은 두 범위를 합쳐 한 번에 분석합니�
 (예전 [공용 캐시] 탭 → [시스템 정리] 탭에 합쳤던 것을 사이드바에서 다시 별도 페이지로 나눴습니다). 페이지를 처음 열면 분석을 시작합니다.
 목록·선택·확인·실행은 [시스템 정리](#시스템-정리)와 같고, 개발 도구 캐시는 [모두 선택]에 들어가지 않아 행을 직접 체크해야 합니다.
 
+![개발 캐시: 캐시별 실제 확보·증감(7일 전보다)·상태(주의), 가상 디스크는 분석만](screenshots/devcache.png)
+
 | 도구 | 캐시 | 기본 위치 |
 |---|---|---|
 | npm | 패키지 캐시 | `%LOCALAPPDATA%\npm-cache` |
@@ -243,7 +245,7 @@ CLI `disk-scanner clean system`은 두 범위를 합쳐 한 번에 분석합니�
 
 ## 프로젝트 정리
 
-![프로젝트 정리 화면(예전 위쪽 탭 배치): 유형·개발 환경별 후보와 선택 합계(실제 확보 열을 넣기 전 화면)](screenshots/cleanup.png)
+![프로젝트 정리: 실제 확보·유형·개발 환경·비고(미커밋 변경·미푸시 커밋), [모두 선택] 뒤 선택 합계](screenshots/cleanup.png)
 
 고른 폴더 안에서 프로젝트가 만든 `node_modules`·빌드 결과물·프로젝트 캐시·임시·로그(정리 후보)를 찾습니다(예전 [정리 후보] 탭).
 사용자 폴더의 공용 개발 캐시는 [개발 캐시](#개발-캐시) 페이지에 있습니다.
@@ -279,7 +281,7 @@ CLI `disk-scanner clean system`은 두 범위를 합쳐 한 번에 분석합니�
 
 ## 격리 폴더
 
-![격리 폴더 화면(예전 위쪽 탭 배치): 격리 항목과 기록만 남은 항목](screenshots/quarantine.png)
+![격리 폴더: 격리 항목과 기록만 남은 항목](screenshots/quarantine.png)
 
 휴지통이 없는 드라이브(USB 등)에서 정리해 같은 드라이브의 격리 폴더(`.bytesieve-trash`)로 옮긴 항목을 드라이브별로 모아 보여 줍니다.
 페이지를 열 때마다와 [새로 고침] 때 다시 읽습니다.
@@ -298,9 +300,11 @@ CLI `disk-scanner clean system`은 두 범위를 합쳐 한 번에 분석합니�
 
 RAM 전체·사용·사용 가능 용량과 사용률, CPU 사용률·논리 프로세서 수를 1초마다 갱신하고 최근 60초 그래프를 그립니다(예전 [시스템] 탭).
 
-![모니터 화면(예전 위쪽 탭 배치, 이름 [시스템]): RAM·CPU 막대와 최근 60초 그래프](screenshots/system.png)
+![모니터: RAM·CPU 막대와 최근 60초 그래프](screenshots/monitor.png)
 
 ## 설정
+
+![설정: 테마·표시 언어·스캔 기록·정보](screenshots/settings.png)
 
 사이드바 아래 끝의 **[설정]** 에서 모양·표시 언어·스캔 기록을 바꿉니다. 설정은 `HKCU\Software\ByteSieve`의 `Theme`·`Language` 값에 바로 저장됩니다
 (스캔 기록 자동 저장은 기록 폴더의 `settings.txt`). 이 페이지는 언어를 고르는 곳이라 네 언어로 모두 번역되어 있습니다.
@@ -319,6 +323,8 @@ RAM 전체·사용·사용 가능 용량과 사용률, CPU 사용률·논리 프
 
 ### 다크 모드
 
+![다크 모드의 폴더 스캔](screenshots/scan-dark.png)
+
 - **어둡게**를 고르면 제목 표시줄(Windows 10 20H1 이상·11), 사이드바, 페이지 배경, 목록·목록 머리글·트리(스크롤 막대 포함), 입력 칸, 콤보 상자와
   펼친 목록, 누름 단추, 도구 설명, 드라이브 사용률 막대, 모니터 그래프, 트리맵 안내 줄·바탕을 어두운 색으로 그립니다.
   색 값은 [ui-design.md](ui-design.md#디자인-토큰)의 토큰을 따릅니다(창 배경 `#202020`, 목록·입력 칸 `#2B2B2B`, 글자 흰색).
@@ -329,22 +335,29 @@ RAM 전체·사용·사용 가능 용량과 사용률, CPU 사용률·논리 프
 
 ## 스크린샷
 
-`docs/screenshots/`의 화면은 개인정보가 드러나지 않도록 **예제 데이터**로 찍었습니다.
-모두 사이드바로 바꾸기 **전**(위쪽 탭 배치)에 찍은 화면이라 창 골격은 지금과 다르고, 각 페이지 안의 내용은 같습니다.
-다시 찍는 일은 README의 향후 계획에 있습니다.
+`docs/screenshots/`의 화면은 1.0.0의 사이드바 UI를 개인정보가 드러나지 않는 **예제 데이터**로 찍었습니다(125% 배율).
+`tools/screenshots.ps1`이 예제 데이터를 만들고 모두 다시 찍습니다(UI가 바뀌면 다시 실행).
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\screenshots.ps1    # build\Release 의 exe 로 docs\screenshots 를 덮어씀
+```
 
 | 파일 | 화면 |
 |---|---|
 | [scan.png](screenshots/scan.png) | 폴더 스캔: 폴더 트리, 용량 순위(변화·디스크 사용 열), 디스크 분석·직전 스캔 비교 줄 |
-| [treemap.png](screenshots/treemap.png) | 폴더 스캔의 트리맵 보기(색 구분: 정리 후보, 범례) |
+| [treemap.png](screenshots/treemap.png) | 폴더 스캔의 트리맵 보기 |
 | [drives.png](screenshots/drives.png) | 드라이브: 사용률 막대와 암호화 열 |
-| [cleanup.png](screenshots/cleanup.png) | 프로젝트 정리(예전 이름 정리 후보, 실제 확보 열을 넣기 전): 유형·개발 환경·비고, [모두 선택] 뒤 선택 합계(옮기기 전) |
+| [cleanup.png](screenshots/cleanup.png) | 프로젝트 정리: 실제 확보·유형·개발 환경·비고, [모두 선택] 뒤 선택 합계(옮기기 전) |
+| [devcache.png](screenshots/devcache.png) | 개발 캐시: 실제 확보·증감·상태(주의), 가상 디스크(분석만) |
 | [quarantine.png](screenshots/quarantine.png) | 격리 폴더: 격리됨·기록만 있음 상태 |
-| [system.png](screenshots/system.png) | 모니터(예전 이름 시스템): RAM·CPU 막대와 60초 그래프 |
+| [monitor.png](screenshots/monitor.png) | 모니터: RAM·CPU 막대와 60초 그래프 |
+| [settings.png](screenshots/settings.png) | 설정: 테마·표시 언어·스캔 기록·정보 |
+| [scan-dark.png](screenshots/scan-dark.png)·[settings-dark.png](screenshots/settings-dark.png) | 다크 모드 |
 
-- 스캔·프로젝트 정리·격리 폴더 화면의 경로는 모두 예제 폴더(`C:\ByteSieveDemo`) 안입니다. 파일은 크기만 잡은 빈 파일이며,
-  이름(`web-shop`, `family-trip.mp4` 등)은 지어낸 것입니다.
-- 스캔 기록·격리 폴더는 환경 변수로 예제 폴더를 보게 해서, 실제 사용자 폴더·기록이 화면에 나오지 않습니다.
-  `BYTESIEVE_HISTORY_DIR`(기록), `BYTESIEVE_QUARANTINE_ROOT`(격리 폴더)를 씁니다.
-- 드라이브·모니터 화면은 촬영한 PC의 실제 값(드라이브 용량·이름 `Windows`, RAM·CPU)이며 개인을 알아볼 수 있는 정보는 없습니다.
-- 창만 캡처(`PrintWindow`)해서 다른 창이나 바탕 화면은 들어가지 않습니다.
+- 경로는 모두 예제 폴더(`C:\ByteSieveDemo`) 안입니다. 파일은 크기만 잡은 빈 파일이고, 이름(`web-shop`, `family-trip.mp4` 등)과
+  Git 저장소(작성자 `Demo`)는 지어낸 것입니다.
+- 사용자 폴더(TEMP·LOCALAPPDATA·APPDATA·USERPROFILE)·개발 도구 환경 변수·설정 키·스캔 기록·격리 폴더·WSL 목록을 모두 예제 폴더로 돌려서
+  실제 사용자 파일·캐시·기록·설정이 화면에 나오지 않습니다.
+- 실제 휴지통 용량이 나오는 [시스템 정리]와 실제 프로세스·시작 프로그램이 나오는 [부스터]는 찍지 않습니다.
+  드라이브·모니터 화면은 촬영한 PC의 하드웨어 값(드라이브 용량·이름 `Windows`, RAM·CPU)이며 개인을 알아볼 수 있는 정보는 없습니다.
+- 창은 활성화하지 않고 화면 밖에 띄워 그 창만 캡처(`PrintWindow`)하고, 찍기 전에 페이지 제목을 확인합니다(다른 페이지가 찍히지 않게).

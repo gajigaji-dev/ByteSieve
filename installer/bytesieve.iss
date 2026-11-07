@@ -22,6 +22,20 @@
   #define OutputDir "..\dist"
 #endif
 
+; 검증용 빌드(/DTestMode, tools/test_installer.ps1): 실제 설치본·설정과 겹치지 않게 AppId·이름·설정 키를 바꾸고,
+; 바로 가기를 만들지 않을 수 있게 한다(/NOICONS). 배포용은 아래 #else 값을 쓴다.
+#ifdef TestMode
+  #define AppIdValue "{{59F2B501-42F4-4B26-92A9-7BC6242C2D27}"
+  #define AppTitle "ByteSieve Installer Test"
+  #define SettingsKey "Software\ByteSieveTest\installer"
+  #define SetupName "ByteSieve-" + AppVersion + "-installer-test"
+#else
+  #define AppIdValue "{{76B7146F-FC3B-4E67-B142-1BA4B7B2CEBE}"
+  #define AppTitle "ByteSieve"
+  #define SettingsKey "Software\ByteSieve"
+  #define SetupName "ByteSieve-" + AppVersion + "-setup-x64"
+#endif
+
 ; 중국어 간체 번역: 컴파일러에 있으면 그것을, 없으면(예전 Inno Setup) 저장소의 사본을 쓴다.
 #if FileExists(AddBackslash(CompilerPath) + "Languages\ChineseSimplified.isl")
   #define ZhHansIsl "compiler:Languages\ChineseSimplified.isl"
@@ -30,26 +44,29 @@
 #endif
 
 [Setup]
-; AppId 는 업그레이드·제거를 같은 앱으로 알아보는 값이다. 절대 바꾸지 않는다.
-AppId={{76B7146F-FC3B-4E67-B142-1BA4B7B2CEBE}
-AppName=ByteSieve
+; AppId 는 업그레이드·제거를 같은 앱으로 알아보는 값이다. 배포용 값({76B7146F-...})은 절대 바꾸지 않는다.
+AppId={#AppIdValue}
+AppName={#AppTitle}
 AppVersion={#AppVersion}
-AppVerName=ByteSieve {#AppVersion}
+AppVerName={#AppTitle} {#AppVersion}
 AppPublisher=gajigaji04
 AppPublisherURL=https://github.com/gajigaji-dev/ByteSieve
 AppSupportURL=https://github.com/gajigaji-dev/ByteSieve/issues
 AppUpdatesURL=https://github.com/gajigaji-dev/ByteSieve/releases
 VersionInfoVersion={#AppVersion}
 PrivilegesRequired=lowest
-DefaultDirName={autopf}\ByteSieve
-DefaultGroupName=ByteSieve
+DefaultDirName={autopf}\{#AppTitle}
+DefaultGroupName={#AppTitle}
 DisableProgramGroupPage=yes
+#ifdef TestMode
+AllowNoIcons=yes
+#endif
 LicenseFile={#StageDir}\LICENSE.txt
 SetupIconFile=..\res\bytesieve.ico
 UninstallDisplayIcon={app}\bytesieve-gui.exe
-UninstallDisplayName=ByteSieve
+UninstallDisplayName={#AppTitle}
 OutputDir={#OutputDir}
-OutputBaseFilename=ByteSieve-{#AppVersion}-setup-x64
+OutputBaseFilename={#SetupName}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -104,10 +121,10 @@ Name: "{autodesktop}\ByteSieve"; Filename: "{app}\bytesieve-gui.exe"; Tasks: des
 
 [Registry]
 ; 설치 언어를 앱 표시 언어로. 이미 값이 있으면 그대로 둔다(createvalueifdoesntexist). 제거할 때도 지우지 않는다.
-Root: HKCU; Subkey: "Software\ByteSieve"; ValueType: string; ValueName: "Language"; ValueData: "ko"; Languages: korean; Flags: createvalueifdoesntexist
-Root: HKCU; Subkey: "Software\ByteSieve"; ValueType: string; ValueName: "Language"; ValueData: "en"; Languages: english; Flags: createvalueifdoesntexist
-Root: HKCU; Subkey: "Software\ByteSieve"; ValueType: string; ValueName: "Language"; ValueData: "ja"; Languages: japanese; Flags: createvalueifdoesntexist
-Root: HKCU; Subkey: "Software\ByteSieve"; ValueType: string; ValueName: "Language"; ValueData: "zh-Hans"; Languages: chinesesimplified; Flags: createvalueifdoesntexist
+Root: HKCU; Subkey: "{#SettingsKey}"; ValueType: string; ValueName: "Language"; ValueData: "ko"; Languages: korean; Flags: createvalueifdoesntexist
+Root: HKCU; Subkey: "{#SettingsKey}"; ValueType: string; ValueName: "Language"; ValueData: "en"; Languages: english; Flags: createvalueifdoesntexist
+Root: HKCU; Subkey: "{#SettingsKey}"; ValueType: string; ValueName: "Language"; ValueData: "ja"; Languages: japanese; Flags: createvalueifdoesntexist
+Root: HKCU; Subkey: "{#SettingsKey}"; ValueType: string; ValueName: "Language"; ValueData: "zh-Hans"; Languages: chinesesimplified; Flags: createvalueifdoesntexist
 
 [Run]
 Filename: "{app}\bytesieve-gui.exe"; Description: "{cm:LaunchProgram,ByteSieve}"; Flags: nowait postinstall skipifsilent

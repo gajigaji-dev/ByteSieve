@@ -127,8 +127,10 @@ GUI는 왼쪽 사이드바에서 목적별로 묶은 여덟 페이지와 아래 
 | 폴더 스캔 | 프로젝트 정리 |
 |---|---|
 | ![폴더 스캔](docs/screenshots/scan.png) | ![프로젝트 정리](docs/screenshots/cleanup.png) |
-| **격리 폴더** | **드라이브** |
-| ![격리 폴더](docs/screenshots/quarantine.png) | ![드라이브](docs/screenshots/drives.png) |
+| **개발 캐시** | **격리 폴더** |
+| ![개발 캐시](docs/screenshots/devcache.png) | ![격리 폴더](docs/screenshots/quarantine.png) |
+| **다크 모드** | **설정** |
+| ![다크 모드의 폴더 스캔](docs/screenshots/scan-dark.png) | ![설정](docs/screenshots/settings.png) |
 
 모든 페이지의 화면과 설명은 [docs/gui.md](docs/gui.md)에 있습니다(화면은 개인정보가 없는 예제 데이터로 찍었습니다).
 
@@ -165,7 +167,7 @@ ByteSieve/
 ├── docs/              상세 문서(screenshots/: 예제 데이터로 찍은 GUI 화면)
 ├── installer/         Inno Setup 설치 스크립트(bytesieve.iss), 배포 파일에 넣는 README.txt, 중국어 간체 번역
 ├── res/               exe 리소스: 앱 아이콘, 버전 정보, 앱 매니페스트(gui·cli)
-├── tools/             package.ps1(릴리스 패키지), make_icon.py(아이콘 생성)
+├── tools/             package.ps1(릴리스 패키지), test_installer.ps1(설치 프로그램 검증), screenshots.ps1(예제 데이터로 화면 촬영), make_icon.py(아이콘 생성)
 ├── src/
 │   ├── scanner, scan_model, scan_job, scan_history   폴더 열거(병렬 미리 열거·정밀 스캔)·트리 모델·스캔 스레드·변화 추적
 │   ├── scan_export                                   스캔 결과 CSV·HTML 내보내기
@@ -225,7 +227,6 @@ CLI 스캐너, JSON Lines 출력, 개발 환경 분석(공용 캐시 15종·WSL2
 - 번역 범위 확대: 상태 줄·오류 문구, 다른 일곱 페이지(시스템 정리·개발 캐시·프로젝트 정리·부스터 포함), 확인 창, HTML 보고서를 영어·일본어·중국어 간체로(지금은 사이드바·페이지 제목·설정 페이지와 폴더 스캔 페이지 컨트롤만)
 
 **배포·문서**
-- 스크린샷 다시 찍기: 사이드바로 바뀐 화면 전체(지금 `docs/screenshots`는 예전 위쪽 탭 화면), 시스템 정리·개발 캐시·설정·다크 모드 화면 추가, 프로젝트 정리 화면(`cleanup.png`)을 실제 확보 열이 보이게 갱신
 - 배포 이후([docs/release.md](docs/release.md#나중에-검토할-것)): 코드 서명(SmartScreen 경고 제거), winget 등록,
   설치 프로그램에서 `disk-scanner`를 PATH에 추가하는 선택, 업데이트 확인
 

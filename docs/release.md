@@ -52,6 +52,22 @@ ByteSieve는 설치형 exe(데스크톱 프로그램)와 포터블 ZIP으로 배
 | 지원 OS | Windows 10 이상, x64 |
 
 `AppId`(`{76B7146F-FC3B-4E67-B142-1BA4B7B2CEBE}`)는 업그레이드·제거를 같은 앱으로 알아보는 값이므로 **절대 바꾸지 않습니다**.
+
+### 설치 프로그램 자동 검증(`tools/test_installer.ps1`)
+
+같은 스크립트를 검증용(`/DTestMode`)으로 컴파일해, 실제 설치본·설정과 겹치지 않는 곳(다른 AppId·이름, 설정 키
+`HKCU\Software\ByteSieveTest\installer`, 임시 설치 폴더, 바로 가기 없음)에서 조용한 모드로 다음을 확인합니다.
+릴리스 워크플로도 태그 빌드마다 실행합니다.
+
+| 단계 | 확인 |
+|---|---|
+| 새로 설치(한국어) | 파일 4개·제거 프로그램, 제거 목록 버전, 언어 기록 `ko`, 설치된 `disk-scanner --version` |
+| 업그레이드(1.0.1, 영어 설치) | 제거 목록 버전 1.0.1, 사용자가 고른 언어(`ja`) 유지, 제거 프로그램 하나(같은 AppId) |
+| 앱 실행 중 업그레이드 | 뮤텍스를 감지해 설치하지 않음(조용한 모드는 취소로 끝남), 버전 그대로 |
+| 제거 | 제거 목록·프로그램 파일·제거 프로그램이 사라지고 언어 설정은 남음 |
+| 실제 위치 | `%LOCALAPPDATA%\Programs\ByteSieve`·`HKCU\Software\ByteSieve`·시작 메뉴·바탕 화면·배포용 제거 항목이 검증 전과 같음 |
+
+언어 선택 창·라이선스 화면·제거 뒤 안내 창·바로 가기처럼 화면을 봐야 하는 부분은 아래 확인 목록에서 사람이 봅니다.
 중국어 간체 번역은 컴파일러에 있으면 그것을, 없으면(예전 Inno Setup) `installer/languages/ChineseSimplified.isl`을 씁니다.
 
 ### 포터블 ZIP
@@ -65,6 +81,8 @@ ByteSieve는 설치형 exe(데스크톱 프로그램)와 포터블 ZIP으로 배
    README·`docs/*`의 기능 표·테스트 개수가 맞는지 확인합니다.
 2. **로컬 패키징**(선택): `powershell -ExecutionPolicy Bypass -File tools\package.ps1`
    (Release 빌드 → Release 테스트 → `dist\`에 설치 프로그램·ZIP·SHA256). Inno Setup이 없으면 `-NoInstaller`.
+   이어서 `tools\test_installer.ps1`로 설치·업그레이드·제거를 검증합니다(위 표).
+   UI가 바뀌었으면 `tools\screenshots.ps1`로 `docs/screenshots`를 다시 찍습니다([gui.md](gui.md#스크린샷)).
 3. **병합**: 릴리스 브랜치를 `main`에 병합합니다(CI 통과 확인).
 4. **태그**: `main`에서 `git tag v<버전>`(예: `git tag v1.0.0`) → `git push origin v1.0.0`.
    Actions가 패키지를 만들어 **릴리스 초안**에 올립니다.
