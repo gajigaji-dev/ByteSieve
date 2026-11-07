@@ -135,7 +135,8 @@ X:\.bytesieve-trash\                    격리 폴더(숨김, 드라이브마다
 
 [프로젝트 정리]·[시스템 정리] 탭과 CLI(`disk-scanner clean`)는 같은 정리 계획(`clean_plan`)으로 고르고 실행하므로, 이 문서의 보호 조건은
 GUI와 CLI에 똑같이 적용됩니다(구조는 [architecture.md](architecture.md#정리-계획탐지--계획--실행)). CLI는 여기에 더해 휴지통 비우기(영구 삭제)를
-지원하지 않고, `--apply` 없이는 아무것도 옮기지 않으며, 확인할 수 없는 입력에서는 `--yes` 없이 실행하지 않습니다([cli.md](cli.md#정리-disk-scanner-clean)).
+지원하지 않고, `--execute` 없이는(기본 `--dry-run`) 아무것도 옮기지 않으며, 확인할 수 없는 입력에서는 `--yes` 없이 실행하지 않습니다
+([cli.md](cli.md#정리-disk-scanner-clean)). `disk-scanner find`는 같은 탐지·판정으로 후보만 보여 주며 아무것도 바꾸지 않습니다.
 
 ## 시스템 정리
 

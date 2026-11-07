@@ -201,7 +201,8 @@ $env:BYTESIEVE_LANG = "ja"; build\Debug\bytesieve-gui.exe
 5. 끝나면 **정리** 열에 항목별 결과(`휴지통으로 이동됨`, `격리 폴더로 이동됨`, `건너뜀: …`, `실패: …`)가 표시되고,
    옮긴 항목은 Windows 휴지통 또는 **격리 폴더** 탭에서 복원할 수 있습니다.
 
-탐지 규칙과 보호 조건은 [cleanup.md](cleanup.md)를 참고하세요. 같은 정리를 CLI에서는 `disk-scanner clean project <폴더>`로 할 수 있습니다.
+탐지 규칙과 보호 조건은 [cleanup.md](cleanup.md)를 참고하세요. CLI에서는 `disk-scanner find <폴더>`로 같은 후보를 보고,
+`disk-scanner clean project <폴더>`로 같은 정리를 할 수 있습니다.
 
 ## 부스터
 

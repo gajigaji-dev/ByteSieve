@@ -272,7 +272,12 @@ add_test(NAME cli_track
                  -DHIST=${CMAKE_CURRENT_BINARY_DIR}/cli_track_history
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_track_check.cmake)
 
-# disk-scanner clean: 미리보기·거부·실행(픽스처의 격리 폴더로). system 은 사용자 폴더를 픽스처로 돌린다.
+# disk-scanner find·clean: 후보 탐색, dry-run·거부·실행(픽스처의 격리 폴더로), JSON 문서·JSON Lines.
+# system 은 사용자 폴더를 픽스처로 돌린다.
+add_test(NAME cli_find
+         COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:disk-scanner> -DMODE=find
+                 -DFIXTURE=${CMAKE_CURRENT_BINARY_DIR}/cli_find_fixture
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_clean_check.cmake)
 add_test(NAME cli_clean_project
          COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:disk-scanner> -DMODE=project
                  -DFIXTURE=${CMAKE_CURRENT_BINARY_DIR}/cli_clean_project_fixture

@@ -3,7 +3,8 @@
 ```
 disk-scanner [--max-depth N] [--jsonl] [--track [--history-dir DIR]] [--threads N] <directory>
 disk-scanner -h | --help
-disk-scanner clean project|system ...   # 정리: 아래 [정리](#정리-disk-scanner-clean) 참고
+disk-scanner find <directory> ...        # 정리 후보 찾기: 아래 [find](#정리-후보-찾기-disk-scanner-find) 참고
+disk-scanner clean project|system ...   # 정리: 아래 [clean](#정리-disk-scanner-clean) 참고
 ```
 
 | 옵션 | 설명 |
@@ -81,13 +82,55 @@ History:        saved to C:\Users\me\AppData\Local\ByteSieve\history\6f56c5d88fb
 
 `items`의 각 항목은 `{"path","kind":"grown|shrunk|added|removed","old","new","delta","uncertain"}`이고, `since`는 직전 스캔 시각(FILETIME, UTC)입니다.
 
-## 정리 (`disk-scanner clean`)
+## 정리 후보 찾기 (`disk-scanner find`)
 
-GUI의 [프로젝트 정리]·[시스템 정리] 탭과 **같은 탐지·계획·실행 코드**(`clean_plan`)를 씁니다. 기본은 미리보기이며, `--apply`를 줘야만 옮깁니다.
+프로젝트 정리 후보를 찾아 보여 주기만 합니다(읽기 전용, 아무것도 바꾸지 않음). GUI [프로젝트 정리]와 같은 탐지·판정(보호 경로·앱 데이터 폴더 제외, 실제 확보 용량)을 씁니다.
 
 ```
-disk-scanner clean project <directory> [--category LIST] [--eco LIST] [--apply [--yes]] [--jsonl]
-disk-scanner clean system [--include LIST] [--exclude LIST] [--apply [--yes]] [--jsonl]
+disk-scanner find <directory> [--category LIST] [--eco LIST] [--json | --jsonl]
+disk-scanner find -h | --help
+```
+
+| 옵션 | 설명 |
+|---|---|
+| `--category LIST` | 이 유형만(`node_modules`, `build`, `cache`, `temp`, `log`) |
+| `--eco LIST` | 이 개발 환경만(`node`, `python`, `rust`, `java`, `dotnet`, `cpp`, `go`, `generic`) |
+| `--json` | JSON 문서 하나(UTF-8)를 stdout에 쓴다 |
+| `--jsonl` | JSON Lines 이벤트(UTF-8)를 stdout에 쓴다 |
+
+후보는 파일 크기가 큰 것부터 나옵니다. 보호 경로 안의 후보도 `protected:<이유>`와 함께 보이며 `cleanable`이 아닙니다.
+
+```
+Cleanup candidates under D:\work: 3 found, 3 cleanable, reclaim 20.0 KiB (size 14.0 KiB)
+  #    Reclaim    Size       Type          Eco      Note                   Path
+  1    12.0 KiB   8.79 KiB   node_modules  node     confirmed              D:\work\web\node_modules
+  2    8.00 KiB   4.88 KiB   build         node     confirmed              D:\work\web\dist
+  3    0 B        302 B      build         generic  guessed                D:\work\loose\dist
+Nothing was changed. Use 'disk-scanner clean project' to see the cleanup plan and move them to the Recycle Bin.
+```
+
+`Note`: `confirmed`(같은 폴더에 프로젝트 파일이 있음) 또는 `guessed`(이름으로만 추정), `incomplete`(일부를 읽지 못해 용량이 더 클 수 있음), `hardlinks`(하드 링크로 다른 곳과 나누는 파일이 있어 실제 확보에서 뺌), `protected:<이유>`.
+
+```json
+{"version":1,"command":"find","root":"D:\\work","status":"complete",
+ "summary":{"candidates":3,"cleanable":3,"bytes":14306,"reclaim":20480},
+ "candidates":[{"index":1,"category":"node_modules","eco":"node","path":"D:\\work\\web\\node_modules",
+   "bytes":9002,"reclaim":12288,"shared":0,"files":1,"dir":true,"confirmed":true,"guessed":false,
+   "incomplete":false,"cleanable":true,"state":"ready"}, ...],
+ "exit_code":0}
+```
+
+(실제 출력은 한 줄입니다.) `--jsonl`은 `find_start` → 후보마다 `find_candidate`(위 `candidates` 항목과 같은 필드) → `complete`(`status`·`candidates`·`cleanable`·`bytes`·`reclaim`·`exit_code`) 순서입니다.
+
+## 정리 (`disk-scanner clean`)
+
+GUI의 [프로젝트 정리]·[시스템 정리] 탭과 **같은 탐지·계획·실행 코드**(`clean_plan`)를 씁니다. 기본은 `--dry-run`(계획과 예상 결과만 출력)이며, `--execute`를 줘야만 옮깁니다.
+
+```
+disk-scanner clean project <directory> [--category LIST] [--eco LIST]
+                           [--dry-run | --execute [--yes]] [--json | --jsonl]
+disk-scanner clean system [--include LIST] [--exclude LIST]
+                          [--dry-run | --execute [--yes]] [--json | --jsonl]
 disk-scanner clean -h | --help
 ```
 
@@ -99,11 +142,14 @@ disk-scanner clean -h | --help
 | `--eco LIST` | project: 이 개발 환경만(`node`, `python`, `rust`, `java`, `dotnet`, `cpp`, `go`, `generic`) |
 | `--include LIST` | system: 이 대상도 고른다. 공용 개발 캐시는 기본으로 고르지 않으므로 이름(`npm`, `pip`, `gradle`, `gradle_wrapper`, `cargo_registry`, `cargo_git`, `nuget_packages`, `nuget_http`)이나 `dev_cache`(전체)로 지정 |
 | `--exclude LIST` | system: 이 대상은 고르지 않는다(`user_temp`, `wer`, `chrome`, `edge`, `firefox`, 개발 캐시 이름) |
-| `--apply` | 계획을 보여 준 뒤 확인(`[y/N]`, 기본 아니요)을 받고 휴지통(없는 드라이브는 격리 폴더)으로 옮긴다 |
-| `--yes` | 확인을 묻지 않는다(`--apply`와 함께만). 표준 입력이 대화형이 아니면(파이프·파일) `--yes` 없이는 실행하지 않고 종료 코드 2 |
-| `--jsonl` | 계획·결과를 UTF-8 JSON Lines로 stdout에 쓴다(확인 질문은 stderr) |
+| `--dry-run` | 계획과 예상 결과(옮길 항목 수, 휴지통을 비우면 확보될 용량)만 보인다. 기본 동작과 같다 |
+| `--execute` | 계획을 보여 준 뒤 확인(`[y/N]`, 기본 아니요)을 받고 휴지통(없는 드라이브는 격리 폴더)으로 옮긴다. `--apply`는 예전 이름으로 계속 동작한다 |
+| `--yes` | 확인을 묻지 않는다(`--execute`와 함께만). 표준 입력이 대화형이 아니면(파이프·파일) `--yes` 없이는 실행하지 않고 종료 코드 2 |
+| `--json` | JSON 문서 하나(UTF-8)를 stdout에 쓴다(안내·확인 질문은 stderr) |
+| `--jsonl` | JSON Lines 이벤트(UTF-8)를 stdout에 쓴다(안내·확인 질문은 stderr) |
 
-목록은 쉼표로 구분하고 `--include=npm,pip`처럼 `=` 형식도 받습니다. 이름이 `clean`인 폴더를 스캔하려면 `disk-scanner -- clean` 또는 `disk-scanner .\clean`을 쓰세요.
+`--dry-run`과 `--execute`, `--json`과 `--jsonl`은 함께 쓸 수 없습니다. 목록은 쉼표로 구분하고 `--include=npm,pip`처럼 `=` 형식도 받습니다.
+이름이 `clean`·`find`인 폴더를 스캔하려면 `disk-scanner -- clean` 또는 `disk-scanner .\clean`을 쓰세요.
 
 **안전 규칙**(GUI와 같음)
 
@@ -112,13 +158,11 @@ disk-scanner clean -h | --help
 - **휴지통 비우기(영구 삭제)는 CLI에서 지원하지 않습니다.** `--include recycle_bin`은 인자 오류입니다.
 - 일부 항목이 실패해도 나머지를 계속하고 항목별 결과를 남깁니다.
 
-**종료 코드**: `0` 미리보기 완료 또는 고른 항목을 모두 옮김(고른 것이 없거나 확인에서 취소한 경우 포함), `1` 일부 폴더를 읽지 못했거나 옮기지 못한(실패·건너뜀) 항목이 있음, `2` 인자 오류·탐지 불가·확인할 수 없는데 `--yes` 없음.
-
 ```powershell
-build\Debug\disk-scanner.exe clean project D:\work                          # 계획만 출력
-build\Debug\disk-scanner.exe clean project D:\work --category node_modules --apply
-build\Debug\disk-scanner.exe clean system --include npm,pip --exclude chrome
-build\Debug\disk-scanner.exe clean system --include dev_cache --apply --yes  # 스크립트용
+build\Debug\disk-scanner.exe clean project D:\work                           # dry-run(계획·예상 결과)
+build\Debug\disk-scanner.exe clean project D:\work --category node_modules --execute
+build\Debug\disk-scanner.exe clean system --include npm,pip --exclude chrome --dry-run
+build\Debug\disk-scanner.exe clean system --include dev_cache --execute --yes --json  # 스크립트용
 ```
 
 ```
@@ -127,7 +171,9 @@ Project cleanup plan: D:\work
   1    [x]  8.00 KiB   4.88 KiB   ready            build                    D:\work\web\dist
   2    [x]  12.0 KiB   8.79 KiB   ready            node_modules             D:\work\web\node_modules
 Selected 2 of 2 selectable target(s): reclaim 20.0 KiB (size 13.7 KiB)
-Preview only - nothing was moved. Add --apply to move the selected targets to the Recycle Bin.
+Dry run - nothing was moved. Expected result: 2 item(s) in 2 target(s) would be moved to the Recycle Bin
+(quarantine folder on drives without one), freeing about 20.0 KiB once it is emptied.
+Add --execute to move them.
 ```
 
 - `Sel`: `[x]` 고름, `[ ]` 고를 수 있음, `[-]` 고를 수 없음(이유는 `State`: `deny_protected`, `app_running`, `not_found` 등).
@@ -135,14 +181,37 @@ Preview only - nothing was moved. Add --apply to move the selected targets to th
   옮긴 항목은 휴지통·격리 폴더를 비워야 공간이 확보됩니다.
 - 괄호 안 표시: `manual`(직접 골라야 함), `caution`(정리 뒤 인터넷 없이 빌드할 수 없음), `guessed`(프로젝트 파일 없이 이름으로 추정), `permanent`(영구 삭제, CLI에서 고를 수 없음).
 
-JSON Lines 이벤트 순서는 `clean_plan` → 대상마다 `clean_target` → `clean_summary` → (`--apply`면 실행한 대상마다 `clean_result`) → `complete`입니다.
+**JSON 문서(`--json`)**: 실행이 끝난 뒤 한 번에 씁니다(실제 출력은 한 줄).
 
 ```json
-{"event":"clean_plan","source":"project","root":"D:\\work","targets":2}
-{"event":"clean_target","index":2,"id":"node_modules","label":"D:\\work\\web\\node_modules","location":"D:\\work\\web\\node_modules","state":"ready","bytes":9002,"reclaim":12288,"shared":0,"files":1,"selectable":true,"selected":true,"manual":false,"caution":false,"guessed":false,"permanent":false}
-{"event":"clean_summary","selected":2,"selectable":2,"bytes":14004,"reclaim":20480,"caution":0,"manual":0,"guessed":0,"apply":true}
-{"event":"clean_result","index":2,"id":"node_modules","moved":1,"quarantined":0,"failed":0,"skipped":0,"cancelled":0,"moved_bytes":9002,"entries":[{"path":"D:\\work\\web\\node_modules","status":"moved","skip":"none","code":0,"moved_to":"D:\\$RECYCLE.BIN\\...\\$R1A2B3C"}]}
-{"event":"complete","applied":true,"moved":2,"quarantined":0,"failed":0,"skipped":0,"moved_bytes":14004,"exit_code":0}
+{"version":1,"command":"clean","source":"project","mode":"execute","root":"D:\\work",
+ "status":"complete","executed":true,
+ "summary":{"selected":2,"selectable":2,"entries":2,"bytes":14004,"reclaim":20480,
+            "caution":0,"manual":0,"guessed":0},
+ "targets":[{"index":2,"id":"node_modules","label":"D:\\work\\web\\node_modules",
+             "location":"D:\\work\\web\\node_modules","state":"ready","bytes":9002,"reclaim":12288,
+             "shared":0,"files":1,"selectable":false,"selected":false,"manual":false,"caution":false,
+             "guessed":false,"permanent":false,
+             "result":{"moved":1,"quarantined":0,"failed":0,"skipped":0,"cancelled":0,"moved_bytes":9002,
+                       "entries":[{"path":"D:\\work\\web\\node_modules","status":"moved","skip":"none",
+                                   "code":0,"moved_to":"D:\\$RECYCLE.BIN\\...\\$R1A2B3C"}]}}, ...],
+ "totals":{"targets":2,"moved":2,"quarantined":0,"failed":0,"skipped":0,"cancelled":0,"moved_bytes":14004},
+ "note":null,"exit_code":0}
 ```
 
-`status`는 휴지통 이동 결과 식별자(`moved`, `quarantined`, `failed`, `deny_protected`, `changed` 등), `skip`은 실행 직전 확인으로 건너뛴 이유(`none`, `recent`, `app_running`)입니다.
+- `mode`: `dry-run` 또는 `execute`. `executed`가 `false`면(dry-run, 고른 것 없음, 확인 취소, `--yes` 없음) `totals`와 각 대상의 `result`는 `null`이고 `note`에 이유가 있습니다.
+- `status`: 탐지 상태(`complete`, `partial` = 일부 폴더를 읽지 못함). 탐지 자체가 실패하면 `{"version":1,…,"status":"failed","error":"cannot scan …","exit_code":2}`만 씁니다.
+- `result.entries[].status`는 휴지통 이동 결과 식별자(`moved`, `quarantined`, `failed`, `deny_protected`, `changed` 등), `skip`은 실행 직전 확인으로 건너뛴 이유(`none`, `recent`, `app_running`)입니다.
+
+**JSON Lines(`--jsonl`)** 이벤트 순서는 `clean_plan` → 대상마다 `clean_target` → `clean_summary`(`mode` 포함, 예전 이름 `apply`도 남김) → (`--execute`면 실행한 대상마다 `clean_result`) → `complete`입니다.
+`clean_target`·`clean_result`의 필드는 위 JSON 문서의 `targets` 항목·`result`와 같습니다.
+
+## 종료 코드(`find`·`clean`)
+
+| 코드 | 이름 | 뜻 |
+|---|---|---|
+| `0` | 완료 | 모든 폴더를 읽었고, `--execute`면 고른 항목을 모두 옮김. 고른 것이 없거나 확인에서 취소한 경우도 아무것도 바꾸지 않았으므로 0 |
+| `1` | 일부 | 일부 폴더를 읽지 못했거나(용량이 더 클 수 있음), 실행에서 옮기지 못한 항목(실패·건너뜀·취소)이 있음 |
+| `2` | 오류 | 인자 오류, 탐지 불가(폴더를 열지 못함), 메모리 부족·출력 실패, 확인할 수 없는데 `--yes` 없음 |
+
+`--json`·`--jsonl` 출력의 `exit_code`는 프로세스 종료 코드와 같습니다.

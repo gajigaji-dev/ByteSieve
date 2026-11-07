@@ -77,7 +77,9 @@ static void test_parse(void)
     CHECK(parse(&o, err, 4, L"clean", L"project", L"a", L"b") == CLI_PARSE_ERROR);
     CHECK(parse(&o, err, 3, L"clean", L"system", L"C:\\x") == CLI_PARSE_ERROR);
     CHECK(parse(&o, err, 4, L"clean", L"project", L"D:\\w", L"--yes") == CLI_PARSE_ERROR);
-    CHECK(wcsstr(err, L"--apply") != NULL);
+    CHECK(wcsstr(err, L"--execute") != NULL);
+    CHECK(parse(&o, err, 5, L"clean", L"project", L"D:\\w", L"--dry-run", L"--yes") ==
+          CLI_PARSE_ERROR);
     CHECK(parse(&o, err, 4, L"clean", L"project", L"D:\\w", L"--force") == CLI_PARSE_ERROR);
     CHECK(parse(&o, err, 5, L"clean", L"project", L"D:\\w", L"--category", L"music") ==
           CLI_PARSE_ERROR);
@@ -91,6 +93,57 @@ static void test_parse(void)
     CHECK(parse(&o, err, 4, L"clean", L"system", L"--include", L"npm,recycle_bin") ==
           CLI_PARSE_ERROR);
     CHECK(wcsstr(err, L"Recycle Bin") != NULL);
+}
+
+/* --dry-run·--execute(--apply 는 예전 이름)·--json, 서로 함께 쓸 수 없는 조합. */
+static void test_parse_modes(void)
+{
+    CliCleanOptions o;
+    wchar_t err[256];
+
+    CHECK(parse(&o, err, 4, L"clean", L"project", L"D:\\w", L"--dry-run") == CLI_PARSE_OK);
+    CHECK(o.dry_run && !o.apply && !o.json);
+    CHECK(parse(&o, err, 5, L"clean", L"project", L"D:\\w", L"--execute", L"--yes") ==
+          CLI_PARSE_OK);
+    CHECK(o.apply && o.yes && !o.dry_run);
+    CHECK(parse(&o, err, 4, L"clean", L"system", L"--apply", L"--json") == CLI_PARSE_OK);
+    CHECK(o.apply && o.json && !o.jsonl);
+    CHECK(parse(&o, err, 5, L"clean", L"project", L"D:\\w", L"--dry-run", L"--execute") ==
+          CLI_PARSE_ERROR);
+    CHECK(wcsstr(err, L"--dry-run") != NULL);
+    CHECK(parse(&o, err, 5, L"clean", L"project", L"D:\\w", L"--json", L"--jsonl") ==
+          CLI_PARSE_ERROR);
+    CHECK(wcsstr(err, L"--jsonl") != NULL);
+}
+
+/* find: 폴더 하나, --category·--eco·--json·--jsonl 만. 실행 관련 옵션·시스템 대상 옵션은 오류. */
+static void test_parse_find(void)
+{
+    CliCleanOptions o;
+    wchar_t err[256];
+
+    CHECK(parse(&o, err, 2, L"find", L"D:\\work") == CLI_PARSE_OK);
+    CHECK(o.command == CLI_CLEAN_FIND && wcscmp(o.target, L"D:\\work") == 0 && !o.json);
+    CHECK(parse(&o, err, 6, L"find", L"--category=build", L"--eco", L"rust,go", L"--json",
+                L"D:\\w") == CLI_PARSE_OK);
+    CHECK(o.categories == CLEANUP_MASK(CLEANUP_BUILD) && o.json);
+    CHECK(o.ecos == (CLEANUP_ECO_BIT(CLEANUP_ECO_RUST) | CLEANUP_ECO_BIT(CLEANUP_ECO_GO)));
+    CHECK(parse(&o, err, 3, L"find", L"--jsonl", L"D:\\w") == CLI_PARSE_OK && o.jsonl);
+    CHECK(parse(&o, err, 3, L"find", L"--", L"--json") == CLI_PARSE_OK);
+    CHECK(wcscmp(o.target, L"--json") == 0 && !o.json);
+    CHECK(parse(&o, err, 2, L"find", L"-h") == CLI_PARSE_HELP);
+
+    CHECK(parse(&o, err, 1, L"find") == CLI_PARSE_ERROR);
+    CHECK(wcsstr(err, L"find") != NULL);
+    CHECK(parse(&o, err, 3, L"find", L"a", L"b") == CLI_PARSE_ERROR);
+    CHECK(parse(&o, err, 3, L"find", L"D:\\w", L"--execute") == CLI_PARSE_ERROR);
+    CHECK(wcsstr(err, L"never changes") != NULL);
+    CHECK(parse(&o, err, 3, L"find", L"D:\\w", L"--apply") == CLI_PARSE_ERROR);
+    CHECK(parse(&o, err, 3, L"find", L"D:\\w", L"--dry-run") == CLI_PARSE_ERROR);
+    CHECK(parse(&o, err, 3, L"find", L"D:\\w", L"--yes") == CLI_PARSE_ERROR);
+    CHECK(parse(&o, err, 4, L"find", L"D:\\w", L"--include", L"npm") == CLI_PARSE_ERROR);
+    CHECK(parse(&o, err, 4, L"find", L"D:\\w", L"--json", L"--jsonl") == CLI_PARSE_ERROR);
+    CHECK(parse(&o, err, 4, L"find", L"D:\\w", L"--category", L"music") == CLI_PARSE_ERROR);
 }
 
 static CleanPlanTarget *add(CleanPlan *plan, CleanSource src, const wchar_t *id, unsigned flags,
@@ -185,12 +238,31 @@ static void test_select_project(void)
     CHECK(parse(&o, err, 5, L"clean", L"project", L"D:\\w", L"--category", L"cache") ==
           CLI_PARSE_OK);
     CHECK(cli_clean_select(&plan, &o) == 0); /* 보호 경로는 거른 뒤에도 고르지 않는다 */
+
+    /* find 의 거르기: 보호된 후보도 맞으면 보인다(고르기와 별개), 시스템 대상은 아니다 */
+    CHECK(parse(&o, err, 2, L"find", L"D:\\w") == CLI_PARSE_OK);
+    CHECK(cli_clean_matches(&plan.items[0], &o) && cli_clean_matches(&plan.items[3], &o));
+    CHECK(parse(&o, err, 4, L"find", L"D:\\w", L"--category", L"cache") == CLI_PARSE_OK);
+    CHECK(!cli_clean_matches(&plan.items[0], &o) && cli_clean_matches(&plan.items[3], &o));
+    CHECK(parse(&o, err, 6, L"find", L"D:\\w", L"--category", L"build", L"--eco", L"rust") ==
+          CLI_PARSE_OK);
+    CHECK(!cli_clean_matches(&plan.items[1], &o) && cli_clean_matches(&plan.items[2], &o));
     clean_plan_free(&plan);
+    {
+        CleanPlan sys;
+        clean_plan_init(&sys);
+        add(&sys, CLEAN_SOURCE_SYSTEM, L"user_temp", 0, CLEANUP_CACHE, CLEANUP_ECO_GENERIC);
+        CHECK(parse(&o, err, 2, L"find", L"D:\\w") == CLI_PARSE_OK);
+        CHECK(!cli_clean_matches(&sys.items[0], &o) && !cli_clean_matches(NULL, &o));
+        clean_plan_free(&sys);
+    }
 }
 
 int main(void)
 {
     test_parse();
+    test_parse_modes();
+    test_parse_find();
     test_select_system();
     test_select_project();
     if (g_failures != 0) {

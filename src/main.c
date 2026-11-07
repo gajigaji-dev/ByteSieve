@@ -244,25 +244,35 @@ static int console_confirm(const CleanPlanSummary *s, void *ctx)
     return _wcsicmp(line, L"y") == 0 || _wcsicmp(line, L"yes") == 0;
 }
 
-/* disk-scanner clean ...: GUI 정리 탭과 같은 탐지·계획·실행(cli_clean.h). */
+/* disk-scanner clean ... / find ...: GUI 정리 탭과 같은 탐지·계획·실행(cli_clean.h). argv[0] 이 명령. */
 static int run_clean(int argc, wchar_t **argv)
 {
     CliCleanOptions opts;
     wchar_t err[512];
+    int find = wcscmp(argv[0], L"find") == 0;
 
     switch (cli_clean_parse_args(argc, argv, &opts, err, sizeof(err) / sizeof(err[0]))) {
     case CLI_PARSE_HELP:
         set_wide_mode(stdout);
-        cli_clean_print_usage(stdout);
+        if (find) {
+            cli_find_print_usage(stdout);
+        } else {
+            cli_clean_print_usage(stdout);
+        }
         return EXIT_COMPLETE;
     case CLI_PARSE_ERROR:
         fwprintf(stderr, L"error: %ls\n\n", err);
-        cli_clean_print_usage(stderr);
+        if (find) {
+            cli_find_print_usage(stderr);
+        } else {
+            cli_clean_print_usage(stderr);
+        }
         return EXIT_FATAL;
     default:
         break;
     }
-    if (opts.jsonl) {
+    /* JSON 출력의 stdout 은 UTF-8 바이트를 fwrite 로만 쓴다. */
+    if (opts.json || opts.jsonl) {
         _setmode(_fileno(stdout), _O_BINARY);
     } else {
         set_wide_mode(stdout);
@@ -278,8 +288,8 @@ int wmain(int argc, wchar_t **argv)
     CliParseResult parsed;
 
     set_wide_mode(stderr);
-    /* 정리 명령. 이름이 clean 인 폴더를 스캔하려면 "disk-scanner -- clean" 또는 ".\clean". */
-    if (argc >= 2 && wcscmp(argv[1], L"clean") == 0) {
+    /* 정리 명령. 이름이 clean·find 인 폴더를 스캔하려면 "disk-scanner -- clean" 또는 ".\clean". */
+    if (argc >= 2 && (wcscmp(argv[1], L"clean") == 0 || wcscmp(argv[1], L"find") == 0)) {
         return run_clean(argc - 1, argv + 1);
     }
     parsed = cli_parse_args(argc, argv, &opts, err, sizeof(err) / sizeof(err[0]));
