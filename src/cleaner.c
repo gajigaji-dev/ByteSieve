@@ -3,7 +3,6 @@
 #include <objbase.h>
 #include <shellapi.h>
 #include <shlobj.h>
-#include <tlhelp32.h>
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -265,30 +264,7 @@ static int target_add_entry(CleanerTarget *t, CleanupItem *item, wchar_t *root)
 
 int cleaner_app_running_system(const wchar_t *exe_name, void *ctx)
 {
-    HANDLE snap;
-    PROCESSENTRY32W pe;
-    int found = 0;
-
-    (void)ctx;
-    if (exe_name == NULL) {
-        return 0;
-    }
-    snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap == INVALID_HANDLE_VALUE) {
-        return 1; /* 확인할 수 없으면 실행 중으로 본다(정리하지 않는 쪽) */
-    }
-    memset(&pe, 0, sizeof(pe));
-    pe.dwSize = sizeof(pe);
-    if (Process32FirstW(snap, &pe)) {
-        do {
-            if (_wcsicmp(pe.szExeFile, exe_name) == 0) {
-                found = 1;
-                break;
-            }
-        } while (Process32NextW(snap, &pe));
-    }
-    CloseHandle(snap);
-    return found;
+    return clean_plan_app_running_system(exe_name, ctx);
 }
 
 int cleaner_query_recycle_system(uint64_t *bytes, uint64_t *items, uint32_t *code, void *ctx)
@@ -311,20 +287,7 @@ int cleaner_query_recycle_system(uint64_t *bytes, uint64_t *items, uint32_t *cod
 
 int cleaner_empty_recycle_system(uint32_t *code, void *ctx)
 {
-    HRESULT hr = SHEmptyRecycleBinW(NULL, NULL,
-                                    SHERB_NOCONFIRMATION | SHERB_NOPROGRESSUI | SHERB_NOSOUND);
-    uint64_t bytes = 0, items = 0;
-    uint32_t qcode = 0;
-
-    if (SUCCEEDED(hr)) {
-        return 0;
-    }
-    /* 이미 비어 있으면 실패 코드를 돌려주는 경우가 있어 다시 조회해 확인한다. */
-    if (cleaner_query_recycle_system(&bytes, &items, &qcode, ctx) == 0 && items == 0) {
-        return 0;
-    }
-    *code = (uint32_t)hr;
-    return -1;
+    return clean_plan_empty_recycle_system(code, ctx);
 }
 
 static CleanerOps resolve_ops(const CleanerOps *ops)
@@ -1265,30 +1228,89 @@ int cleaner_scan_finish(CleanerScanJob *job, CleanerList *out)
     return rc;
 }
 
-/* ---- 실행 ---- */
+/* ---- 계획 ---- */
 
-typedef struct {
-    size_t target;
-    CleanerKind kind;
-    CleanupItem item; /* path 소유 */
-    wchar_t *root;
-} RunEntry;
+/* 계획 대상 이름: 개발 캐시는 도구·캐시 이름, 브라우저는 프로필 수를 덧붙인다(GUI 대상 칸과 같다). */
+static void plan_label(const CleanerTarget *t, wchar_t *buf, size_t len)
+{
+    const CleanerKindInfo *k = cleaner_kind_info(t->kind);
+
+    if (t->kind == CLEANER_DEV_CACHE && t->label != NULL) {
+        swprintf(buf, len, L"%ls", t->label);
+    } else if (t->label != NULL) {
+        swprintf(buf, len, L"%ls (%ls)", k->name, t->label);
+    } else {
+        swprintf(buf, len, L"%ls", k->name);
+    }
+}
+
+const wchar_t *cleaner_target_id(const CleanerTarget *t)
+{
+    const DevCacheKindInfo *d;
+
+    if (t == NULL) {
+        return L"";
+    }
+    if (t->kind == CLEANER_DEV_CACHE && (d = dev_cache_kind_info(t->dev_kind)) != NULL) {
+        return d->id;
+    }
+    return cleaner_kind_info(t->kind) != NULL ? cleaner_kind_info(t->kind)->id : L"";
+}
+
+int cleaner_build_plan(const CleanerList *list, CleanPlan *plan)
+{
+    size_t i, j;
+
+    clean_plan_free(plan);
+    for (i = 0; list != NULL && i < list->len; i++) {
+        const CleanerTarget *src = &list->items[i];
+        const CleanerKindInfo *k = cleaner_kind_info(src->kind);
+        CleanPlanTarget *t;
+        wchar_t label[256];
+
+        plan_label(src, label, sizeof(label) / sizeof(label[0]));
+        t = clean_plan_add(plan, CLEAN_SOURCE_SYSTEM, cleaner_target_id(src), label,
+                           src->location);
+        if (t == NULL) {
+            goto fail;
+        }
+        t->origin = i;
+        t->ready = cleaner_target_runnable(src);
+        t->state = src->kind == CLEANER_DEV_CACHE && src->dev_status != DEV_CACHE_FOUND
+                       ? dev_cache_status_name(src->dev_status)
+                       : cleaner_status_name(src->status);
+        t->bytes = src->bytes;
+        t->reclaim = src->reclaim_bytes;
+        t->shared = src->shared_bytes;
+        t->files = src->files;
+        t->category = CLEANUP_CACHE;
+        t->eco = CLEANUP_ECO_GENERIC;
+        t->flags = (cleaner_target_manual_only(src) ? CLEAN_PLAN_MANUAL : 0u) |
+                   (cleaner_target_caution(src) ? CLEAN_PLAN_CAUTION : 0u) |
+                   (k != NULL && k->permanent ? CLEAN_PLAN_PERMANENT : 0u) |
+                   (src->kind == CLEANER_USER_TEMP || src->kind == CLEANER_WER
+                        ? CLEAN_PLAN_CHECK_RECENT
+                        : 0u);
+        if (k != NULL && k->app != NULL && (t->app = path_dup(k->app)) == NULL) {
+            goto fail;
+        }
+        for (j = 0; j < src->entry_count; j++) {
+            if (clean_plan_add_entry(t, &src->entries[j].item, src->entries[j].root) != 0) {
+                goto fail;
+            }
+        }
+    }
+    return 0;
+fail:
+    clean_plan_free(plan);
+    return -1;
+}
+
+/* ---- 실행(계획 실행 엔진을 감싼다) ---- */
 
 struct CleanerRunJob {
-    HANDLE thread;
-    CleanerOps ops;
-    cleaner_notify_fn notify;
-    void *ctx;
-    volatile LONG cancel;
-    CRITICAL_SECTION lock;
-    CleanerRunSnapshot snap;
-
-    RunEntry *entries;
-    size_t entry_count;
-    size_t target_count;
-    int recycle;
-    uint64_t recycle_bytes;
-    CleanerRunResult result;
+    CleanPlan plan;
+    CleanPlanRunJob *job; /* 실행할 항목이 없으면 NULL */
 };
 
 void cleaner_run_result_free(CleanerRunResult *r)
@@ -1307,142 +1329,13 @@ void cleaner_run_result_free(CleanerRunResult *r)
     memset(r, 0, sizeof(*r));
 }
 
-/* 실행 직전 다시 확인: 최근에 바뀌었거나 확인할 수 없으면 1(옮기지 않음). 없으면 0(trash 가 MISSING). */
-static int recently_changed(const CleanupItem *item, uint64_t threshold)
-{
-    WIN32_FILE_ATTRIBUTE_DATA fa;
-    WalkResult w;
-    CancelCtx cc;
-    uint64_t t;
-
-    if (!GetFileAttributesExW(item->path, GetFileExInfoStandard, &fa)) {
-        DWORD err = GetLastError();
-        return !(err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND);
-    }
-    t = ft64(fa.ftLastWriteTime) > ft64(fa.ftCreationTime) ? ft64(fa.ftLastWriteTime)
-                                                           : ft64(fa.ftCreationTime);
-    if (t >= threshold) {
-        return 1;
-    }
-    if (!(fa.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ||
-        (fa.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
-        return 0;
-    }
-    memset(&w, 0, sizeof(w));
-    memset(&cc, 0, sizeof(cc));
-    if (walk_tree(item->path, threshold, &cc, &w) != 0) {
-        return 1;
-    }
-    return w.stopped || w.incomplete || w.newest >= threshold;
-}
-
-static void run_notify(CleanerRunJob *job)
-{
-    if (job->notify != NULL) {
-        job->notify(0, job->ctx);
-    }
-}
-
-static DWORD WINAPI run_job_main(LPVOID param)
-{
-    CleanerRunJob *job = param;
-    HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
-    CleanupGuard guard;
-    CleanerRunResult *r = &job->result;
-    uint64_t threshold = recent_threshold(&job->ops);
-    size_t i, last_target = (size_t)-1;
-    int app_running = 0;
-
-    /* 1. 휴지통 비우기(영구 삭제): 다른 항목을 옮기기 전에 한다. */
-    if (job->recycle && job->cancel == 0) {
-        uint32_t code = 0;
-        EnterCriticalSection(&job->lock);
-        job->snap.emptying_recycle = 1;
-        LeaveCriticalSection(&job->lock);
-        run_notify(job);
-        r->recycle_emptied = job->ops.empty_recycle(&code, job->ops.ctx) == 0;
-        r->recycle_code = r->recycle_emptied ? 0 : code;
-        r->recycle_bytes = r->recycle_emptied ? job->recycle_bytes : 0;
-        EnterCriticalSection(&job->lock);
-        job->snap.emptying_recycle = 0;
-        LeaveCriticalSection(&job->lock);
-        run_notify(job);
-    }
-
-    /* 2. 나머지 항목: 같은 안전 장치(cleanup_trash_one)로 휴지통·격리 폴더로. */
-    cleanup_guard_init(&guard);
-    cleanup_guard_add_system(&guard);
-    for (i = 0; i < job->entry_count; i++) {
-        RunEntry *e = &job->entries[i];
-        CleanerEntryOutcome *o = &r->entries[i];
-        CleanerTargetResult *tr = &r->targets[e->target];
-        const CleanerKindInfo *k = cleaner_kind_info(e->kind);
-
-        if (e->target != last_target) {
-            last_target = e->target;
-            app_running = k->app != NULL && job->ops.app_running(k->app, job->ops.ctx);
-        }
-        if (job->cancel != 0) {
-            o->trash.status = CLEANUP_TRASH_CANCELLED;
-            tr->cancelled++;
-            r->cancelled = 1;
-        } else if (app_running) {
-            o->skip = CLEANER_SKIP_APP_RUNNING;
-            tr->skipped++;
-        } else if ((e->kind == CLEANER_USER_TEMP || e->kind == CLEANER_WER) &&
-                   recently_changed(&e->item, threshold)) {
-            o->skip = CLEANER_SKIP_RECENT;
-            tr->skipped++;
-        } else {
-            cleanup_trash_one(&guard, e->root, &e->item, &o->trash);
-            if (o->trash.status == CLEANUP_TRASH_MOVED ||
-                o->trash.status == CLEANUP_TRASH_QUARANTINED) {
-                tr->moved++;
-                tr->quarantined += o->trash.status == CLEANUP_TRASH_QUARANTINED;
-                tr->moved_bytes += e->item.bytes;
-            } else {
-                tr->failed++;
-            }
-        }
-        EnterCriticalSection(&job->lock);
-        job->snap.done = i + 1;
-        if (o->skip == CLEANER_SKIP_NONE && (o->trash.status == CLEANUP_TRASH_MOVED ||
-                                             o->trash.status == CLEANUP_TRASH_QUARANTINED)) {
-            job->snap.moved++;
-            job->snap.moved_bytes += e->item.bytes;
-        } else if (o->trash.status != CLEANUP_TRASH_CANCELLED) {
-            job->snap.failed++;
-        }
-        LeaveCriticalSection(&job->lock);
-        run_notify(job);
-    }
-    cleanup_guard_free(&guard);
-    if (SUCCEEDED(hr)) {
-        CoUninitialize();
-    }
-    if (job->notify != NULL) {
-        job->notify(1, job->ctx);
-    }
-    return 0;
-}
-
-static void free_run_entries(CleanerRunJob *job)
-{
-    size_t i;
-
-    for (i = 0; i < job->entry_count; i++) {
-        free(job->entries[i].item.path);
-        free(job->entries[i].root);
-    }
-    free(job->entries);
-    job->entries = NULL;
-}
-
 CleanerRunJob *cleaner_run_start(const CleanerList *list, const int *selected,
                                  const CleanerOps *ops, cleaner_notify_fn notify, void *ctx)
 {
     CleanerRunJob *job;
-    size_t i, j, n = 0;
+    CleanerOps r;
+    CleanPlanOps pops;
+    size_t i;
 
     if (list == NULL || selected == NULL) {
         return NULL;
@@ -1451,92 +1344,129 @@ CleanerRunJob *cleaner_run_start(const CleanerList *list, const int *selected,
     if (job == NULL) {
         return NULL;
     }
-    job->ops = resolve_ops(ops);
-    job->notify = notify;
-    job->ctx = ctx;
-    job->target_count = list->len;
-    for (i = 0; i < list->len; i++) {
-        if (selected[i] && cleaner_target_runnable(&list->items[i])) {
-            n += list->items[i].entry_count;
-        }
+    clean_plan_init(&job->plan);
+    if (cleaner_build_plan(list, &job->plan) != 0) {
+        free(job);
+        return NULL;
     }
-    job->entries = calloc(n > 0 ? n : 1, sizeof(*job->entries));
-    job->result.entries = calloc(n > 0 ? n : 1, sizeof(*job->result.entries));
-    job->result.targets = calloc(list->len > 0 ? list->len : 1, sizeof(*job->result.targets));
-    if (job->entries == NULL || job->result.entries == NULL || job->result.targets == NULL) {
-        goto fail;
+    for (i = 0; i < job->plan.len; i++) {
+        clean_plan_set_selected(&job->plan, i, selected[i]);
     }
-    job->result.target_count = list->len;
-    for (i = 0; i < list->len; i++) {
-        const CleanerTarget *t = &list->items[i];
-        if (!selected[i] || !cleaner_target_runnable(t)) {
-            continue;
-        }
-        job->result.targets[i].selected = 1;
-        if (cleaner_kind_info(t->kind)->permanent) {
-            job->recycle = 1;
-            job->recycle_bytes = t->bytes;
-            job->result.recycle_requested = 1;
-            continue;
-        }
-        for (j = 0; j < t->entry_count; j++) {
-            RunEntry *e = &job->entries[job->entry_count];
-            CleanerEntryOutcome *o = &job->result.entries[job->entry_count];
-            e->target = i;
-            e->kind = t->kind;
-            e->item = t->entries[j].item;
-            e->item.path = path_dup(t->entries[j].item.path);
-            e->root = path_dup(t->entries[j].root);
-            o->target = i;
-            o->path = path_dup(t->entries[j].item.path);
-            o->bytes = t->entries[j].item.bytes;
-            job->entry_count++;
-            job->result.entry_count++;
-            if (e->item.path == NULL || e->root == NULL || o->path == NULL) {
-                goto fail;
-            }
-        }
-    }
-    job->snap.total = job->entry_count;
-    InitializeCriticalSection(&job->lock);
-    job->thread = CreateThread(NULL, 0, run_job_main, job, 0, NULL);
-    if (job->thread == NULL) {
-        DeleteCriticalSection(&job->lock);
-        goto fail;
+    r = resolve_ops(ops);
+    memset(&pops, 0, sizeof(pops));
+    pops.app_running = r.app_running;
+    pops.empty_recycle = r.empty_recycle;
+    pops.ctx = r.ctx;
+    pops.min_age_hours = r.min_age_hours;
+    /* 이 API 는 호출자가 휴지통 비우기를 이미 확인했다고 본다(골랐으면 실행). */
+    pops.allow_permanent = 1;
+    job->job = clean_plan_run_start(&job->plan, &pops, (clean_plan_notify_fn)notify, ctx);
+    if (job->job == NULL && notify != NULL) {
+        notify(1, ctx); /* 실행할 것이 없음: 바로 끝났다고 알린다 */
     }
     return job;
-fail:
-    free_run_entries(job);
-    cleaner_run_result_free(&job->result);
-    free(job);
-    return NULL;
 }
 
 void cleaner_run_cancel(CleanerRunJob *job)
 {
-    if (job != NULL) {
-        InterlockedExchange(&job->cancel, 1);
+    if (job != NULL && job->job != NULL) {
+        clean_plan_run_cancel(job->job);
     }
 }
 
 void cleaner_run_progress(CleanerRunJob *job, CleanerRunSnapshot *out)
 {
-    EnterCriticalSection(&job->lock);
-    *out = job->snap;
-    LeaveCriticalSection(&job->lock);
-    out->cancel_requested = job->cancel != 0;
+    CleanPlanSnapshot s;
+
+    memset(out, 0, sizeof(*out));
+    if (job == NULL || job->job == NULL) {
+        return;
+    }
+    clean_plan_run_progress(job->job, &s);
+    out->emptying_recycle = s.emptying_recycle;
+    out->total = s.total;
+    out->done = s.done;
+    out->moved = s.moved;
+    out->failed = s.failed;
+    out->moved_bytes = s.moved_bytes;
+    out->cancel_requested = s.cancel_requested;
 }
 
 void cleaner_run_finish(CleanerRunJob *job, CleanerRunResult *out)
 {
-    WaitForSingleObject(job->thread, INFINITE);
-    CloseHandle(job->thread);
-    DeleteCriticalSection(&job->lock);
-    free_run_entries(job);
-    if (out != NULL) {
-        *out = job->result;
-    } else {
-        cleaner_run_result_free(&job->result);
+    CleanPlanTotals totals;
+    CleanerRunResult r;
+    size_t i, j, n = 0;
+
+    memset(&totals, 0, sizeof(totals));
+    memset(&r, 0, sizeof(r));
+    if (job == NULL) {
+        if (out != NULL) {
+            *out = r;
+        }
+        return;
     }
+    if (job->job != NULL) {
+        clean_plan_run_finish(job->job, &job->plan, &totals);
+    }
+    for (i = 0; i < job->plan.len; i++) {
+        const CleanPlanTarget *t = &job->plan.items[i];
+        for (j = 0; t->ran && j < t->entry_count; j++) {
+            n += t->entries[j].skip != CLEAN_SKIP_NONE ||
+                 t->entries[j].outcome.status != CLEANUP_TRASH_PENDING;
+        }
+    }
+    r.targets = calloc(job->plan.len > 0 ? job->plan.len : 1, sizeof(*r.targets));
+    r.entries = calloc(n > 0 ? n : 1, sizeof(*r.entries));
+    if (r.targets != NULL && r.entries != NULL) {
+        r.target_count = job->plan.len;
+        for (i = 0; i < job->plan.len; i++) {
+            CleanPlanTarget *t = &job->plan.items[i];
+            CleanerTargetResult *tr = &r.targets[i];
+            if (!t->ran) {
+                continue;
+            }
+            tr->selected = 1;
+            if (t->flags & CLEAN_PLAN_PERMANENT) {
+                continue;
+            }
+            tr->moved = t->moved;
+            tr->quarantined = t->quarantined;
+            tr->failed = t->failed;
+            tr->skipped = t->skipped;
+            tr->cancelled = t->cancelled;
+            tr->moved_bytes = t->moved_bytes;
+            for (j = 0; j < t->entry_count; j++) {
+                CleanPlanEntry *e = &t->entries[j];
+                CleanerEntryOutcome *o;
+                if (e->skip == CLEAN_SKIP_NONE && e->outcome.status == CLEANUP_TRASH_PENDING) {
+                    continue;
+                }
+                o = &r.entries[r.entry_count++];
+                o->target = i;
+                o->path = e->item.path;
+                e->item.path = NULL; /* 소유권을 넘긴다 */
+                o->bytes = e->item.bytes;
+                o->skip = (CleanerSkip)e->skip;
+                o->trash = e->outcome;
+                memset(&e->outcome, 0, sizeof(e->outcome));
+            }
+        }
+        r.recycle_requested = totals.permanent_requested;
+        r.recycle_emptied = totals.permanent_done;
+        r.recycle_code = totals.permanent_code;
+        r.recycle_bytes = totals.permanent_bytes;
+        r.cancelled = totals.was_cancelled;
+    } else {
+        free(r.targets);
+        free(r.entries);
+        memset(&r, 0, sizeof(r));
+    }
+    clean_plan_free(&job->plan);
     free(job);
+    if (out != NULL) {
+        *out = r;
+    } else {
+        cleaner_run_result_free(&r);
+    }
 }
