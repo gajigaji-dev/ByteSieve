@@ -23,7 +23,7 @@ CLI(`disk-scanner`)와 Win32 GUI(`bytesieve-gui`)를 제공합니다.
 | 드라이브·시스템 | 드라이브별 사용률과 BitLocker(장치 암호화 포함) 상태(켜짐·잠김·일시 중단 등, 관리자 권한 불필요), RAM·CPU 사용률 1초 갱신과 60초 그래프 |
 | 병렬 스캔 | 폴더 목록을 여러 스레드로 미리 읽어 `C:\Windows` 스캔을 16.4초 → 3.2초로 단축. 미리 읽기 작업 수를 제한해(동시 작업 5만여 개 → 약 1천 개) 속도는 그대로 두고 최대 메모리를 약 30% 절감 |
 | JSON Lines 출력 | 다른 도구가 읽을 수 있는 UTF-8 이벤트 스트림(`--jsonl`) |
-| CLI 정리 | `disk-scanner clean project <dir>` / `clean system`이 GUI 두 정리 탭과 같은 탐지·정리 계획·실행 코드를 사용. 기본은 미리보기(계획만 출력)이고 `--apply`면 확인 후 휴지통·격리 폴더로 옮김(스크립트는 `--yes`, 대화형이 아니면 `--yes` 없이 거부). 공용 개발 캐시는 `--include`로 직접 지정해야 하고, 휴지통 비우기(영구 삭제)는 CLI에서 지원하지 않음. `--jsonl`로 계획·결과 출력 |
+| CLI 정리 | `disk-scanner find <dir>`로 프로젝트 정리 후보를 크기순으로 찾고(읽기 전용), `disk-scanner clean project <dir>` / `clean system`으로 정리. GUI 두 정리 탭과 같은 탐지·정리 계획·실행 코드를 사용. `clean`은 기본 `--dry-run`(계획과 예상 결과만)이고 `--execute`면 확인 후 휴지통·격리 폴더로 옮김(스크립트는 `--yes`, 대화형이 아니면 `--yes` 없이 거부). 공용 개발 캐시는 `--include`로 직접 지정해야 하고, 휴지통 비우기(영구 삭제)는 CLI에서 지원하지 않음. `--json`(문서 하나)·`--jsonl`(이벤트) 출력, 종료 코드 0 완료·1 일부·2 오류 |
 | 시스템 정리 | 사용자 임시 파일(`%TEMP%`)·Windows 오류 보고서·휴지통·브라우저(Chrome·Edge·Firefox) 캐시와 공용 개발 캐시(npm·pip·Gradle·Cargo·NuGet, 환경 변수·설정 파일까지 확인한 위치와 그 근거 표시)를 한 목록에서 분석해 대상별 실제 확보 용량을 보여 주고, 고른 대상만 정리. 설정한 캐시 위치가 링크·캐시 구조가 아니면 이유와 함께 정리하지 않음. 휴지통 외에는 기존 안전 장치를 거쳐 휴지통(없는 드라이브는 격리 폴더)으로 옮기며, 최근 24시간 안에 바뀐 임시 파일·실행 중인 브라우저의 캐시는 건너뜀. 휴지통 비우기(영구 삭제)는 직접 고르고 따로 한 번 더 확인해야 함. 개발 도구 캐시도 [모두 선택]에 들어가지 않아 직접 골라야 하며, 오프라인 빌드가 안 되는 캐시는 주의로 표시 |
 | Booster | 시작 프로그램 켜기/끄기(작업 관리자와 같은 방식, 등록은 지우지 않아 되돌릴 수 있음), 전체·프로세스별 CPU·메모리 사용량, 앱/백그라운드 구분과 고른 프로세스 끝내기(시스템·Windows 구성 요소·ByteSieve 자신은 보호, PID 재사용 확인) |
 | 표시 언어·Windows 11 모양 | GUI를 한국어·영어·일본어·중국어 간체로 표시(환경 변수 → 설치 언어 → Windows 표시 언어 순, 언어별 글꼴, 문구 길이에 맞춘 단추 폭). 지금은 탭 이름과 폴더 스캔 탭 컨트롤까지 번역. Windows 11에서 둥근 창 모서리·Mica 제목 표시줄 |
@@ -49,10 +49,11 @@ build\Debug\disk-scanner.exe C:\Users\me\Projects
 build\Debug\disk-scanner.exe --track C:\Users\me\Projects
 build\Debug\disk-scanner.exe --jsonl C:\Users\me\Projects > scan.jsonl
 
-# CLI 정리: 계획만 보기 → 확인 후 휴지통으로(GUI 정리 탭과 같은 코드)
-build\Debug\disk-scanner.exe clean project C:\Users\me\Projects
-build\Debug\disk-scanner.exe clean project C:\Users\me\Projects --category node_modules --apply
-build\Debug\disk-scanner.exe clean system --include npm,pip
+# CLI 정리: 후보 찾기 → 예상 결과 보기 → 확인 후 휴지통으로(GUI 정리 탭과 같은 코드)
+build\Debug\disk-scanner.exe find C:\Users\me\Projects
+build\Debug\disk-scanner.exe clean project C:\Users\me\Projects --dry-run
+build\Debug\disk-scanner.exe clean project C:\Users\me\Projects --category node_modules --execute
+build\Debug\disk-scanner.exe clean system --include npm,pip --json
 
 # GUI: 폴더를 지정하면 바로 스캔
 build\Debug\bytesieve-gui.exe C:\Users\me\Projects
@@ -95,13 +96,13 @@ GUI는 **폴더 스캔 / 드라이브 / 시스템 정리 / 프로젝트 정리 /
 ctest --test-dir build -C Debug --output-on-failure
 ```
 
-단위 테스트 26개, CLI·도구 검사 29개, GUI 자체 검사 18개(총 73개)가 등록되어 있습니다.
+단위 테스트 26개, CLI·도구 검사 30개, GUI 자체 검사 18개(총 74개)가 등록되어 있습니다.
 
 ## 문서
 
 | 문서 | 내용 |
 |---|---|
-| [docs/cli.md](docs/cli.md) | CLI 옵션 전체, 종료 코드, 텍스트·`--track`·JSON Lines 출력 예, 정리 명령(`clean project`·`clean system`) |
+| [docs/cli.md](docs/cli.md) | CLI 옵션 전체, 종료 코드, 텍스트·`--track`·JSON Lines 출력 예, 정리 후보 찾기(`find`)·정리 명령(`clean project`·`clean system`, `--dry-run`·`--execute`, `--json` 문서 형식) |
 | [docs/gui.md](docs/gui.md) | 탭별 사용법과 스크린샷(정밀 스캔·트리맵·결과 내보내기·기록 관리·드라이브 암호화 상태·시스템 정리·프로젝트 정리·실제 확보 용량·격리 폴더 포함), 표시 언어 |
 | [docs/ui-design.md](docs/ui-design.md) | Windows 11 Fluent 방향 UI 설계(단계·디자인 토큰·사이드바 구조), 다국어 규칙(문자열·글꼴·글자 길이), 설치 마법사 설계 |
 | [docs/cleanup.md](docs/cleanup.md) | 정리 후보 탐지 규칙, 개발 환경 분류, 휴지통 이동 보호 조건, 공용 개발 캐시 보호 조건, 격리 폴더, 시스템 정리 대상·안전 규칙, 실제 확보 용량 계산, Booster 보호 규칙 |
@@ -126,7 +127,7 @@ ByteSieve/
 │   ├── cleaner, booster                              시스템 정크 분석·정리, 시작 프로그램·프로세스 관리
 │   ├── drive, sysmon, path, size_format              드라이브·RAM/CPU 측정·경로·용량 표시
 │   ├── treemap                                       트리맵 배치(스퀘어리파이드, 순수 계산)
-│   ├── cli, cli_clean, jsonl, main.c                 CLI(disk-scanner, clean 명령 포함)
+│   ├── cli, cli_clean, jsonl, main.c                 CLI(disk-scanner, find·clean 명령 포함)
 │   ├── gui_main.c, gui_drives, gui_cleaner, gui_booster, gui_cleanup, gui_quarantine, gui_monitor, gui_treemap   GUI(bytesieve-gui)
 │   ├── gui_theme, ui_lang                            GUI 공통 모양(창 외곽·언어별 글꼴·글자 폭), 표시 언어·번역 문자열
 │   └── bench.c                                       성능 측정 도구(bytesieve-bench)
@@ -135,7 +136,7 @@ ByteSieve/
 
 ## 구현 상태와 향후 계획
 
-CLI 스캐너, JSON Lines 출력, CLI 정리 명령(GUI와 같은 정리 계획·실행 코드), GUI 일곱 탭, 시스템 정리(임시 파일·오류 보고서·휴지통·브라우저 캐시·공용 개발 캐시(npm·pip·Gradle·Cargo·NuGet) 분석·정리), 프로젝트 정리(정리 후보 탐지·휴지통 이동), 실제 확보 용량(할당 크기·하드 링크 반영), Booster(시작 프로그램·프로세스 관리, CPU·메모리 사용량), 휴지통 없는 드라이브의 격리 폴더(복원·영구 삭제), 디스크 사용량 분석, 트리맵 시각화, 드라이브별 BitLocker 암호화 상태 표시, 정밀 스캔(하드 링크 중복 보정), 폴더별 변화 추적(자동 저장 설정·기록 삭제 포함), 스캔 결과 CSV·HTML 내보내기, 병렬 스캔(미리 읽기 작업 수 제한으로 메모리 절감), GUI 표시 언어 기반(한국어·영어·일본어·중국어 간체, 탭 이름과 폴더 스캔 탭 컨트롤)과 Windows 11 창 외곽이 구현되어 있습니다.
+CLI 스캐너, JSON Lines 출력, CLI 정리 후보 찾기·정리 명령(`find`·`clean --dry-run`·`--execute`, JSON 문서 출력, GUI와 같은 정리 계획·실행 코드), GUI 일곱 탭, 시스템 정리(임시 파일·오류 보고서·휴지통·브라우저 캐시·공용 개발 캐시(npm·pip·Gradle·Cargo·NuGet) 분석·정리), 프로젝트 정리(정리 후보 탐지·휴지통 이동), 실제 확보 용량(할당 크기·하드 링크 반영), Booster(시작 프로그램·프로세스 관리, CPU·메모리 사용량), 휴지통 없는 드라이브의 격리 폴더(복원·영구 삭제), 디스크 사용량 분석, 트리맵 시각화, 드라이브별 BitLocker 암호화 상태 표시, 정밀 스캔(하드 링크 중복 보정), 폴더별 변화 추적(자동 저장 설정·기록 삭제 포함), 스캔 결과 CSV·HTML 내보내기, 병렬 스캔(미리 읽기 작업 수 제한으로 메모리 절감), GUI 표시 언어 기반(한국어·영어·일본어·중국어 간체, 탭 이름과 폴더 스캔 탭 컨트롤)과 Windows 11 창 외곽이 구현되어 있습니다.
 
 ### 향후 개선 계획(미구현)
 
@@ -151,7 +152,8 @@ CLI 스캐너, JSON Lines 출력, CLI 정리 명령(GUI와 같은 정리 계획�
 - 실제 확보 용량 보강: 여러 항목을 함께 고를 때 항목끼리 나누는 하드 링크까지 합쳐 계산(지금은 항목마다 판정해 실제보다 작게 말할 수 있음),
   프로젝트 정리 목록을 실제 확보 순으로 정렬하는 선택(지금은 파일 크기 순), 폴더 스캔 CLI(`--jsonl`)의 실제 확보 용량 출력
   (정리 명령 `clean --jsonl`은 출력함)
-- CLI 정리 보강: 격리 폴더 목록·복원·영구 삭제(`clean quarantine`), 진행률 표시, 정리 결과를 변화 추적 기록과 연결
+- CLI 정리 보강: 격리 폴더 목록·복원·영구 삭제(`clean quarantine`), 진행률 표시, 정리 결과를 변화 추적 기록과 연결,
+  `find`의 크기·마지막 수정 기준 거르기(`--min-size`·`--older-than`)와 정렬 선택
 - 설치 경로 보호 확대: 레지스트리·`AppData`에 없는 임의 위치(예: `D:\tools`에 압축을 푼 VS Code 포터블)의 개발 도구도 보호 경로로 인식
 - 정밀 스캔의 CLI·CSV 지원: 지금은 GUI와 HTML 보고서에서만 하드 링크 보정 결과를 보여 줌
 **UI·버그 수정**

@@ -20,13 +20,13 @@ void cli_clean_print_usage(FILE *out)
     fwprintf(out,
              L"Usage:\n"
              L"  disk-scanner clean project <directory> [--category LIST] [--eco LIST]\n"
-             L"                             [--apply [--yes]] [--jsonl]\n"
+             L"                             [--dry-run | --execute [--yes]] [--json | --jsonl]\n"
              L"  disk-scanner clean system [--include LIST] [--exclude LIST]\n"
-             L"                            [--apply [--yes]] [--jsonl]\n"
+             L"                            [--dry-run | --execute [--yes]] [--json | --jsonl]\n"
              L"  disk-scanner clean -h | --help\n"
              L"\n"
              L"Finds cleanup targets the same way as the GUI ([Project cleanup] / [System cleanup])\n"
-             L"and prints a plan. Nothing is moved unless --apply is given.\n"
+             L"and prints the plan and expected result. Nothing is moved unless --execute is given.\n"
              L"\n"
              L"  project <directory>  node_modules, build output, caches, temp files and logs in the folder\n"
              L"  system               user temp files, Windows error reports, browser caches,\n"
@@ -39,13 +39,37 @@ void cli_clean_print_usage(FILE *out)
              L"                    selected by default: name them (npm,pip,gradle,gradle_wrapper,\n"
              L"                    cargo_registry,cargo_git,nuget_packages,nuget_http) or use dev_cache\n"
              L"  --exclude LIST    system: do not select these targets (user_temp,wer,chrome,edge,firefox,...)\n"
-             L"  --apply           move the selected targets to the Recycle Bin (quarantine folder on\n"
+             L"  --dry-run         show the plan and expected result only (default)\n"
+             L"  --execute         move the selected targets to the Recycle Bin (quarantine folder on\n"
              L"                    drives without one) after confirmation. Never deletes permanently.\n"
+             L"                    (--apply is the old name and still works)\n"
              L"  --yes             do not ask for confirmation (required when input is not interactive)\n"
-             L"  --jsonl           write the plan and results as JSON Lines (UTF-8) to stdout\n"
+             L"  --json            write one JSON document (UTF-8) to stdout\n"
+             L"  --jsonl           write JSON Lines events (UTF-8) to stdout\n"
              L"\n"
              L"Emptying the Recycle Bin is permanent and is only available in the GUI.\n"
              L"Exit codes: 0 done, 1 some folders unreadable or some items not moved, 2 error.\n");
+}
+
+void cli_find_print_usage(FILE *out)
+{
+    fwprintf(out,
+             L"Usage:\n"
+             L"  disk-scanner find <directory> [--category LIST] [--eco LIST] [--json | --jsonl]\n"
+             L"  disk-scanner find -h | --help\n"
+             L"\n"
+             L"Lists project cleanup candidates (node_modules, build output, caches, temp files, logs)\n"
+             L"under <directory>, largest first, with the space that deleting them would free.\n"
+             L"Read-only: nothing is changed. Candidates in protected locations are listed with the\n"
+             L"reason they would not be cleaned. Use 'disk-scanner clean project' to clean them.\n"
+             L"\n"
+             L"Options:\n"
+             L"  --category LIST   only these types (node_modules,build,cache,temp,log)\n"
+             L"  --eco LIST        only these ecosystems (node,python,rust,java,dotnet,cpp,go,generic)\n"
+             L"  --json            write one JSON document (UTF-8) to stdout\n"
+             L"  --jsonl           write JSON Lines events (UTF-8) to stdout\n"
+             L"\n"
+             L"Exit codes: 0 complete, 1 some folders could not be read, 2 error.\n");
 }
 
 static int is_opt(const wchar_t *arg, const wchar_t *name, const wchar_t **value)
@@ -153,8 +177,9 @@ static int parse_list(CliCleanOptions *opts, size_t *used, const wchar_t *value,
 CliParseResult cli_clean_parse_args(int argc, wchar_t **argv, CliCleanOptions *opts,
                                     wchar_t *err, size_t err_len)
 {
-    int i, options_done = 0, positional = 0;
+    int i, start, options_done = 0, positional = 0;
     size_t used = 0;
+    const wchar_t *cmd;
 
     memset(opts, 0, sizeof(*opts));
     err[0] = L'\0';
@@ -166,21 +191,30 @@ CliParseResult cli_clean_parse_args(int argc, wchar_t **argv, CliCleanOptions *o
             return CLI_PARSE_HELP;
         }
     }
-    if (argc < 2) {
-        swprintf(err, err_len, L"missing command (project or system)");
-        return CLI_PARSE_ERROR;
-    }
-    if (wcscmp(argv[1], L"project") == 0) {
-        opts->command = CLI_CLEAN_PROJECT;
-    } else if (wcscmp(argv[1], L"system") == 0) {
-        opts->command = CLI_CLEAN_SYSTEM;
+    if (argc >= 1 && wcscmp(argv[0], L"find") == 0) {
+        opts->command = CLI_CLEAN_FIND;
+        cmd = L"find";
+        start = 1;
     } else {
-        swprintf(err, err_len, L"unknown command: %ls (expected project or system)", argv[1]);
-        return CLI_PARSE_ERROR;
+        if (argc < 2) {
+            swprintf(err, err_len, L"missing command (project or system)");
+            return CLI_PARSE_ERROR;
+        }
+        if (wcscmp(argv[1], L"project") == 0) {
+            opts->command = CLI_CLEAN_PROJECT;
+            cmd = L"clean project";
+        } else if (wcscmp(argv[1], L"system") == 0) {
+            opts->command = CLI_CLEAN_SYSTEM;
+            cmd = L"clean system";
+        } else {
+            swprintf(err, err_len, L"unknown command: %ls (expected project or system)", argv[1]);
+            return CLI_PARSE_ERROR;
+        }
+        start = 2;
     }
-    for (i = 2; i < argc; i++) {
+    for (i = start; i < argc; i++) {
         const wchar_t *arg = argv[i], *value = NULL;
-        int kind = -1;
+        int kind = -1, *flag = NULL;
         const wchar_t **list = NULL;
         size_t *count = NULL;
 
@@ -188,16 +222,27 @@ CliParseResult cli_clean_parse_args(int argc, wchar_t **argv, CliCleanOptions *o
             options_done = 1;
             continue;
         }
-        if (!options_done && wcscmp(arg, L"--apply") == 0) {
-            opts->apply = 1;
-            continue;
+        if (!options_done) {
+            if (wcscmp(arg, L"--execute") == 0 || wcscmp(arg, L"--apply") == 0) {
+                flag = &opts->apply;
+            } else if (wcscmp(arg, L"--dry-run") == 0) {
+                flag = &opts->dry_run;
+            } else if (wcscmp(arg, L"--yes") == 0) {
+                flag = &opts->yes;
+            } else if (wcscmp(arg, L"--json") == 0) {
+                flag = &opts->json;
+            } else if (wcscmp(arg, L"--jsonl") == 0) {
+                flag = &opts->jsonl;
+            }
         }
-        if (!options_done && wcscmp(arg, L"--yes") == 0) {
-            opts->yes = 1;
-            continue;
-        }
-        if (!options_done && wcscmp(arg, L"--jsonl") == 0) {
-            opts->jsonl = 1;
+        if (flag != NULL) {
+            /* find 는 읽기 전용: 실행 관련 옵션이 없다. */
+            if (opts->command == CLI_CLEAN_FIND && flag != &opts->json && flag != &opts->jsonl) {
+                swprintf(err, err_len, L"%ls is not valid for find (find never changes anything)",
+                         arg);
+                return CLI_PARSE_ERROR;
+            }
+            *flag = 1;
             continue;
         }
         if (!options_done && is_opt(arg, L"--category", &value)) {
@@ -217,8 +262,8 @@ CliParseResult cli_clean_parse_args(int argc, wchar_t **argv, CliCleanOptions *o
             const wchar_t *name = kind == 0 ? L"--category" : kind == 1 ? L"--eco"
                                   : list == opts->include ? L"--include"
                                                           : L"--exclude";
-            if ((kind < 2) != (opts->command == CLI_CLEAN_PROJECT)) {
-                swprintf(err, err_len, L"%ls is not valid for clean %ls", name, argv[1]);
+            if ((kind < 2) == (opts->command == CLI_CLEAN_SYSTEM)) {
+                swprintf(err, err_len, L"%ls is not valid for %ls", name, cmd);
                 return CLI_PARSE_ERROR;
             }
             if (value == NULL) {
@@ -247,12 +292,20 @@ CliParseResult cli_clean_parse_args(int argc, wchar_t **argv, CliCleanOptions *o
         }
         opts->target = arg;
     }
-    if (opts->command == CLI_CLEAN_PROJECT && opts->target == NULL) {
-        swprintf(err, err_len, L"missing folder for clean project");
+    if (opts->command != CLI_CLEAN_SYSTEM && opts->target == NULL) {
+        swprintf(err, err_len, L"missing folder for %ls", cmd);
+        return CLI_PARSE_ERROR;
+    }
+    if (opts->apply && opts->dry_run) {
+        swprintf(err, err_len, L"--dry-run and --execute cannot be used together");
+        return CLI_PARSE_ERROR;
+    }
+    if (opts->json && opts->jsonl) {
+        swprintf(err, err_len, L"--json and --jsonl cannot be used together");
         return CLI_PARSE_ERROR;
     }
     if (opts->yes && !opts->apply) {
-        swprintf(err, err_len, L"--yes requires --apply");
+        swprintf(err, err_len, L"--yes requires --execute");
         return CLI_PARSE_ERROR;
     }
     return CLI_PARSE_OK;
@@ -441,7 +494,156 @@ static void print_result(FILE *out, const CleanPlan *plan, const CleanPlanTotals
                   L"Moved items can be restored from there.\n");
 }
 
-/* ---- JSON Lines ---- */
+/* ---- JSON 문서(--json) ---- */
+
+static const wchar_t *source_name(const CliCleanOptions *opts)
+{
+    return opts->command == CLI_CLEAN_SYSTEM ? L"system" : L"project";
+}
+
+/* 실행 결과 필드("moved"…"entries" 배열). 객체를 연 뒤 호출한다. 실행하지 않은 대상은 호출하지 않는다. */
+static void json_result_fields(JsonBuf *b, const CleanPlanTarget *t)
+{
+    size_t j;
+    int first = 1;
+
+    jsonl_field_u64(b, "moved", t->moved);
+    jsonl_field_u64(b, "quarantined", t->quarantined);
+    jsonl_field_u64(b, "failed", t->failed);
+    jsonl_field_u64(b, "skipped", t->skipped);
+    jsonl_field_u64(b, "cancelled", t->cancelled);
+    jsonl_field_u64(b, "moved_bytes", t->moved_bytes);
+    jsonl_field_key(b, "entries");
+    jsonl_raw(b, "[");
+    for (j = 0; j < t->entry_count; j++) {
+        const CleanPlanEntry *e = &t->entries[j];
+        if (e->skip == CLEAN_SKIP_NONE && e->outcome.status == CLEANUP_TRASH_PENDING) {
+            continue;
+        }
+        jsonl_raw(b, first ? "{" : ",{");
+        first = 0;
+        jsonl_field_string(b, "path", e->item.path);
+        jsonl_field_string(b, "status", cleanup_trash_status_name(e->outcome.status));
+        jsonl_field_string(b, "skip", clean_skip_name(e->skip));
+        jsonl_field_u64(b, "code", e->outcome.code);
+        jsonl_field_string(b, "moved_to", e->outcome.recycled_path);
+        jsonl_raw(b, "}");
+    }
+    jsonl_raw(b, "]");
+}
+
+/* 계획 대상의 공통 필드(객체를 연 뒤 호출). */
+static void json_target_fields(JsonBuf *b, const CleanPlanTarget *t, size_t index)
+{
+    jsonl_field_u64(b, "index", index + 1);
+    jsonl_field_string(b, "id", t->id);
+    jsonl_field_string(b, "label", t->label);
+    jsonl_field_string(b, "location", t->location);
+    jsonl_field_string(b, "state", t->state);
+    jsonl_field_u64(b, "bytes", t->bytes);
+    jsonl_field_u64(b, "reclaim", t->reclaim);
+    jsonl_field_u64(b, "shared", t->shared);
+    jsonl_field_u64(b, "files", t->files);
+    jsonl_field_bool(b, "selectable", clean_plan_selectable(t));
+    jsonl_field_bool(b, "selected", t->selected);
+    jsonl_field_bool(b, "manual", (t->flags & CLEAN_PLAN_MANUAL) != 0);
+    jsonl_field_bool(b, "caution", (t->flags & CLEAN_PLAN_CAUTION) != 0);
+    jsonl_field_bool(b, "guessed", (t->flags & CLEAN_PLAN_GUESSED) != 0);
+    jsonl_field_bool(b, "permanent", (t->flags & CLEAN_PLAN_PERMANENT) != 0);
+}
+
+static void json_summary(JsonBuf *b, const CleanPlanSummary *s)
+{
+    jsonl_raw(b, "{");
+    jsonl_field_u64(b, "selected", s->targets);
+    jsonl_field_u64(b, "selectable", s->selectable);
+    jsonl_field_u64(b, "entries", s->entries);
+    jsonl_field_u64(b, "bytes", s->bytes);
+    jsonl_field_u64(b, "reclaim", s->reclaim);
+    jsonl_field_u64(b, "caution", s->caution);
+    jsonl_field_u64(b, "manual", s->manual);
+    jsonl_field_u64(b, "guessed", s->guessed);
+    jsonl_raw(b, "}");
+}
+
+static void json_totals(JsonBuf *b, const CleanPlanTotals *t)
+{
+    jsonl_raw(b, "{");
+    jsonl_field_u64(b, "targets", t->targets);
+    jsonl_field_u64(b, "moved", t->moved);
+    jsonl_field_u64(b, "quarantined", t->quarantined);
+    jsonl_field_u64(b, "failed", t->failed);
+    jsonl_field_u64(b, "skipped", t->skipped);
+    jsonl_field_u64(b, "cancelled", t->cancelled);
+    jsonl_field_u64(b, "moved_bytes", t->moved_bytes);
+    jsonl_raw(b, "}");
+}
+
+/* 문서 머리: {"version":1,"command":..,("source":..,)"root":.. */
+static void json_head(JsonBuf *b, const CliCleanOptions *opts, const wchar_t *root)
+{
+    jsonl_raw(b, "{\"version\":1");
+    jsonl_field_string(b, "command", opts->command == CLI_CLEAN_FIND ? L"find" : L"clean");
+    if (opts->command != CLI_CLEAN_FIND) {
+        jsonl_field_string(b, "source", source_name(opts));
+        jsonl_field_string(b, "mode", opts->apply ? L"execute" : L"dry-run");
+    }
+    jsonl_field_string(b, "root", root);
+}
+
+/* 실패 문서: 탐지 전에 끝났을 때. */
+static void json_error_doc(JsonBuf *b, const CliCleanOptions *opts, const wchar_t *root,
+                           const wchar_t *message, int code)
+{
+    json_head(b, opts, root);
+    jsonl_field_string(b, "status", L"failed");
+    jsonl_field_string(b, "error", message);
+    jsonl_field_u64(b, "exit_code", (uint64_t)code);
+    jsonl_raw(b, "}\n");
+}
+
+static void json_clean_doc(JsonBuf *b, const CliCleanOptions *opts, const CleanPlan *plan,
+                           const wchar_t *root, ScanStatus st, int executed,
+                           const CleanPlanTotals *tot, const wchar_t *note, int code)
+{
+    CleanPlanSummary s;
+    size_t i;
+
+    json_head(b, opts, root);
+    jsonl_field_string(b, "status", scan_status_name(st));
+    jsonl_field_bool(b, "executed", executed);
+    clean_plan_summarize(plan, &s);
+    jsonl_field_key(b, "summary");
+    json_summary(b, &s);
+    jsonl_field_key(b, "targets");
+    jsonl_raw(b, "[");
+    for (i = 0; i < plan->len; i++) {
+        const CleanPlanTarget *t = &plan->items[i];
+        jsonl_raw(b, i == 0 ? "{" : ",{");
+        json_target_fields(b, t, i);
+        jsonl_field_key(b, "result");
+        if (t->ran) {
+            jsonl_raw(b, "{");
+            json_result_fields(b, t);
+            jsonl_raw(b, "}");
+        } else {
+            jsonl_raw(b, "null");
+        }
+        jsonl_raw(b, "}");
+    }
+    jsonl_raw(b, "]");
+    jsonl_field_key(b, "totals");
+    if (executed) {
+        json_totals(b, tot);
+    } else {
+        jsonl_raw(b, "null");
+    }
+    jsonl_field_string(b, "note", note);
+    jsonl_field_u64(b, "exit_code", (uint64_t)code);
+    jsonl_raw(b, "}\n");
+}
+
+/* ---- JSON Lines(--jsonl) ---- */
 
 static void jsonl_plan(JsonBuf *buf, const CleanPlan *plan, const CliCleanOptions *opts,
                        const wchar_t *root)
@@ -450,28 +652,13 @@ static void jsonl_plan(JsonBuf *buf, const CleanPlan *plan, const CliCleanOption
     size_t i;
 
     jsonl_begin_event(buf, "clean_plan");
-    jsonl_field_string(buf, "source", opts->command == CLI_CLEAN_PROJECT ? L"project" : L"system");
+    jsonl_field_string(buf, "source", source_name(opts));
     jsonl_field_string(buf, "root", root);
     jsonl_field_u64(buf, "targets", plan->len);
     jsonl_end_event(buf);
     for (i = 0; i < plan->len; i++) {
-        const CleanPlanTarget *t = &plan->items[i];
         jsonl_begin_event(buf, "clean_target");
-        jsonl_field_u64(buf, "index", i + 1);
-        jsonl_field_string(buf, "id", t->id);
-        jsonl_field_string(buf, "label", t->label);
-        jsonl_field_string(buf, "location", t->location);
-        jsonl_field_string(buf, "state", t->state);
-        jsonl_field_u64(buf, "bytes", t->bytes);
-        jsonl_field_u64(buf, "reclaim", t->reclaim);
-        jsonl_field_u64(buf, "shared", t->shared);
-        jsonl_field_u64(buf, "files", t->files);
-        jsonl_field_bool(buf, "selectable", clean_plan_selectable(t));
-        jsonl_field_bool(buf, "selected", t->selected);
-        jsonl_field_bool(buf, "manual", (t->flags & CLEAN_PLAN_MANUAL) != 0);
-        jsonl_field_bool(buf, "caution", (t->flags & CLEAN_PLAN_CAUTION) != 0);
-        jsonl_field_bool(buf, "guessed", (t->flags & CLEAN_PLAN_GUESSED) != 0);
-        jsonl_field_bool(buf, "permanent", (t->flags & CLEAN_PLAN_PERMANENT) != 0);
+        json_target_fields(buf, &plan->items[i], i);
         jsonl_end_event(buf);
     }
     clean_plan_summarize(plan, &s);
@@ -483,46 +670,24 @@ static void jsonl_plan(JsonBuf *buf, const CleanPlan *plan, const CliCleanOption
     jsonl_field_u64(buf, "caution", s.caution);
     jsonl_field_u64(buf, "manual", s.manual);
     jsonl_field_u64(buf, "guessed", s.guessed);
-    jsonl_field_bool(buf, "apply", opts->apply);
+    jsonl_field_bool(buf, "apply", opts->apply); /* 예전 이름(호환용), mode 와 같다 */
+    jsonl_field_string(buf, "mode", opts->apply ? L"execute" : L"dry-run");
     jsonl_end_event(buf);
 }
 
 static void jsonl_results(JsonBuf *buf, const CleanPlan *plan)
 {
-    size_t i, j;
+    size_t i;
 
     for (i = 0; i < plan->len; i++) {
         const CleanPlanTarget *t = &plan->items[i];
-        int first = 1;
         if (!t->ran) {
             continue;
         }
         jsonl_begin_event(buf, "clean_result");
         jsonl_field_u64(buf, "index", i + 1);
         jsonl_field_string(buf, "id", t->id);
-        jsonl_field_u64(buf, "moved", t->moved);
-        jsonl_field_u64(buf, "quarantined", t->quarantined);
-        jsonl_field_u64(buf, "failed", t->failed);
-        jsonl_field_u64(buf, "skipped", t->skipped);
-        jsonl_field_u64(buf, "cancelled", t->cancelled);
-        jsonl_field_u64(buf, "moved_bytes", t->moved_bytes);
-        jsonl_field_key(buf, "entries");
-        jsonl_raw(buf, "[");
-        for (j = 0; j < t->entry_count; j++) {
-            const CleanPlanEntry *e = &t->entries[j];
-            if (e->skip == CLEAN_SKIP_NONE && e->outcome.status == CLEANUP_TRASH_PENDING) {
-                continue;
-            }
-            jsonl_raw(buf, first ? "{" : ",{");
-            first = 0;
-            jsonl_field_string(buf, "path", e->item.path);
-            jsonl_field_string(buf, "status", cleanup_trash_status_name(e->outcome.status));
-            jsonl_field_string(buf, "skip", clean_skip_name(e->skip));
-            jsonl_field_u64(buf, "code", e->outcome.code);
-            jsonl_field_string(buf, "moved_to", e->outcome.recycled_path);
-            jsonl_raw(buf, "}");
-        }
-        jsonl_raw(buf, "]");
+        json_result_fields(buf, t);
         jsonl_end_event(buf);
     }
 }
@@ -540,6 +705,203 @@ static void jsonl_done(JsonBuf *buf, const CleanPlanTotals *tot, int applied, in
     jsonl_end_event(buf);
 }
 
+/* ---- find ---- */
+
+int cli_clean_matches(const CleanPlanTarget *t, const CliCleanOptions *opts)
+{
+    return t != NULL && t->source == CLEAN_SOURCE_PROJECT &&
+           (opts->categories == 0 || (opts->categories & CLEANUP_MASK(t->category))) &&
+           (opts->ecos == 0 || (opts->ecos & CLEANUP_ECO_BIT(t->eco)));
+}
+
+static const CleanPlan *g_sort_plan;
+
+/* 파일 크기 내림차순, 같으면 경로 순(GUI 목록·cleanup_select 와 같다). */
+static int cmp_find(const void *a, const void *b)
+{
+    const CleanPlanTarget *x = &g_sort_plan->items[*(const size_t *)a];
+    const CleanPlanTarget *y = &g_sort_plan->items[*(const size_t *)b];
+    int by_path;
+
+    if (x->bytes != y->bytes) {
+        return x->bytes > y->bytes ? -1 : 1;
+    }
+    by_path = _wcsicmp(x->location != NULL ? x->location : L"",
+                       y->location != NULL ? y->location : L"");
+    if (by_path != 0) {
+        return by_path;
+    }
+    return *(const size_t *)a < *(const size_t *)b ? -1 : 1;
+}
+
+/* 필터에 맞는 후보 번호를 크기순으로 order 에(malloc). 개수를 돌려주며 메모리가 없으면 -1 이 아닌 0 과 *oom. */
+static size_t find_order(const CleanPlan *plan, const CliCleanOptions *opts, size_t **order,
+                         int *oom)
+{
+    size_t i, n = 0;
+
+    *order = malloc((plan->len > 0 ? plan->len : 1) * sizeof(**order));
+    if (*order == NULL) {
+        *oom = 1;
+        return 0;
+    }
+    for (i = 0; i < plan->len; i++) {
+        if (cli_clean_matches(&plan->items[i], opts)) {
+            (*order)[n++] = i;
+        }
+    }
+    g_sort_plan = plan; /* CLI 는 한 스레드에서만 부른다 */
+    qsort(*order, n, sizeof(**order), cmp_find);
+    return n;
+}
+
+static unsigned item_flags(const CleanPlanTarget *t)
+{
+    return t->entry_count > 0 ? t->entries[0].item.flags : 0u;
+}
+
+static void find_note(const CleanPlanTarget *t, wchar_t *buf, size_t len)
+{
+    unsigned f = item_flags(t);
+    size_t used = 0;
+
+    buf[0] = L'\0';
+    if (t->deny != CLEANUP_TRASH_PENDING) {
+        used += (size_t)swprintf(buf + used, len - used, L"protected:%ls,", t->state);
+    }
+    if (t->flags & CLEAN_PLAN_GUESSED) {
+        used += (size_t)swprintf(buf + used, len - used, L"guessed,");
+    } else if (f & CLEANUP_ITEM_CONFIRMED) {
+        used += (size_t)swprintf(buf + used, len - used, L"confirmed,");
+    }
+    if (f & CLEANUP_ITEM_INCOMPLETE) {
+        used += (size_t)swprintf(buf + used, len - used, L"incomplete,");
+    }
+    if (t->shared > 0) {
+        used += (size_t)swprintf(buf + used, len - used, L"hardlinks,");
+    }
+    if (used > 0) {
+        buf[used - 1] = L'\0';
+    } else {
+        swprintf(buf, len, L"-");
+    }
+}
+
+static void find_totals(const CleanPlan *plan, const size_t *order, size_t n, uint64_t *bytes,
+                        uint64_t *reclaim, size_t *cleanable)
+{
+    size_t i;
+
+    *bytes = *reclaim = 0;
+    *cleanable = 0;
+    for (i = 0; i < n; i++) {
+        const CleanPlanTarget *t = &plan->items[order[i]];
+        *bytes += t->bytes;
+        if (t->ready) {
+            *reclaim += t->reclaim;
+            (*cleanable)++;
+        }
+    }
+}
+
+static void print_find(FILE *out, const CleanPlan *plan, const size_t *order, size_t n,
+                       const wchar_t *root)
+{
+    size_t i, cleanable;
+    uint64_t bytes, reclaim;
+    wchar_t r[32], sz[32], note[128];
+
+    find_totals(plan, order, n, &bytes, &reclaim, &cleanable);
+    format_size(reclaim, r, 32);
+    format_size(bytes, sz, 32);
+    fwprintf(out, L"Cleanup candidates under %ls: %u found, %u cleanable, reclaim %ls (size %ls)\n",
+             root, (unsigned)n, (unsigned)cleanable, r, sz);
+    if (n > 0) {
+        fwprintf(out, L"  %-4ls %-10ls %-10ls %-13ls %-8ls %-22ls %ls\n", L"#", L"Reclaim",
+                 L"Size", L"Type", L"Eco", L"Note", L"Path");
+    }
+    for (i = 0; i < n; i++) {
+        const CleanPlanTarget *t = &plan->items[order[i]];
+        format_size(t->reclaim, r, 32);
+        format_size(t->bytes, sz, 32);
+        find_note(t, note, 128);
+        fwprintf(out, L"  %-4u %-10ls %-10ls %-13ls %-8ls %-22ls %ls\n", (unsigned)(i + 1), r, sz,
+                 t->id != NULL ? t->id : L"", cleanup_eco_name(t->eco), note,
+                 t->location != NULL ? t->location : L"");
+    }
+    if (cleanable > 0) {
+        fwprintf(out, L"Nothing was changed. Use 'disk-scanner clean project' to see the cleanup "
+                      L"plan and move them to the Recycle Bin.\n");
+    }
+}
+
+static void json_candidate_fields(JsonBuf *b, const CleanPlanTarget *t, size_t index)
+{
+    unsigned f = item_flags(t);
+
+    jsonl_field_u64(b, "index", index + 1);
+    jsonl_field_string(b, "category", t->id);
+    jsonl_field_string(b, "eco", cleanup_eco_name(t->eco));
+    jsonl_field_string(b, "path", t->location);
+    jsonl_field_u64(b, "bytes", t->bytes);
+    jsonl_field_u64(b, "reclaim", t->reclaim);
+    jsonl_field_u64(b, "shared", t->shared);
+    jsonl_field_u64(b, "files", t->files);
+    jsonl_field_bool(b, "dir", (f & CLEANUP_ITEM_DIR) != 0);
+    jsonl_field_bool(b, "confirmed", (f & CLEANUP_ITEM_CONFIRMED) != 0);
+    jsonl_field_bool(b, "guessed", (t->flags & CLEAN_PLAN_GUESSED) != 0);
+    jsonl_field_bool(b, "incomplete", (f & CLEANUP_ITEM_INCOMPLETE) != 0);
+    jsonl_field_bool(b, "cleanable", t->ready);
+    jsonl_field_string(b, "state", t->state);
+}
+
+static void json_find(JsonBuf *b, const CliCleanOptions *opts, const CleanPlan *plan,
+                      const size_t *order, size_t n, const wchar_t *root, ScanStatus st, int code)
+{
+    size_t i, cleanable;
+    uint64_t bytes, reclaim;
+
+    find_totals(plan, order, n, &bytes, &reclaim, &cleanable);
+    if (opts->json) {
+        json_head(b, opts, root);
+        jsonl_field_string(b, "status", scan_status_name(st));
+        jsonl_field_key(b, "summary");
+        jsonl_raw(b, "{");
+        jsonl_field_u64(b, "candidates", n);
+        jsonl_field_u64(b, "cleanable", cleanable);
+        jsonl_field_u64(b, "bytes", bytes);
+        jsonl_field_u64(b, "reclaim", reclaim);
+        jsonl_raw(b, "}");
+        jsonl_field_key(b, "candidates");
+        jsonl_raw(b, "[");
+        for (i = 0; i < n; i++) {
+            jsonl_raw(b, i == 0 ? "{" : ",{");
+            json_candidate_fields(b, &plan->items[order[i]], i);
+            jsonl_raw(b, "}");
+        }
+        jsonl_raw(b, "]");
+        jsonl_field_u64(b, "exit_code", (uint64_t)code);
+        jsonl_raw(b, "}\n");
+        return;
+    }
+    jsonl_begin_event(b, "find_start");
+    jsonl_field_string(b, "root", root);
+    jsonl_end_event(b);
+    for (i = 0; i < n; i++) {
+        jsonl_begin_event(b, "find_candidate");
+        json_candidate_fields(b, &plan->items[order[i]], i);
+        jsonl_end_event(b);
+    }
+    jsonl_begin_event(b, "complete");
+    jsonl_field_string(b, "status", scan_status_name(st));
+    jsonl_field_u64(b, "candidates", n);
+    jsonl_field_u64(b, "cleanable", cleanable);
+    jsonl_field_u64(b, "bytes", bytes);
+    jsonl_field_u64(b, "reclaim", reclaim);
+    jsonl_field_u64(b, "exit_code", (uint64_t)code);
+    jsonl_end_event(b);
+}
+
 /* ---- 실행 ---- */
 
 /* 탐지해 계획을 만든다. 탐지 상태(SCAN_*)를 돌려주며 메모리 부족이면 SCAN_FATAL·*oom. */
@@ -547,7 +909,7 @@ static ScanStatus detect(const CliCleanOptions *opts, CleanPlan *plan, wchar_t *
 {
     *oom = 0;
     *root = NULL;
-    if (opts->command == CLI_CLEAN_PROJECT) {
+    if (opts->command != CLI_CLEAN_SYSTEM) {
         /* GUI [프로젝트 정리]와 같은 탐지 작업(보호 경로·앱 데이터 폴더 제외 포함). */
         CleanupResult r;
         CleanupJob *job = cleanup_job_start(opts->target, 1000, NULL, NULL);
@@ -582,6 +944,41 @@ static ScanStatus detect(const CliCleanOptions *opts, CleanPlan *plan, wchar_t *
     }
 }
 
+/* JSON 출력이면 buf 를 out 에 쓴다. 실패하면 EXIT_FATAL. */
+static int flush_json(JsonBuf *buf, FILE *out, FILE *err, int code)
+{
+    if (!jsonl_buf_flush(buf, out)) {
+        fwprintf(err, L"error: failed to write JSON output\n");
+        return EXIT_FATAL;
+    }
+    return code;
+}
+
+static int run_find(const CliCleanOptions *opts, FILE *out, FILE *err, CleanPlan *plan,
+                    const wchar_t *root, ScanStatus st, JsonBuf *buf)
+{
+    size_t *order = NULL, n;
+    int oom = 0, code = st == SCAN_PARTIAL ? EXIT_PARTIAL : EXIT_COMPLETE;
+
+    n = find_order(plan, opts, &order, &oom);
+    if (oom) {
+        fwprintf(err, L"error: out of memory\n");
+        if (opts->json) {
+            json_error_doc(buf, opts, root, L"out of memory", EXIT_FATAL);
+            flush_json(buf, out, err, EXIT_FATAL);
+        }
+        return EXIT_FATAL;
+    }
+    if (opts->json || opts->jsonl) {
+        json_find(buf, opts, plan, order, n, root, st, code);
+        code = flush_json(buf, out, err, code);
+    } else {
+        print_find(out, plan, order, n, root);
+    }
+    free(order);
+    return code;
+}
+
 int cli_clean_run(const CliCleanOptions *opts, FILE *out, FILE *err,
                   cli_clean_confirm_fn confirm, void *ctx)
 {
@@ -591,8 +988,11 @@ int cli_clean_run(const CliCleanOptions *opts, FILE *out, FILE *err,
     CleanPlanSummary s;
     JsonBuf buf;
     ScanStatus st;
-    wchar_t *root = NULL;
+    wchar_t *root = NULL, msg[600];
+    const wchar_t *note = NULL;
     int oom, code = EXIT_COMPLETE, applied = 0;
+    /* 텍스트에서 안내 문구를 쓸 곳: JSON 출력이면 stdout 은 JSON 만이므로 stderr. */
+    FILE *info = (opts->json || opts->jsonl) ? err : out;
 
     clean_plan_init(&plan);
     jsonl_buf_init(&buf);
@@ -600,17 +1000,27 @@ int cli_clean_run(const CliCleanOptions *opts, FILE *out, FILE *err,
     st = detect(opts, &plan, &root, &oom);
     if (st == SCAN_FATAL) {
         if (oom) {
-            fwprintf(err, L"error: out of memory\n");
+            swprintf(msg, 600, L"out of memory");
         } else {
-            fwprintf(err, L"error: cannot scan %ls\n", opts->target != NULL ? opts->target : L"");
+            swprintf(msg, 600, L"cannot scan %ls", opts->target != NULL ? opts->target : L"");
         }
+        fwprintf(err, L"error: %ls\n", msg);
         code = EXIT_FATAL;
+        if (opts->json) {
+            json_error_doc(&buf, opts, root != NULL ? root : opts->target, msg, code);
+            flush_json(&buf, out, err, code);
+        }
         goto done;
     }
     if (st == SCAN_PARTIAL) {
         fwprintf(err, L"warning: some folders could not be read; sizes may be incomplete\n");
         code = EXIT_PARTIAL;
     }
+    if (opts->command == CLI_CLEAN_FIND) {
+        code = run_find(opts, out, err, &plan, root, st, &buf);
+        goto done;
+    }
+
     cli_clean_select(&plan, opts);
     clean_plan_summarize(&plan, &s);
     if (opts->jsonl) {
@@ -619,38 +1029,48 @@ int cli_clean_run(const CliCleanOptions *opts, FILE *out, FILE *err,
             code = EXIT_FATAL;
             goto done;
         }
-    } else {
+    } else if (!opts->json) {
         print_plan(out, &plan, opts, root);
     }
     if (!opts->apply) {
-        if (!opts->jsonl) {
-            fwprintf(out, L"Preview only - nothing was moved. Add --apply to move the selected "
-                          L"targets to the Recycle Bin.\n");
+        wchar_t r[32];
+        format_size(s.reclaim, r, 32);
+        if (!opts->json && !opts->jsonl) {
+            fwprintf(out, L"Dry run - nothing was moved. Expected result: %u item(s) in %u "
+                          L"target(s) would be moved to the Recycle Bin (quarantine folder on drives "
+                          L"without one), freeing about %ls once it is emptied.\n"
+                          L"Add --execute to move them.\n",
+                     (unsigned)s.entries, (unsigned)s.targets, r);
         }
-        goto done;
+        note = L"dry run: nothing was moved";
+        goto finish;
     }
     if (s.targets == 0) {
-        fwprintf(opts->jsonl ? err : out, L"Nothing selected; nothing was moved.\n");
-        goto done;
+        fwprintf(info, L"Nothing selected; nothing was moved.\n");
+        note = L"nothing selected";
+        goto finish;
     }
     if (!opts->yes) {
         if (confirm == NULL) {
             fwprintf(err, L"error: confirmation is not possible (input is not interactive); "
-                          L"add --yes to apply\n");
+                          L"add --yes to execute\n");
             code = EXIT_FATAL;
-            goto done;
+            note = L"confirmation is not possible (input is not interactive); add --yes";
+            goto finish;
         }
         if (!confirm(&s, ctx)) {
-            fwprintf(opts->jsonl ? err : out, L"Cancelled; nothing was moved.\n");
-            goto done;
+            fwprintf(info, L"Cancelled; nothing was moved.\n");
+            note = L"cancelled at confirmation";
+            goto finish;
         }
     }
     {
         CleanPlanOps ops;
         memset(&ops, 0, sizeof(ops)); /* allow_permanent = 0: CLI 는 영구 삭제하지 않는다 */
         if (clean_plan_run(&plan, &ops, &totals) != 0) {
-            fwprintf(opts->jsonl ? err : out, L"Nothing to move.\n");
-            goto done;
+            fwprintf(info, L"Nothing to move.\n");
+            note = L"nothing to move";
+            goto finish;
         }
     }
     applied = 1;
@@ -659,17 +1079,18 @@ int cli_clean_run(const CliCleanOptions *opts, FILE *out, FILE *err,
     }
     if (opts->jsonl) {
         jsonl_results(&buf, &plan);
-    } else {
+    } else if (!opts->json) {
         print_result(out, &plan, &totals);
     }
-done:
-    if (opts->jsonl && code != EXIT_FATAL) {
+finish:
+    if (opts->json) {
+        json_clean_doc(&buf, opts, &plan, root, st, applied, &totals, note, code);
+        code = flush_json(&buf, out, err, code);
+    } else if (opts->jsonl && code != EXIT_FATAL) {
         jsonl_done(&buf, applied ? &totals : NULL, applied, code);
-        if (!jsonl_buf_flush(&buf, out)) {
-            fwprintf(err, L"error: failed to write JSON output\n");
-            code = EXIT_FATAL;
-        }
+        code = flush_json(&buf, out, err, code);
     }
+done:
     jsonl_buf_free(&buf);
     clean_plan_free(&plan);
     free(root);

@@ -53,7 +53,7 @@
 | `bytesieve_treemap` | 스퀘어리파이드 트리맵 배치(순수 계산, GUI 트리맵 보기 `gui_treemap`이 사용) |
 | `bytesieve_cli` / `bytesieve_jsonl` | CLI 인자 해석·출력, JSON Lines 직렬화(정리 명령용 일반 이벤트 도우미 포함) |
 | `bytesieve_plan` | 정리 계획: 탐지 결과를 대상(선택 단위)·실행 항목으로 바꾸고, 선택 정책([모두 선택]은 MANUAL 제외)·요약·실행 엔진(영구 삭제는 `allow_permanent` 일 때만 먼저, 실행 직전 실행 중 프로그램·최근 변경 확인, 항목마다 `cleanup_trash_one`)을 GUI 두 정리 탭과 CLI에 똑같이 제공 |
-| `bytesieve_cli_clean` | `disk-scanner clean project|system`: 인자 해석, CLI 선택(필터·`--include`·`--exclude`, 영구 삭제 항상 제외), 미리보기·확인·실행, 텍스트·JSON Lines 출력. 탐지는 GUI와 같은 `cleanup_job`·`cleaner_analyze` |
+| `bytesieve_cli_clean` | `disk-scanner find`·`clean project|system`: 인자 해석, CLI 선택(필터·`--include`·`--exclude`, 영구 삭제 항상 제외), 후보 목록(find, 읽기 전용)·dry-run·확인·실행(`--execute`), 텍스트·JSON 문서(`--json`, `"version":1`)·JSON Lines 출력, 공통 종료 코드. 탐지는 GUI와 같은 `cleanup_job`·`cleaner_analyze` |
 | `bytesieve_cleaner` | 시스템 정리(Cleaner): 사용자 임시 파일·오류 보고서·휴지통·브라우저 캐시·공용 개발 캐시 분석(읽기 전용, 위치 근거·캐시 위치 문제 포함, 항목마다 실제 확보 용량), 분석 결과 → 정리 계획(`cleaner_build_plan`), 분석 작업 스레드. 기존 실행 API(`cleaner_run_*`)는 계획 실행 엔진을 감싼다 |
 | `bytesieve_booster` | Booster: 시작 프로그램 목록·켜기/끄기(StartupApproved), 프로세스 목록·CPU 계산·보호 판정·끝내기(PID 재사용 확인) |
 | `bytesieve_ui_lang` | GUI 표시 언어(한국어·영어·일본어·중국어 간체) 번역 문자열 표와 언어 결정(환경 변수 → 레지스트리 → Windows 표시 언어). 창과 무관 |
