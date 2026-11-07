@@ -1859,6 +1859,11 @@ static LRESULT CALLBACK panel_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_SIZE:
         layout();
         return 0;
+    case WM_CTLCOLOREDIT:
+    case WM_CTLCOLORLISTBOX:
+    case WM_CTLCOLORBTN:
+        /* 입력 칸·콤보 상자 목록(어둡게일 때 SURFACE 색). */
+        return theme_ctlcolor(hwnd, msg, wp, lp);
     case WM_CTLCOLORSTATIC:
         return theme_ctlcolor_static((HDC)wp);
     case WM_COMMAND:

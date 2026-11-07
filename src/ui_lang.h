@@ -9,7 +9,8 @@
  * GUI 의 문자열을 언어별 표에서 꺼내 쓴다(외부 라이브러리·리소스 DLL 없음).
  * - 지원 언어: 한국어(기본 원문), 영어, 일본어, 중국어 간체.
  * - 언어 결정 순서(ui_lang_detect): 환경 변수 BYTESIEVE_LANG → 레지스트리
- *   HKCU\Software\ByteSieve 의 Language 값(설치 프로그램이 설치 언어로 기록) → Windows 표시 언어.
+ *   HKCU\Software\ByteSieve 의 Language 값(설치 프로그램이 설치 언어로 기록, GUI [설정] 페이지가 바꿈.
+ *   환경 변수 BYTESIEVE_SETTINGS_KEY 가 있으면 그 키) → Windows 표시 언어.
  *   지원하지 않는 언어(중국어 번체 포함)는 영어로 한다.
  * - 언어는 프로그램 시작 때 한 번 정한다(ui_lang_set). 실행 중에 바꾸면 이미 만든 창의 글자는 그대로다.
  * - 모든 번역 문자열은 비어 있지 않고, 같은 항목의 서식 지정자(%ls, %u 등)가 언어마다 같은 순서로
@@ -36,6 +37,7 @@ typedef enum {
     UI_T_NAV_CLEANER,
     UI_T_NAV_BOOSTER,
     UI_T_NAV_CACHE,
+    UI_T_NAV_SETTINGS,
 
     /* 사이드바 그룹 머리글(목적별 메뉴) */
     UI_T_GROUP_ANALYSIS,
@@ -81,6 +83,24 @@ typedef enum {
     UI_T_FLAG_INCOMPLETE,
     UI_T_FLAG_REPARSE,
     UI_T_FLAG_DEPTH_LIMIT,
+
+    /* 설정 페이지 */
+    UI_T_SET_APPEARANCE,
+    UI_T_SET_THEME,
+    UI_T_THEME_SYSTEM, /* 테마 콤보 상자(ThemeMode 순서) */
+    UI_T_THEME_LIGHT,
+    UI_T_THEME_DARK,
+    UI_T_SET_THEME_HC,
+    UI_T_SET_LANGUAGE,
+    UI_T_SET_LANG_LABEL,
+    UI_T_LANG_SYSTEM, /* %ls: Windows 표시 언어의 이름 */
+    UI_T_SET_LANG_RESTART,
+    UI_T_SET_LANG_ENV, /* %ls: 환경 변수 값의 언어 이름 */
+    UI_T_SET_HISTORY,
+    UI_T_SET_HISTORY_DIR, /* %ls: 기록 폴더 */
+    UI_T_SET_OPEN_DIR,
+    UI_T_SET_SAVE_FAILED, /* %lu: Windows 오류 */
+    UI_T_SET_AUTOSAVE_FAILED,
 
     UI_T_COUNT
 } UiText;

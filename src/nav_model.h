@@ -14,9 +14,11 @@
  *   캐시            개발 캐시
  *   격리·복원       격리 폴더
  *   시스템          모니터 · 부스터
+ *   (아래 끝)       설정            ← 머리글 없는 footer 그룹. 배치에 아래 끝(bottom)을 주면 거기에 붙는다.
  *
  * 계약
- *   - 모든 페이지는 정확히 한 번, 자기 그룹 머리글 아래에 나온다. 첫 행은 머리글이다.
+ *   - 모든 페이지는 정확히 한 번 나온다. footer 가 아닌 페이지는 자기 그룹 머리글 아래에 있다.
+ *     첫 행은 머리글이다. footer 그룹(NAV_GROUP_FOOTER)은 머리글이 없고 맨 끝에 온다.
  *   - 머리글은 고를 수 없다. 키 이동·클릭은 항상 페이지 항목에 멈춘다.
  *   - 키 이동은 끝에서 멈춘다(돌아가지 않음).
  */
@@ -30,6 +32,7 @@ typedef enum {
     NAV_PAGE_QUARANTINE, /* 격리 폴더(복원·영구 삭제) */
     NAV_PAGE_MONITOR,    /* 모니터(RAM·CPU) */
     NAV_PAGE_BOOSTER,    /* 부스터(시작 프로그램·프로세스) */
+    NAV_PAGE_SETTINGS,   /* 설정(테마·표시 언어·스캔 기록) */
     NAV_PAGE_COUNT
 } NavPage;
 
@@ -39,6 +42,7 @@ typedef enum {
     NAV_GROUP_CACHE,        /* 캐시 */
     NAV_GROUP_QUARANTINE,   /* 격리·복원 */
     NAV_GROUP_SYSTEM,       /* 시스템 */
+    NAV_GROUP_FOOTER,       /* 아래 끝(설정). 머리글 없음 */
     NAV_GROUP_COUNT
 } NavGroup;
 
@@ -70,7 +74,11 @@ size_t nav_row_of_page(NavPage page);
 /* 페이지가 속한 그룹(범위 밖이면 NAV_GROUP_COUNT). */
 NavGroup nav_page_group(NavPage page);
 
-/* 화면 문구 번호(ui_text 로 꺼냄). 페이지 문구는 사이드바 항목과 페이지 제목에 함께 쓴다. */
+/* 그룹에 머리글 행이 있으면 1(footer 는 0). */
+int nav_group_has_header(NavGroup group);
+
+/* 화면 문구 번호(ui_text 로 꺼냄). 페이지 문구는 사이드바 항목과 페이지 제목에 함께 쓴다.
+ * 머리글이 없는 그룹은 UI_T_COUNT(빈 문자열). */
 UiText nav_page_text(NavPage page);
 UiText nav_group_text(NavGroup group);
 
@@ -82,19 +90,22 @@ NavPage nav_key_move(NavPage current, NavKey key);
 
 /*
  * 세로 배치. 위 여백 top 다음에 행을 차례로 놓는다. 머리글 행 높이 header_h, 항목 행 높이 item_h.
- * 둘째 그룹부터는 머리글 위에 group_gap 만큼 띄운다.
+ * 둘째 그룹부터는 그룹 첫 행(머리글, footer 는 첫 항목) 위에 group_gap 만큼 띄운다.
+ * bottom 이 0 보다 크면 footer 행들을 아래 끝이 bottom 이 되게 내려 붙인다(그 자리가 원래 자리보다
+ * 위면 원래 자리 그대로: 겹치지 않음). 0 이면 이어서 놓는다.
  */
 typedef struct {
     int top;
     int header_h;
     int item_h;
     int group_gap;
+    int bottom;
 } NavMetrics;
 
 /* 행의 위·아래 y(아래는 포함하지 않음). 범위 밖이면 0. */
 int nav_row_span(const NavMetrics *m, size_t index, int *y0, int *y1);
 
-/* 모든 행을 놓은 뒤의 아래 끝 y. */
+/* 모든 행을 이어서 놓은 뒤의 아래 끝 y(bottom 은 보지 않음: 사이드바에 필요한 최소 높이). */
 int nav_total_height(const NavMetrics *m);
 
 /* y 에 있는 페이지 항목을 *out 에. 머리글·간격·범위 밖이면 0. */

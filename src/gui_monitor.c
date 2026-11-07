@@ -332,11 +332,11 @@ static void paint_graph(MonitorPanel *p, HDC dc, const RECT *rc)
     SIZE size;
     int i, x, label_w;
 
-    FillRect(dc, rc, GetSysColorBrush(COLOR_WINDOW));
-    FrameRect(dc, rc, GetSysColorBrush(COLOR_BTNSHADOW));
+    theme_fill_rect(dc, rc, THEME_COLOR_SURFACE);
+    theme_frame_rect(dc, rc, THEME_COLOR_FRAME);
     old_font = SelectObject(dc, p->font);
     SetBkMode(dc, TRANSPARENT);
-    SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
+    SetTextColor(dc, theme_is_dark() ? THEME_COLOR_TEXT : GetSysColor(COLOR_WINDOWTEXT));
 
     x = rc->left + pscale(p, 8);
     TextOutW(dc, x, rc->top + pscale(p, 4), title, (int)wcslen(title));
@@ -357,7 +357,7 @@ static void paint_graph(MonitorPanel *p, HDC dc, const RECT *rc)
     }
 
     /* 0·25·50·75·100% 눈금. */
-    grid = CreatePen(PS_SOLID, 1, GetSysColor(COLOR_BTNFACE));
+    grid = CreatePen(PS_SOLID, 1, THEME_COLOR_FACE);
     if (grid != NULL) {
         HGDIOBJ old_pen = SelectObject(dc, grid);
         for (i = 0; i <= 4; i++) {
@@ -369,14 +369,14 @@ static void paint_graph(MonitorPanel *p, HDC dc, const RECT *rc)
             LineTo(dc, plot.right, y);
             if (i % 2 == 0) {
                 swprintf(label, 8, L"%d%%", i * 25);
-                SetTextColor(dc, GetSysColor(COLOR_GRAYTEXT));
+                SetTextColor(dc, THEME_COLOR_TEXT_2ND);
                 DrawTextW(dc, label, -1, &lr, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
             }
         }
         SelectObject(dc, old_pen);
         DeleteObject(grid);
     }
-    SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
+    SetTextColor(dc, theme_is_dark() ? THEME_COLOR_TEXT : GetSysColor(COLOR_WINDOWTEXT));
 
     draw_series(p, dc, &plot, p->ram_history, RAM_COLOR);
     draw_series(p, dc, &plot, p->cpu_history, CPU_COLOR);
@@ -492,6 +492,11 @@ static LRESULT CALLBACK panel_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_CREATE:
         panel_create_controls(p);
         return 0;
+    case WM_CTLCOLOREDIT:
+    case WM_CTLCOLORLISTBOX:
+    case WM_CTLCOLORBTN:
+        /* 입력 칸·콤보 상자 목록(어둡게일 때 SURFACE 색). */
+        return theme_ctlcolor(hwnd, msg, wp, lp);
     case WM_CTLCOLORSTATIC:
         /* 정적 글자·체크 상자 배경을 창 배경색(theme BG)에 맞춘다. */
         return theme_ctlcolor_static((HDC)wp);
@@ -510,7 +515,7 @@ static LRESULT CALLBACK panel_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         GetClientRect(hwnd, &rc);
         saved = SaveDC(dc);
         ExcludeClipRect(dc, p->graph.left, p->graph.top, p->graph.right, p->graph.bottom);
-        FillRect(dc, &rc, GetSysColorBrush(COLOR_BTNFACE));
+        FillRect(dc, &rc, theme_bg_brush());
         RestoreDC(dc, saved);
         return 1;
     }

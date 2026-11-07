@@ -48,11 +48,15 @@ static int nscale(const NavView *v, int px)
 static NavMetrics metrics(const NavView *v)
 {
     NavMetrics m;
+    RECT client;
 
     m.top = nscale(v, NAV_TOP);
     m.header_h = nscale(v, NAV_HEADER_H);
     m.item_h = nscale(v, NAV_ITEM_H);
     m.group_gap = nscale(v, NAV_GROUP_GAP);
+    /* [설정](footer)은 사이드바 아래 끝에 붙인다. */
+    GetClientRect(v->hwnd, &client);
+    m.bottom = client.bottom - nscale(v, NAV_TOP);
     return m;
 }
 
@@ -329,6 +333,18 @@ HWND nav_view_create(HWND parent, int id, HFONT font, int dpi)
     params.dpi = dpi > 0 ? dpi : 96;
     return CreateWindowExW(0, NAV_CLASS, L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 0, 0,
                            parent, (HMENU)(INT_PTR)id, GetModuleHandleW(NULL), &params);
+}
+
+int nav_view_min_height(HWND nav)
+{
+    NavView *v = nav_of(nav);
+    NavMetrics m;
+
+    if (v == NULL) {
+        return 0;
+    }
+    m = metrics(v);
+    return nav_total_height(&m) + nscale(v, NAV_TOP);
 }
 
 int nav_view_width(HWND nav)

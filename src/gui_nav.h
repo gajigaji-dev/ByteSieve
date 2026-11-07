@@ -10,7 +10,8 @@
 
 /*
  * 왼쪽 사이드바(직접 그리는 자식 창). 메뉴 구성·키 이동·위치 판정은 nav_model 이 정하고,
- * 이 창은 그리기와 입력만 맡는다(Windows 11 설정 앱 모양).
+ * 이 창은 그리기와 입력만 맡는다(Windows 11 설정 앱 모양). [설정]은 아래 끝에 붙는다(footer).
+ * 색은 gui_theme 의 토큰을 그릴 때마다 읽으므로 다크 모드로 바꾸면 다시 그리기만 하면 된다.
  *   - 그룹 머리글은 보조 글자색, 페이지 항목은 본문 글자색으로 그린다.
  *   - 고른 항목: 흰 표면(둥근 모서리) + 왼쪽 강조색 막대. 마우스를 올린 항목: 옅은 배경.
  *   - 마우스 클릭, ↑·↓·Home·End 로 고른다(Tab 으로 포커스를 받으면 고른 항목에 포커스 테두리).
@@ -27,6 +28,9 @@ HWND nav_view_create(HWND parent, int id, HFONT font, int dpi);
 
 /* 사이드바 폭: 가장 긴 문구(머리글·항목) + 여백, 최소 200px(96 DPI 기준). */
 int nav_view_width(HWND nav);
+
+/* 모든 항목이 겹치지 않고 들어가는 사이드바 높이(아래 여백 포함). 최소 창 높이에 쓴다. */
+int nav_view_min_height(HWND nav);
 
 /* 고른 페이지. */
 NavPage nav_view_selected(HWND nav);

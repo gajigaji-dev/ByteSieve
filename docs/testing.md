@@ -4,13 +4,13 @@
 ctest --test-dir build -C Debug --output-on-failure
 ```
 
-CTest에 등록된 테스트는 79개입니다.
+CTest에 등록된 테스트는 82개입니다.
 
 | 분류 | 테스트 | 확인 내용 |
 |---|---|---|
-| 단위 테스트(29개) | `path`, `scanner`, `scan_alloc`, `scan_parallel`, `hardlink`, `scan_model`, `scan_history`, `export`, `scan_job`, `jsonl`, `cli`, `cli_clean`, `drive`, `sysmon`, `size_format`, `treemap`, `ui_lang`, `nav_model`, `cleanup_rules`, `project`, `devenv`, `clean_plan`, `reclaim`, `cleanup_scan`, `cleanup_trash`, `dev_cache`, `quarantine`, `cleaner`, `booster` | 아래 참고 |
+| 단위 테스트(30개) | `path`, `scanner`, `scan_alloc`, `scan_parallel`, `hardlink`, `scan_model`, `scan_history`, `export`, `scan_job`, `jsonl`, `cli`, `cli_clean`, `drive`, `sysmon`, `size_format`, `treemap`, `ui_lang`, `nav_model`, `app_settings`, `cleanup_rules`, `project`, `devenv`, `clean_plan`, `reclaim`, `cleanup_scan`, `cleanup_trash`, `dev_cache`, `quarantine`, `cleaner`, `booster` | 아래 참고 |
 | CLI·도구 검사(31개) | `no_args`, `help`, `scan_*`, `cli_*`, `bench_smoke` | 개발 환경 분석(`cli_devenv`: 사용자·기록 폴더를 픽스처로, 첫 기록 → 캐시를 키운 뒤 증감(+10000) → `--no-record`는 기록 파일을 바꾸지 않음, Docker 가상 디스크·줄이는 방법, JSON Lines, 인자 오류, 아무것도 지우지 않음), 종료 코드, 텍스트·JSONL 출력, 인자 오류, 접근 거부 픽스처, 격리 폴더 제외(`cli_skip_quarantine`·`cli_jsonl_skip_quarantine`), `--track` 기준 → 변경 → 비교(`cli_track`), 정리 후보 찾기(`cli_find`: 프로젝트마다 자기 Git 저장소를 만들어 휴면(2020년 커밋)·미커밋 변경·원격 없는 커밋·lockfile 복구 가능성·`--dormant-days`·`--no-git`(직접 읽기)·`project` 이벤트를 확인, git 이 없으면 Git 확인은 건너뜀, 크기순 목록·확인됨/추정 표시, 아무것도 옮기지 않음, `--json` 문서를 해석해 필드 확인, `--category`·`--jsonl`, 실행 옵션 거부, 없는 폴더는 2와 실패 문서), 정리 명령(`cli_clean_project`·`cli_clean_system`: 기본·`--dry-run`은 아무것도 옮기지 않고 예상 결과를 보임, `--json` dry-run·실행 문서를 해석해 `mode`·`executed`·`summary`·`totals`·대상별 `result`·`exit_code` 확인, 대화형이 아닌 입력에서 `--yes` 없는 `--execute` 거부, 예전 이름 `--apply`도 실행, 유형 거르기·JSON Lines 실행, 공용 개발 캐시는 `--include`로만, `recycle_bin` 거부, 옮긴 항목은 픽스처의 격리 폴더로), 성능 측정 도구의 스캐너 진단 출력(`bench_smoke`) |
-| GUI 자체 검사(19개) | `gui_scan`, `gui_cancel`, `gui_missing_dir`, `gui_drives`, `gui_cleanup`, `gui_cleanup_cancel`, `gui_trash`, `gui_quarantine`, `gui_history`, `gui_precise`, `gui_export`, `gui_monitor`, `gui_cleaner`, `gui_booster`, `gui_nav`, `gui_lang_ko`, `gui_lang_en`, `gui_lang_ja`, `gui_lang_zh-Hans` | 숨긴 창에서 실제 작업을 실행하고 화면 상태를 검증(`gui_scan`은 트리맵, `gui_drives`는 암호화 열, `gui_cleanup`은 프로젝트 정리 페이지의 실제 확보 열 포함, 모든 검사가 고른 페이지의 패널만 보이고 제목·사이드바 선택이 맞는지도 확인). `gui_cleaner`(시스템 정리 → 개발 캐시 페이지 차례로)는 사용자 폴더·TEMP 를 픽스처로 돌리고 각 페이지에 분석 범위 밖 종류의 행이 없는지(시스템 정리에 개발 캐시 없음, 개발 캐시에 휴지통 없음), [모두 선택]이 휴지통·개발 도구 캐시를 고르지 않는지, Gradle 래퍼 캐시가 "정리 가능 · 주의"로 표시되는지, 예전 `gui_cache`가 보던 공용 캐시(npm·pip·Gradle·Cargo·NuGet)의 위치 근거와 캐시 구조가 아닌 위치(`NUGET_HTTP_CACHE_PATH` → 문서 폴더)가 이유와 함께 정리되지 않는지, 하드 링크로 캐시 밖과 나누는 파일이 실제 확보에서 빠지는지 확인한 뒤 개발 도구 캐시를 직접 체크해 정리한 항목을 픽스처의 격리 폴더로 보내며(실제 휴지통은 조회만 하고 비우지 않음, 도구 설정·설치한 도구는 남음), `gui_booster`는 목록·CPU 측정·보호 판정만 확인하고 아무것도 바꾸지 않음. `gui_nav`는 사이드바를 키보드(↓ 끝까지·↑·Home·End)와 마우스(모든 항목·같은 항목 다시·그룹 머리글)로 오가며 고른 페이지의 패널만 보이는지, 제목·선택이 맞는지, 처음 열 때 조회(드라이브·시스템 정리·개발 캐시)는 한 번만이고 격리 폴더는 열 때마다인지, 두 Cleaner 페이지의 분석 범위를 확인(조회는 세기만 하고 실제로 하지 않아 사용자 시스템을 읽지 않음). `gui_lang_*`는 언어마다 언어별 글꼴과, 최소 창 크기에서 사이드바 문구와 폴더 스캔 페이지 단추 문구가 잘리지 않고 패널 안에 있는지, 보기·열 머리글 번역을 확인 |
+| GUI 자체 검사(21개) | `gui_scan`, `gui_cancel`, `gui_missing_dir`, `gui_drives`, `gui_cleanup`, `gui_cleanup_cancel`, `gui_trash`, `gui_quarantine`, `gui_history`, `gui_precise`, `gui_export`, `gui_monitor`, `gui_cleaner`, `gui_booster`, `gui_nav`, `gui_theme`, `gui_settings`, `gui_lang_ko`, `gui_lang_en`, `gui_lang_ja`, `gui_lang_zh-Hans` | 숨긴 창에서 실제 작업을 실행하고 화면 상태를 검증(`gui_scan`은 트리맵, `gui_drives`는 암호화 열, `gui_cleanup`은 프로젝트 정리 페이지의 실제 확보 열 포함, 모든 검사가 고른 페이지의 패널만 보이고 제목·사이드바 선택이 맞는지도 확인). `gui_cleaner`(시스템 정리 → 개발 캐시 페이지 차례로)는 사용자 폴더·TEMP 를 픽스처로 돌리고 각 페이지에 분석 범위 밖 종류의 행이 없는지(시스템 정리에 개발 캐시 없음, 개발 캐시에 휴지통 없음), [모두 선택]이 휴지통·개발 도구 캐시를 고르지 않는지, Gradle 래퍼 캐시가 "정리 가능 · 주의"로 표시되는지, 예전 `gui_cache`가 보던 공용 캐시(npm·pip·Gradle·Cargo·NuGet)의 위치 근거와 캐시 구조가 아닌 위치(`NUGET_HTTP_CACHE_PATH` → 문서 폴더)가 이유와 함께 정리되지 않는지, 하드 링크로 캐시 밖과 나누는 파일이 실제 확보에서 빠지는지 확인한 뒤 개발 도구 캐시를 직접 체크해 정리한 항목을 픽스처의 격리 폴더로 보내며(실제 휴지통은 조회만 하고 비우지 않음, 도구 설정·설치한 도구는 남음), `gui_booster`는 목록·CPU 측정·보호 판정만 확인하고 아무것도 바꾸지 않음. `gui_nav`는 사이드바를 키보드(↓ 끝까지·↑·Home·End)와 마우스(모든 항목·같은 항목 다시·그룹 머리글·[설정] 위 빈 곳)로 오가며 고른 페이지의 패널만 보이는지, 제목·선택이 맞는지, 처음 열 때 조회(드라이브·시스템 정리·개발 캐시)는 한 번만이고 격리 폴더는 열 때마다인지, 두 Cleaner 페이지의 분석 범위, [설정]이 사이드바 아래 끝에 붙는지 확인(조회는 세기만 하고 실제로 하지 않아 사용자 시스템을 읽지 않음). `gui_theme`은 테스트 레지스트리 키(`BYTESIEVE_SETTINGS_KEY`, 끝나면 지움)와 `BYTESIEVE_SYSTEM_THEME`으로 시스템 따르기(밝게) → 어둡게 → 시스템 따르기에서 Windows 앱 모드가 어둡게·밝게로 바뀜(`WM_SETTINGCHANGE`) → 밝게 고정(시스템이 바뀌어도 그대로)을 거치며, 단계마다 모든 목록·트리의 배경·글자 색, 창 클래스 배경 브러시, 제목·입력 칸의 `WM_CTLCOLOR*` 응답 색과 저장 값을 확인. `gui_settings`는 [설정]에서 표시 언어를 일본어 → 한국어 → 시스템 따르기로 저장하며 레지스트리 값·다음 실행 언어(`ui_lang_detect`)·다시 시작 안내를 확인하고(지금 화면 언어는 그대로), [스캔 기록 자동 저장]을 끄고 켜며 폴더 스캔 페이지 상태·기록 폴더의 설정 파일과 맞는지 확인. `gui_lang_*`는 언어마다 언어별 글꼴과, 최소 창 크기에서 사이드바 문구(항목끼리 겹치지 않음)와 폴더 스캔·설정 페이지 문구가 잘리지 않고 패널 안에 있는지, 보기·열 머리글·설정 페이지 번역을 확인 |
 
 예제 폴더가 빌드 폴더(이 저장소) 안에 있는 검사(`gui_trash`, `gui_quarantine`, `cli_clean_project`, `cli_clean_system`)는 `BYTESIEVE_GIT=none`으로 실행해
 작업 트리의 Git 상태(미커밋 변경)에 결과가 좌우되지 않게 합니다. 사용자 폴더를 픽스처로 돌리는 검사는 Go·Yarn·Conda 등의 도구 환경 변수도 지우고 `BYTESIEVE_WSL_KEY`를 빈 레지스트리 키로 두어
@@ -89,8 +89,13 @@ CTest에 등록된 테스트는 79개입니다.
 - `ui_lang`: 모든 번역 문자열이 네 언어(한국어·영어·일본어·중국어 간체)에 다 있는지, 같은 항목의 서식 지정자가 언어마다 같은 순서인지,
   폴더 상태 표시가 공백으로 시작하는지, 언어 태그 해석(지역 표기·대소문자·`_`, 번체·지원하지 않는 언어·너무 긴 값 거부),
   LANGID 변환(번체·그 밖의 언어는 영어), 환경 변수 `BYTESIEVE_LANG`이 먼저이고 해석할 수 없으면 다음 단계로 넘어가는지(레지스트리는 바꾸지 않음)
-- `nav_model`: 사이드바 메뉴 표(모든 페이지가 한 번씩 자기 그룹 머리글 아래, 목적별 그룹), 네 언어 문구가 비지 않고 겹치지 않음,
-  키 이동(머리글 건너뜀·끝에서 멈춤·↓로 모든 페이지를 한 번씩), 배치(행 위치·그룹 간격·전체 높이)와 마우스 위치 판정(머리글·간격·여백은 없음)
+- `nav_model`: 사이드바 메뉴 표(모든 페이지가 한 번씩 자기 그룹 머리글 아래, [설정]은 머리글 없는 footer 로 맨 끝, 목적별 그룹), 네 언어 문구가 비지 않고 겹치지 않음,
+  키 이동(머리글 건너뜀·끝에서 멈춤·↓로 모든 페이지를 한 번씩, 끝은 [설정]), 배치(행 위치·그룹 간격·전체 높이)와 마우스 위치 판정(머리글·간격·여백은 없음),
+  footer 배치(아래 끝에 붙음, 위 행은 그대로, 창이 낮으면 원래 자리에 남아 겹치지 않음)
+- `app_settings`: 테마 식별자·문구(네 언어)·해석, 실제로 어둡게 할지(고대비면 항상 밝게, 시스템 따르기면 시스템 값), 설정 키(환경 변수가 없으면 기본 키, 테스트 키 판정,
+  기본 키는 지우지 않음), 프로세스 번호를 붙인 테스트 키에서 테마 저장·읽기(없음·대소문자·해석할 수 없는 값은 시스템 따르기·잘못된 값은 거부하고 그대로)와
+  언어 저장·읽기(시스템 따르기는 `Language` 값만 지우고 `Theme`은 그대로, 번체는 없는 것과 같음), `ui_lang_detect`가 같은 키를 읽는지, `BYTESIEVE_LANG`이 먼저인지,
+  시스템 앱 모드의 테스트용 환경 변수, 끝나면 테스트 키를 지우는지
 - `treemap`: 넓이가 무게에 비례하는지, 영역 안·서로 겹치지 않음·영역을 빈틈없이 채움, 논문 예(6×4에 6,6,4,3,2,2,1) 배치,
   무게 0·합 0·넓이 0 영역, 64비트에 가까운 큰 값, 무작위 무게 300개(정렬·비정렬)
 - `gui_scan`의 트리맵 검사: 보기를 트리맵으로 바꾸면 목록 대신 보이는지, 블록이 영역 안에 겹치지 않고 용량에 비례하며 합이 기준 폴더와
@@ -122,6 +127,12 @@ build\Debug\bytesieve-gui.exe --self-test-booster        # 목록·CPU 측정·�
 build\Debug\bytesieve-gui.exe --self-test-cleaner C:\fx
 build\Debug\bytesieve-gui.exe --self-test-lang en      # ko·en·ja·zh-Hans, 성공하면 언어·글꼴·최소 폭을 stdout에 출력
 build\Debug\bytesieve-gui.exe --self-test-nav          # 사이드바 이동·페이지 전환(조회는 세기만 함), 지나간 페이지를 stdout에 출력
+# --self-test-theme·--self-test-settings 는 설정을 바꾸므로 테스트 키에서만 실행된다(아니면 실패). 끝나면 테스트 키를 지운다.
+$env:BYTESIEVE_SETTINGS_KEY = "Software\ByteSieveTest\manual"
+$env:BYTESIEVE_SYSTEM_THEME = "light"                    # 시스템 앱 모드를 밝게로 가정
+build\Debug\bytesieve-gui.exe --self-test-theme        # 테마 단계를 stdout에 출력
+$env:BYTESIEVE_HISTORY_DIR = "C:\fx\history"; Remove-Item Env:BYTESIEVE_LANG -ErrorAction SilentlyContinue
+build\Debug\bytesieve-gui.exe --self-test-settings     # 언어 저장·자동 저장 끄고 켜기
 ```
 
 `--self-test-cleaner`는 분석한 위치(공용 개발 캐시 포함)가 **하나라도** 지정한 폴더 밖이면(실제 사용자 파일·캐시를 볼 수 있으므로) 아무것도
