@@ -1,0 +1,47 @@
+# 릴리스: v* 태그(예: v1.0.0)를 올리면 Release 빌드·테스트 → 설치 프로그램·포터블 ZIP·SHA256SUMS.txt 를 만들어
+# GitHub 릴리스 "초안"에 올린다. 공개는 사람이 docs/release.md 의 확인 목록을 마친 뒤 직접 한다.
+# 태그와 CMakeLists.txt 의 project VERSION 이 다르거나 CHANGELOG.md 에 그 버전 구역이 없으면 실패한다(tools/package.ps1).
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup -y --no-progress
+          }
+
+      - name: Package (build, test, installer, portable zip, SHA256)
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tools/package.ps1
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ByteSieve-${{ github.ref_name }}
+          path: |
+            dist/*.exe
+            dist/*.zip
+            dist/SHA256SUMS.txt
+
+      - name: Create draft release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $files = Get-ChildItem dist -File | Where-Object { $_.Name -match '\.(exe|zip)$' -or $_.Name -eq 'SHA256SUMS.txt' } |
+                   ForEach-Object { $_.FullName }
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          gh release create $env:GITHUB_REF_NAME @files --draft --title "ByteSieve $version" --notes-file dist/RELEASE_NOTES.md

@@ -1,0 +1,7 @@
+#pragma code_page(65001)
+// bytesieve-gui.exe 리소스(공통 부분은 bytesieve_common.rc.inc).
+#define BYTESIEVE_RC_NAME "bytesieve-gui"
+#define BYTESIEVE_RC_FILE "bytesieve-gui.exe"
+#define BYTESIEVE_RC_DESC "ByteSieve - disk usage analyzer and cleaner"
+#define BYTESIEVE_RC_MANIFEST "gui.manifest"
+#include "bytesieve_common.rc.inc"

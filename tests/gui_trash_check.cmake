@@ -45,9 +45,37 @@ if(NOT deny_rc EQUAL 0)
 endif()
 
 file(TO_NATIVE_PATH "${FIXTURE}" native_fixture)
+# FORCE_QUARANTINE=1(gui_trash_fallback): 픽스처를 휴지통 없는 위치처럼 다뤄(BYTESIEVE_QUARANTINE_ROOT) 휴지통을
+# 쓸 수 없을 때의 건너뜀·복원 경로를 검사한다. 격리 폴더는 픽스처 안에 생긴다.
+set(extra_env)
+if(FORCE_QUARANTINE)
+    set(extra_env "BYTESIEVE_QUARANTINE_ROOT=${native_fixture}")
+endif()
 # 예제 폴더는 빌드 폴더(이 저장소) 안에 있으므로, 작업 트리의 Git 상태에 결과가 좌우되지 않게 git.exe 를 쓰지 않는다.
-execute_process(COMMAND ${CMAKE_COMMAND} -E env BYTESIEVE_GIT=none "${EXE}" --self-test-trash "${native_fixture}"
+execute_process(COMMAND ${CMAKE_COMMAND} -E env BYTESIEVE_GIT=none ${extra_env}
+                        "${EXE}" --self-test-trash "${native_fixture}"
                 RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err TIMEOUT 110)
+if(FORCE_QUARANTINE AND NOT out MATCHES "trash-skip: [^\r\n]*test quarantine root")
+    message(SEND_ERROR "expected the quarantine fallback to be reported\n${out}\n${err}")
+endif()
+
+# 이 위치에서 휴지통을 쓸 수 없으면(빌드 폴더가 이동식 드라이브, 휴지통 꺼짐·용량 부족) GUI 가 격리 폴더로
+# 전환하고, 검사는 휴지통 경로를 확인할 수 없어 건너뛴다. GUI 는 격리한 테스트 파일을 원래 자리로 복원하므로
+# 실제 드라이브의 격리 폴더(.bytesieve-trash)에 아무것도 남지 않는다. CTest 는 "trash-skip:" 줄로 Skipped 처리한다.
+if(out MATCHES "trash-skip: [^\r\n]+")
+    message(STATUS "${CMAKE_MATCH_0}")
+    if(NOT rc EQUAL 0)
+        message(SEND_ERROR "quarantined test files could not all be restored\n${out}\n${err}")
+    endif()
+    foreach(kept app/node_modules/a/i.js app/build/o.bin app/server.log app/package.json)
+        if(NOT EXISTS "${FIXTURE}/${kept}")
+            message(SEND_ERROR "${kept} should have been restored from the quarantine folder\n${out}")
+        endif()
+    endforeach()
+    unlock()
+    file(REMOVE_RECURSE "${FIXTURE}")
+    return()
+endif()
 
 # 결과와 상관없이 테스트가 휴지통에 넣은 항목만 지운다.
 set(recycled_count 0)

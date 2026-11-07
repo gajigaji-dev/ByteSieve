@@ -10,6 +10,7 @@
 #include <wchar.h>
 
 #include "gui_quarantine.h"
+#include "gui_progress.h"
 #include "gui_theme.h"
 #include "path.h"
 #include "quarantine.h"
@@ -524,7 +525,7 @@ static void update_purge_progress(QuarantinePanel *p)
     }
     if (pos > p->progress_pos) {
         p->progress_pos = pos;
-        SendMessageW(p->progress, PBM_SETPOS, (WPARAM)pos, 0);
+        progress_set(p->progress, PROGRESS_RUNNING, pos, PROGRESS_RANGE);
     }
     e = &job->entries[job->rows[current < job->count ? current : job->count - 1]];
     format_size(bytes, size, 32);
@@ -664,7 +665,7 @@ int quarantine_panel_purge(HWND panel, int confirm)
     p->job = job;
     p->purge_finished = 0;
     p->progress_pos = 0;
-    SendMessageW(p->progress, PBM_SETPOS, 0, 0);
+    progress_set(p->progress, PROGRESS_IDLE, 0, PROGRESS_RANGE);
     update_buttons(p);
     update_purge_progress(p);
     return 1;
@@ -719,8 +720,11 @@ static void finish_purge(QuarantinePanel *p, int interactive)
                  (unsigned)done, (unsigned)failed);
     }
     p->purge_finished = cancelled == 0;
-    p->progress_pos = cancelled == 0 ? PROGRESS_RANGE : 0;
-    SendMessageW(p->progress, PBM_SETPOS, (WPARAM)p->progress_pos, 0);
+    /* 일부라도 실패하면 빨간색, 취소하면 멈춘 자리에서 노란색(예전에는 0 으로 되돌려 사라져 보였다). */
+    progress_set(p->progress,
+                 failed > 0 ? PROGRESS_FAILED : cancelled > 0 ? PROGRESS_CANCELLED : PROGRESS_DONE, 0,
+                 PROGRESS_RANGE);
+    p->progress_pos = (int)SendMessageW(p->progress, PBM_GETPOS, 0, 0);
     if (interactive && failed > 0 && pending != NULL) {
         show_failures(p, L"영구 삭제 결과",
                       L"일부 항목을 영구 삭제하지 못했습니다. 지우지 못한 파일은 격리 폴더에 "
@@ -1114,5 +1118,7 @@ int quarantine_panel_verify(HWND panel, size_t expect_rows, size_t expect_ok)
     /* 영구 삭제가 끝났으면 진행바가 끝까지 찬다. */
     PANEL_CHECK(!p->purge_finished ||
                 SendMessageW(p->progress, PBM_GETPOS, 0, 0) == PROGRESS_RANGE);
+    PANEL_CHECK(!p->purge_finished || progress_state(p->progress) == PROGRESS_DONE ||
+                progress_state(p->progress) == PROGRESS_FAILED);
     return failures;
 }

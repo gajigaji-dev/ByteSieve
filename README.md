@@ -5,6 +5,22 @@ CLI(`disk-scanner`)와 Win32 GUI(`bytesieve-gui`)를 제공합니다.
 
 ![폴더 스캔 페이지의 트리맵 보기(예제 데이터)](docs/screenshots/treemap.png)
 
+## 설치
+
+[GitHub Releases](https://github.com/gajigaji-dev/ByteSieve/releases)에서 내려받습니다(Windows 10/11, 64비트).
+
+| 파일 | 용도 |
+|---|---|
+| `ByteSieve-<버전>-setup-x64.exe` | 설치 프로그램. 관리자 권한 없이 `%LOCALAPPDATA%\Programs\ByteSieve`에 설치하고 시작 메뉴 바로 가기를 만듭니다. 설치 언어(한국어·English·日本語·简体中文)가 앱 표시 언어가 됩니다 |
+| `ByteSieve-<버전>-portable-x64.zip` | 설치 없이 실행. 압축을 풀고 `bytesieve-gui.exe`를 실행합니다 |
+| `SHA256SUMS.txt` | 내려받은 파일 확인용 |
+
+- 코드 서명이 없어 처음 실행할 때 **Windows SmartScreen** 경고("Windows의 PC 보호")가 나올 수 있습니다.
+  `Get-FileHash <파일> -Algorithm SHA256` 결과가 `SHA256SUMS.txt`와 같은지 확인한 뒤 [추가 정보] → [실행]을 누르세요.
+- 설정(`HKCU\Software\ByteSieve`)·스캔 기록(`%LOCALAPPDATA%\ByteSieve\history`)·각 드라이브의 격리 폴더(`.bytesieve-trash`)는
+  제거해도 지우지 않습니다(격리 항목은 정리 중에 옮긴 사용자 파일). 포터블 판도 같은 위치를 씁니다.
+- 변경 내용은 [CHANGELOG.md](CHANGELOG.md), 배포 절차는 [docs/release.md](docs/release.md)에 있습니다.
+
 ## 주요 기능
 
 | 기능 | 내용 |
@@ -41,6 +57,14 @@ cmake --build build --config Debug      # 릴리스는 --config Release
 ```
 
 결과물은 `build\Debug\` 아래의 `disk-scanner.exe`, `bytesieve-gui.exe`, `bytesieve-bench.exe`입니다.
+버전은 `CMakeLists.txt`의 `project(ByteSieve VERSION ...)` 한 곳에서 정합니다(`disk-scanner --version`).
+
+배포 파일(설치 프로그램·포터블 ZIP·SHA256)은 `tools\package.ps1`이 만듭니다(Release 빌드 → 테스트 → `dist\`).
+설치 프로그램에는 [Inno Setup 6](https://jrsoftware.org/isinfo.php)이 필요하고, 없으면 `-NoInstaller`로 ZIP만 만듭니다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\package.ps1
+```
 
 ## 빠른 시작
 
@@ -114,7 +138,8 @@ GUI는 왼쪽 사이드바에서 목적별로 묶은 여덟 페이지와 아래 
 ctest --test-dir build -C Debug --output-on-failure
 ```
 
-단위 테스트 30개, CLI·도구 검사 31개, GUI 자체 검사 21개(총 82개)가 등록되어 있습니다.
+단위 테스트 30개, CLI·도구 검사 32개, GUI 자체 검사 22개(총 84개)가 등록되어 있습니다.
+GitHub Actions(`.github/workflows/ci.yml`)가 `main`·`dev`에 올리거나 PR을 열 때 Release 구성으로 빌드·테스트합니다.
 
 ## 문서
 
@@ -127,13 +152,20 @@ ctest --test-dir build -C Debug --output-on-failure
 | [docs/architecture.md](docs/architecture.md) | 기술 스택, 모듈 구조, 정리 계획(탐지 → 계획 → 실행, GUI·CLI 공통), 오류·취소 처리, 병렬 미리 열거(메모리 상한), 디스크 분석·정밀 스캔·변화 추적 설계 |
 | [docs/performance.md](docs/performance.md) | `bytesieve-bench` 사용법과 스캐너 진단 값, 측정 결과, 병렬 스캔 메모리 최적화 전후 비교, 병목 분석 |
 | [docs/testing.md](docs/testing.md) | 테스트 목록과 범위, GUI 자체 검사 옵션 |
+| [docs/release.md](docs/release.md) | 배포 결정 사항, 산출물(설치 프로그램·포터블 ZIP·SHA256), 버전 관리, 릴리스 절차, 출시 전 확인 목록 |
+| [CHANGELOG.md](CHANGELOG.md) | 버전별 변경 기록(릴리스 노트) |
 
 ## 디렉터리 구조
 
 ```
 ByteSieve/
-├── CMakeLists.txt     빌드·테스트 정의
+├── CMakeLists.txt     빌드·테스트·설치(install) 정의, 버전(project VERSION)
+├── CHANGELOG.md       변경 기록(릴리스 노트)
+├── .github/workflows/ CI(빌드·테스트), 릴리스(v* 태그 → 설치 프로그램·ZIP·SHA256 → 릴리스 초안)
 ├── docs/              상세 문서(screenshots/: 예제 데이터로 찍은 GUI 화면)
+├── installer/         Inno Setup 설치 스크립트(bytesieve.iss), 배포 파일에 넣는 README.txt, 중국어 간체 번역
+├── res/               exe 리소스: 앱 아이콘, 버전 정보, 앱 매니페스트(gui·cli)
+├── tools/             package.ps1(릴리스 패키지), make_icon.py(아이콘 생성)
 ├── src/
 │   ├── scanner, scan_model, scan_job, scan_history   폴더 열거(병렬 미리 열거·정밀 스캔)·트리 모델·스캔 스레드·변화 추적
 │   ├── scan_export                                   스캔 결과 CSV·HTML 내보내기
@@ -150,6 +182,8 @@ ByteSieve/
 │   ├── cli, cli_clean, cli_devenv, jsonl, main.c     CLI(disk-scanner, find·clean·devenv 명령 포함)
 │   ├── gui_main.c, gui_nav                           GUI 창 골격(사이드바·페이지 전환·자체 검사 진행), 사이드바 컨트롤
 │   ├── gui_scan, gui_drives, gui_cleaner, gui_booster, gui_cleanup, gui_quarantine, gui_monitor, gui_settings, gui_treemap   GUI 페이지 패널
+│   ├── gui_progress                                  진행 막대 상태(진행·움직이는 막대·완료·취소·실패) 공용 처리
+│   ├── version.h.in                                  버전 헤더 틀(CMake 가 build/generated/version.h 로 만듦)
 │   ├── nav_model                                     사이드바 메뉴 모델(목적별 그룹·키 이동·위치 판정, 순수 계산)
 │   ├── gui_theme, ui_lang                            GUI 공통 모양(창 외곽·밝게/어둡게 색 토큰·다크 모드 적용·언어별 글꼴·글자 폭), 표시 언어·번역 문자열
 │   ├── app_settings                                  GUI 설정(테마·표시 언어) 저장·해석, 시스템 앱 모드·고대비
@@ -159,7 +193,7 @@ ByteSieve/
 
 ## 구현 상태와 향후 계획
 
-CLI 스캐너, JSON Lines 출력, 개발 환경 분석(공용 캐시 15종·WSL2/Docker 가상 디스크·증가 기록), Git 기반 프로젝트 분석(휴면 판정·미커밋/미푸시 경고·복구 가능성), CLI 정리 후보 찾기·정리 명령(`find`·`clean --dry-run`·`--execute`, JSON 문서 출력, GUI와 같은 정리 계획·실행 코드), GUI 여덟 페이지(목적별 사이드바), 시스템 정리(임시 파일·오류 보고서·휴지통·브라우저 캐시·공용 개발 캐시(npm·pip·Gradle·Cargo·NuGet) 분석·정리), 프로젝트 정리(정리 후보 탐지·휴지통 이동), 실제 확보 용량(할당 크기·하드 링크 반영), Booster(시작 프로그램·프로세스 관리, CPU·메모리 사용량), 휴지통 없는 드라이브의 격리 폴더(복원·영구 삭제), 디스크 사용량 분석, 트리맵 시각화, 드라이브별 BitLocker 암호화 상태 표시, 정밀 스캔(하드 링크 중복 보정), 폴더별 변화 추적(자동 저장 설정·기록 삭제 포함), 스캔 결과 CSV·HTML 내보내기, 병렬 스캔(미리 읽기 작업 수 제한으로 메모리 절감), GUI 표시 언어 기반(한국어·영어·일본어·중국어 간체, 사이드바·페이지 제목·설정 페이지와 폴더 스캔 페이지 컨트롤), Windows 11 창 외곽과 사이드바 탐색, 다크 모드(시스템 설정 따르기 포함)와 설정 페이지(테마·표시 언어·스캔 기록)가 구현되어 있습니다.
+CLI 스캐너, JSON Lines 출력, 개발 환경 분석(공용 캐시 15종·WSL2/Docker 가상 디스크·증가 기록), Git 기반 프로젝트 분석(휴면 판정·미커밋/미푸시 경고·복구 가능성), CLI 정리 후보 찾기·정리 명령(`find`·`clean --dry-run`·`--execute`, JSON 문서 출력, GUI와 같은 정리 계획·실행 코드), GUI 여덟 페이지(목적별 사이드바), 시스템 정리(임시 파일·오류 보고서·휴지통·브라우저 캐시·공용 개발 캐시(npm·pip·Gradle·Cargo·NuGet) 분석·정리), 프로젝트 정리(정리 후보 탐지·휴지통 이동), 실제 확보 용량(할당 크기·하드 링크 반영), Booster(시작 프로그램·프로세스 관리, CPU·메모리 사용량), 휴지통 없는 드라이브의 격리 폴더(복원·영구 삭제), 디스크 사용량 분석, 트리맵 시각화, 드라이브별 BitLocker 암호화 상태 표시, 정밀 스캔(하드 링크 중복 보정), 폴더별 변화 추적(자동 저장 설정·기록 삭제 포함), 스캔 결과 CSV·HTML 내보내기, 병렬 스캔(미리 읽기 작업 수 제한으로 메모리 절감), GUI 표시 언어 기반(한국어·영어·일본어·중국어 간체, 사이드바·페이지 제목·설정 페이지와 폴더 스캔 페이지 컨트롤), Windows 11 창 외곽과 사이드바 탐색, 다크 모드(시스템 설정 따르기 포함)와 설정 페이지(테마·표시 언어·스캔 기록·버전 정보), 진행 막대의 완료·취소·실패 표시, 배포(설치 프로그램·포터블 ZIP·SHA256, exe 버전 정보·아이콘·매니페스트, 정적 C 런타임, CI·릴리스 자동화)가 구현되어 있습니다.
 
 ### 향후 개선 계획(미구현)
 
@@ -189,13 +223,11 @@ CLI 스캐너, JSON Lines 출력, 개발 환경 분석(공용 캐시 15종·WSL2
 - 다크 모드 남은 부분: 확인 창(MessageBox)·오른쪽 클릭 메뉴·진행 막대는 아직 밝게 그려짐(Windows가 그리는 부분), 어둡게일 때 체크 상자는 비주얼 스타일 없이 그려짐,
   표시 언어를 바꾸면 다시 시작하지 않고 바로 적용
 - 번역 범위 확대: 상태 줄·오류 문구, 다른 일곱 페이지(시스템 정리·개발 캐시·프로젝트 정리·부스터 포함), 확인 창, HTML 보고서를 영어·일본어·중국어 간체로(지금은 사이드바·페이지 제목·설정 페이지와 폴더 스캔 페이지 컨트롤만)
-- 조회 완료 표시 개선: 조회 후 사라지는 상단 로딩 바를 고치고, 완료·실패 상태를 명확하게 표시
-- `gui_trash` 테스트 실패 원인 분석: 실패 재현과 원인 확인
 
 **배포·문서**
 - 스크린샷 다시 찍기: 사이드바로 바뀐 화면 전체(지금 `docs/screenshots`는 예전 위쪽 탭 화면), 시스템 정리·개발 캐시·설정·다크 모드 화면 추가, 프로젝트 정리 화면(`cleanup.png`)을 실제 확보 열이 보이게 갱신
-- 설치 프로그램 배포: 설치형 exe 제공(설치·제거, 시작 메뉴 바로 가기). 설치 마법사를 한국어·영어·일본어·중국어 간체로 제공하고
-  고른 언어를 앱 표시 언어로 기록(설계: [docs/ui-design.md](docs/ui-design.md#설치-마법사))
+- 배포 이후([docs/release.md](docs/release.md#나중에-검토할-것)): 코드 서명(SmartScreen 경고 제거), winget 등록,
+  설치 프로그램에서 `disk-scanner`를 PATH에 추가하는 선택, 업데이트 확인
 
 ## 라이선스
 

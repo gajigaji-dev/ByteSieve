@@ -23,6 +23,7 @@
 #include "gui_theme.h"
 #include "gui_treemap.h"
 #include "nav_model.h"
+#include "quarantine.h"
 #include "scan_history.h"
 #include "ui_lang.h"
 
@@ -43,8 +44,11 @@
  * "시스템 설정 따르기"면 Windows 의 앱 모드가 바뀔 때(WM_SETTINGCHANGE "ImmersiveColorSet") 따라간다.
  */
 
-/* 공용 컨트롤 v6(비주얼 스타일). */
-#pragma comment(linker, "\"/manifestdependency:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
+/* 공용 컨트롤 v6(비주얼 스타일)·DPI 인식은 앱 매니페스트(res/gui.manifest, 리소스로 넣음)에서 켠다. */
+
+/* 실행 중임을 알리는 뮤텍스. 설치·제거 프로그램(Inno Setup AppMutex)이 앱이 켜져 있는지 확인하는 데 쓴다.
+ * 여러 개 실행을 막지는 않는다. installer/bytesieve.iss 의 AppMutex 와 이름이 같아야 한다. */
+#define BYTESIEVE_APP_MUTEX L"ByteSieve.Gui.Running"
 
 /* --self-test 의 전체 제한 시간. */
 #define SELF_TEST_TIMEOUT_MS 60000
@@ -111,6 +115,7 @@ typedef struct {
     SelfTest self_test;
     int self_test_exit;
     size_t trash_expect; /* SELF_TEST_TRASH·QUARANTINE: 선택해 옮기기 시작한 항목 수 */
+    const wchar_t *trash_root; /* SELF_TEST_TRASH: 탐지 경로(드라이브 종류를 알리는 데 씀) */
     const wchar_t *quarantine_root;     /* SELF_TEST_QUARANTINE: 탐지 경로(가짜 볼륨 루트) */
     const wchar_t *quarantine_conflict; /* SELF_TEST_QUARANTINE: 복원 전에 만들 같은 이름 파일 */
     const wchar_t *export_prefix;  /* SELF_TEST_EXPORT: 내보낼 파일 경로(확장자 제외) */
@@ -911,6 +916,29 @@ static int on_page_notify(int id, int code)
         return 1;
     }
     if (id == IDC_CLEANUP && code == CPN_TRASHED && g_app.self_test == SELF_TEST_TRASH) {
+        size_t quarantined = cleanup_panel_quarantined(cleanup);
+        if (quarantined > 0) {
+            /* 이 위치에서는 휴지통을 쓸 수 없어 격리 폴더로 전환했다(이동식 드라이브, 휴지통 꺼짐·용량
+             * 부족). 휴지통 경로는 검사할 수 없으므로 건너뛰고, 실제 드라이브의 격리 폴더에 테스트
+             * 파일을 남기지 않게 원래 자리로 복원한다(격리 전환 자체는 gui_quarantine 이 검사한다). */
+            size_t restored;
+            wchar_t drive[4] = {g_app.trash_root != NULL ? g_app.trash_root[0] : L'C', L':', L'\\', 0};
+            const wchar_t *why = L"recycle bin refused: disabled or too small";
+            wchar_t probe[MAX_PATH * 2];
+            /* 테스트 격리 루트는 그 "아래" 경로만 포함으로 보므로 탐지 경로 아래의 이름으로 묻는다. */
+            swprintf(probe, MAX_PATH * 2, L"%ls\\x", g_app.trash_root != NULL ? g_app.trash_root : L"");
+            if (g_app.trash_root != NULL && quarantine_test_root_contains(probe)) {
+                why = L"test quarantine root";
+            } else if (GetDriveTypeW(drive) == DRIVE_REMOVABLE) {
+                why = L"removable drive";
+            }
+            wprintf(L"trash-skip: recycle bin not usable here (%ls, %u of %u items quarantined)\n", why,
+                    (unsigned)quarantined, (unsigned)g_app.trash_expect);
+            fflush(stdout);
+            restored = cleanup_panel_restore_quarantined(cleanup);
+            finish_self_test(restored == quarantined ? 0 : 1);
+            return 1;
+        }
         finish_self_test(cleanup_panel_verify_trash(cleanup, g_app.trash_expect) == 0 ? 0 : 1);
         return 1;
     }
@@ -1115,8 +1143,11 @@ static void parse_args(int argc, wchar_t **argv, const wchar_t **target,
                 break;
             case SELF_TEST_CLEANUP:
             case SELF_TEST_CLEANUP_CANCEL:
+                *cleanup_target = argv[2];
+                break;
             case SELF_TEST_TRASH:
                 *cleanup_target = argv[2];
+                g_app.trash_root = argv[2];
                 break;
             case SELF_TEST_QUARANTINE:
                 *cleanup_target = argv[2];
@@ -1290,6 +1321,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmd, int show)
     const wchar_t *cleanup_target = NULL;
     const wchar_t *lang_tag = NULL;
     UiLang lang = UI_LANG_KO;
+    HANDLE app_mutex;
     int argc = 0;
 
     (void)prev;
@@ -1330,7 +1362,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmd, int show)
     theme_set_dark(settings_theme_is_dark(g_app.theme_mode, settings_system_dark(),
                                           settings_high_contrast()));
 
+    /* 매니페스트로 DPI 인식을 켰지만, 매니페스트를 읽지 못하는 환경을 위해 그대로 둔다. */
     SetProcessDPIAware();
+    app_mutex = CreateMutexW(NULL, FALSE, BYTESIEVE_APP_MUTEX);
     screen = GetDC(NULL);
     g_app.dpi = GetDeviceCaps(screen, LOGPIXELSY);
     ReleaseDC(NULL, screen);
@@ -1356,7 +1390,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmd, int show)
     wc.lpfnWndProc = wnd_proc;
     wc.hInstance = inst;
     wc.hCursor = LoadCursorW(NULL, IDC_ARROW);
-    wc.hIcon = LoadIconW(NULL, IDI_APPLICATION);
+    wc.hIcon = LoadIconW(inst, MAKEINTRESOURCEW(1)); /* res/bytesieve.ico */
+    wc.hIconSm = (HICON)LoadImageW(inst, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
+                                   GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
     wc.hbrBackground = theme_bg_brush();
     wc.lpszClassName = L"ByteSieveMain";
     RegisterClassExW(&wc);
@@ -1393,5 +1429,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmd, int show)
         DeleteObject(g_app.title_font);
     }
     CoUninitialize();
+    if (app_mutex != NULL) {
+        CloseHandle(app_mutex);
+    }
     return (int)msg.wParam;
 }

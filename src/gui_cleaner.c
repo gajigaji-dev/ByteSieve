@@ -10,6 +10,7 @@
 #include "cleaner.h"
 #include "devenv_history.h"
 #include "gui_cleaner.h"
+#include "gui_progress.h"
 #include "gui_theme.h"
 #include "path.h"
 #include "scan_history.h"
@@ -403,7 +404,10 @@ static void update_scan_progress(CleanerPanel *p)
         return;
     }
     if (s.total > 0) {
-        SendMessageW(p->progress, PBM_SETPOS, (WPARAM)(s.done * PROGRESS_RANGE / s.total), 0);
+        progress_set(p->progress, PROGRESS_RUNNING, (int)(s.done * PROGRESS_RANGE / s.total),
+                     PROGRESS_RANGE);
+    } else if (progress_state(p->progress) != PROGRESS_BUSY) {
+        progress_set(p->progress, PROGRESS_BUSY, 0, PROGRESS_RANGE);
     }
     format_size(s.bytes, size, 32);
     swprintf(text, sizeof(text) / sizeof(text[0]), L"분석하는 중... %ls (%u/%u) · 지금까지 %ls",
@@ -499,7 +503,8 @@ static void finish_scan(CleanerPanel *p)
              p->targets.cancelled ? L"분석 취소됨(다 세지 못한 대상은 정리할 수 없음)" : L"분석 완료",
              (unsigned)ready, size, (double)(GetTickCount64() - p->started) / 1000.0);
     SetWindowTextW(p->status, text);
-    SendMessageW(p->progress, PBM_SETPOS, p->targets.cancelled ? 0 : PROGRESS_RANGE, 0);
+    progress_set(p->progress, p->targets.cancelled ? PROGRESS_CANCELLED : PROGRESS_DONE, 0,
+                 PROGRESS_RANGE);
     ListView_SetItemCountEx(p->list, (int)p->targets.len, 0);
     recount(p);
     set_busy(p, 0);
@@ -528,11 +533,15 @@ static void update_run_progress(CleanerPanel *p)
         return;
     }
     if (s.emptying_recycle) {
+        if (progress_state(p->progress) != PROGRESS_BUSY) {
+            progress_set(p->progress, PROGRESS_BUSY, 0, PROGRESS_RANGE);
+        }
         SetWindowTextW(p->status, L"휴지통을 비우는 중...");
         return;
     }
     if (s.total > 0) {
-        SendMessageW(p->progress, PBM_SETPOS, (WPARAM)(s.done * PROGRESS_RANGE / s.total), 0);
+        progress_set(p->progress, PROGRESS_RUNNING, (int)(s.done * PROGRESS_RANGE / s.total),
+                     PROGRESS_RANGE);
     }
     format_size(s.moved_bytes, size, 32);
     swprintf(text, sizeof(text) / sizeof(text[0]),
@@ -700,7 +709,13 @@ static void finish_run(CleanerPanel *p)
              p->totals.was_cancelled ? L" · 취소됨" : L"",
              (double)(GetTickCount64() - p->run_started) / 1000.0);
     SetWindowTextW(p->status, text);
-    SendMessageW(p->progress, PBM_SETPOS, p->totals.was_cancelled ? 0 : PROGRESS_RANGE, 0);
+    /* 일부라도 실패했거나(휴지통 비우기 실패 포함) 취소했으면 막대 색으로도 알린다. */
+    progress_set(p->progress,
+                 failed > 0 || (p->totals.permanent_requested && !p->totals.permanent_done)
+                     ? PROGRESS_FAILED
+                 : p->totals.was_cancelled ? PROGRESS_CANCELLED
+                                           : PROGRESS_DONE,
+                 0, PROGRESS_RANGE);
     set_busy(p, 0);
     InvalidateRect(p->list, NULL, TRUE);
     update_detail(p);
@@ -1110,7 +1125,7 @@ int cleaner_panel_refresh(HWND panel)
     p->has_result = 0;
     p->loaded = 1;
     recount(p);
-    SendMessageW(p->progress, PBM_SETPOS, 0, 0);
+    progress_set(p->progress, PROGRESS_BUSY, 0, PROGRESS_RANGE); /* 대상 수를 알기 전 */
     update_detail(p);
     p->started = GetTickCount64();
     {
@@ -1236,7 +1251,7 @@ int cleaner_panel_run(HWND panel, int confirm)
     }
     p->run_interactive = confirm;
     p->run_started = GetTickCount64();
-    SendMessageW(p->progress, PBM_SETPOS, 0, 0);
+    progress_set(p->progress, PROGRESS_IDLE, 0, PROGRESS_RANGE);
     set_busy(p, 1);
     SetWindowTextW(p->status, L"정리하는 중...");
     return 1;
@@ -1300,6 +1315,8 @@ int cleaner_panel_verify(HWND panel, const wchar_t *expect_root)
     PANEL_CHECK(p->scan == NULL && p->has_result && p->loaded && !p->targets.cancelled);
     PANEL_CHECK(IsWindowEnabled(p->refresh) && !IsWindowEnabled(p->cancel));
     PANEL_CHECK(SendMessageW(p->progress, PBM_GETPOS, 0, 0) == PROGRESS_RANGE);
+    PANEL_CHECK(progress_state(p->progress) == PROGRESS_DONE);
+    PANEL_CHECK((GetWindowLongW(p->progress, GWL_STYLE) & PBS_MARQUEE) == 0);
     PANEL_CHECK(ListView_GetItemCount(p->list) == (int)p->targets.len);
     /* 고정 대상 6개(시스템 정리) + 개발 캐시 하나 이상(개발 캐시) */
     PANEL_CHECK(p->targets.len >=
@@ -1446,6 +1463,9 @@ int cleaner_panel_verify_run(HWND panel, size_t expect_targets)
     }
     PANEL_CHECK(p->run == NULL && IsWindowEnabled(p->refresh) && !IsWindowEnabled(p->cancel));
     PANEL_CHECK(!p->totals.permanent_requested && !p->totals.permanent_done);
+    /* 정리 결과가 막대 상태로도 보인다(일부 실패면 빨간색). */
+    PANEL_CHECK(progress_state(p->progress) ==
+                (p->totals.failed > 0 ? PROGRESS_FAILED : PROGRESS_DONE));
     PANEL_CHECK(p->totals.targets == expect_targets);
     for (i = 0; i < p->plan.len; i++) {
         const CleanPlanTarget *t = &p->plan.items[i];

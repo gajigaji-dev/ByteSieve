@@ -72,11 +72,15 @@ GUI(`bytesieve-gui`) 안의 파일은 다음처럼 나뉩니다. 페이지마다
 | `gui_cleaner` | Cleaner 패널. [시스템 정리]·[개발 캐시] 두 페이지가 같은 패널을 분석 범위만 달리해 하나씩 씀 |
 | `gui_settings` | 설정 페이지(테마·표시 언어·스캔 기록 자동 저장). 저장은 `app_settings`, 자동 저장은 `gui_main`을 거쳐 폴더 스캔 패널과 같은 경로 |
 | `gui_drives`·`gui_cleanup`·`gui_quarantine`·`gui_monitor`·`gui_booster`·`gui_treemap` | 나머지 페이지 패널과 트리맵 보기 |
+| `gui_progress` | 진행 막대 상태(대기·진행·움직이는 막대·완료·취소·실패) 공용 처리. 실패·취소해도 막대가 비어 사라져 보이지 않게 함 |
 | `gui_theme` | 창 외곽(DWM 둥근 모서리·Mica·어두운 제목 표시줄), 밝게·어둡게 색 토큰(`theme_color`, 시스템 강조색), 창 트리 전체에 모드 적용(`theme_apply_window`: 목록·트리·단추·입력 칸 테마와 색, 클래스 배경), 패널의 `WM_CTLCOLOR*` 처리, 언어별 UI 글꼴·페이지 제목 글꼴, 글자 폭에 맞춘 컨트롤 크기 |
 
 설계와 단계는 [ui-design.md](ui-design.md)를 참고하세요.
 
 실행 파일은 `disk-scanner`(CLI), `bytesieve-gui`(GUI), `bytesieve-bench`(성능 측정 도구)입니다.
+배포하는 두 exe(`disk-scanner`·`bytesieve-gui`)에는 `res/`의 리소스(아이콘·버전 정보·앱 매니페스트)를 넣고, C 런타임을 정적으로
+링크합니다(`/MT`). 버전은 `CMakeLists.txt`의 `project(ByteSieve VERSION ...)`에서 생성한 `version.h` 하나를 따릅니다.
+설치 프로그램·포터블 ZIP·릴리스 자동화는 [release.md](release.md)를 참고하세요.
 
 ## 정리 계획(탐지 → 계획 → 실행)
 

@@ -1,0 +1,26 @@
+# 빌드·테스트: main·dev 에 올리거나 PR 을 열 때 Release 구성으로 빌드하고 전체 테스트를 돌린다.
+# 배포하는 것과 같은 Release 구성으로 검사한다(정적 C 런타임·매니페스트 포함).
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build
+
+      - name: Build (Release)
+        run: cmake --build build --config Release
+
+      - name: Test (Release)
+        run: ctest --test-dir build -C Release --output-on-failure

@@ -1,0 +1,14 @@
+#ifndef BYTESIEVE_VERSION_H
+#define BYTESIEVE_VERSION_H
+
+/*
+ * 버전(CMake 가 CMakeLists.txt 의 project(ByteSieve VERSION ...) 값으로 생성한다. 직접 고치지 않는다).
+ * CLI(--version)·GUI([설정] 페이지·창 제목)·exe 버전 리소스(res/bytesieve.rc)·설치 프로그램이 함께 쓴다.
+ */
+#define BYTESIEVE_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
+#define BYTESIEVE_VERSION_MINOR @PROJECT_VERSION_MINOR@
+#define BYTESIEVE_VERSION_PATCH @PROJECT_VERSION_PATCH@
+#define BYTESIEVE_VERSION_STRING "@PROJECT_VERSION@"
+#define BYTESIEVE_VERSION_WSTRING L"@PROJECT_VERSION@"
+
+#endif /* BYTESIEVE_VERSION_H */

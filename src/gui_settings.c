@@ -10,6 +10,7 @@
 
 #include "gui_theme.h"
 #include "scan_history.h"
+#include "version.h"
 
 #define SETTINGS_PANEL_CLASS L"ByteSieveSettingsPanel"
 
@@ -26,6 +27,8 @@ enum {
     IDC_AUTOSAVE,
     IDC_HISTORY_DIR,
     IDC_OPEN_DIR,
+    IDC_H_ABOUT,
+    IDC_VERSION,
     IDC_STATUS
 };
 
@@ -43,6 +46,7 @@ typedef struct {
     HWND h_appearance, l_theme, theme, theme_note;
     HWND h_language, l_language, language, lang_note;
     HWND h_history, autosave, history_dir, open_dir;
+    HWND h_about, version;
     HWND status;
     HFONT font, section_font;
     int dpi;
@@ -269,6 +273,11 @@ static void panel_layout(SettingsPanel *p)
     MoveWindow(p->open_dir, 0, y, open_width(p), row, TRUE);
     y += row + section;
 
+    MoveWindow(p->h_about, 0, y, w, head, TRUE);
+    y += head + gap / 2;
+    MoveWindow(p->version, 0, y + pscale(p, 4), w, row - pscale(p, 4), TRUE);
+    y += row + section;
+
     MoveWindow(p->status, 0, y, w, note * 2, TRUE);
 }
 
@@ -349,6 +358,9 @@ static void panel_create_controls(SettingsPanel *p)
                                  IDC_HISTORY_DIR, p->font);
     p->open_dir = panel_child(p, L"BUTTON", ui_text(UI_T_SET_OPEN_DIR), BS_PUSHBUTTON | WS_TABSTOP,
                               IDC_OPEN_DIR, p->font);
+    p->h_about = panel_child(p, L"STATIC", ui_text(UI_T_SET_ABOUT), SS_LEFTNOWORDWRAP, IDC_H_ABOUT, head);
+    swprintf(text, 128, ui_text(UI_T_SET_VERSION), BYTESIEVE_VERSION_WSTRING);
+    p->version = panel_child(p, L"STATIC", text, SS_LEFTNOWORDWRAP | SS_NOPREFIX, IDC_VERSION, p->font);
     p->status = panel_child(p, L"STATIC", L"", SS_LEFT | SS_NOPREFIX, IDC_STATUS, p->font);
 
     /* 저장된 설정을 보인다(읽기만 함). */
@@ -639,6 +651,14 @@ int settings_panel_verify_lang(HWND panel)
     SELF_CHECK(text_is(p->h_history, ui_text(UI_T_SET_HISTORY)));
     SELF_CHECK(text_is(p->autosave, ui_text(UI_T_SCAN_AUTOSAVE)));
     SELF_CHECK(text_is(p->open_dir, ui_text(UI_T_SET_OPEN_DIR)));
+    SELF_CHECK(text_is(p->h_about, ui_text(UI_T_SET_ABOUT)));
+    {
+        /* 정보: 지금 빌드의 버전(CMake project VERSION)을 보인다 */
+        wchar_t buf[128];
+        GetWindowTextW(p->version, buf, 128);
+        SELF_CHECK(wcsstr(buf, BYTESIEVE_VERSION_WSTRING) != NULL);
+    }
+    SELF_CHECK(fits(p, p->version, p->font, 0));
     SELF_CHECK(fits(p, p->h_appearance, head, 0));
     SELF_CHECK(fits(p, p->h_language, head, 0));
     SELF_CHECK(fits(p, p->l_theme, p->font, 0));

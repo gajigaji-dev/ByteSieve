@@ -1,0 +1,7 @@
+#pragma code_page(65001)
+// disk-scanner.exe 리소스(공통 부분은 bytesieve_common.rc.inc).
+#define BYTESIEVE_RC_NAME "disk-scanner"
+#define BYTESIEVE_RC_FILE "disk-scanner.exe"
+#define BYTESIEVE_RC_DESC "ByteSieve command-line disk scanner"
+#define BYTESIEVE_RC_MANIFEST "cli.manifest"
+#include "bytesieve_common.rc.inc"

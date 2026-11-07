@@ -101,6 +101,8 @@ typedef enum {
     UI_T_SET_OPEN_DIR,
     UI_T_SET_SAVE_FAILED, /* %lu: Windows 오류 */
     UI_T_SET_AUTOSAVE_FAILED,
+    UI_T_SET_ABOUT,
+    UI_T_SET_VERSION, /* %ls: 버전(1.0.0) */
 
     UI_T_COUNT
 } UiText;

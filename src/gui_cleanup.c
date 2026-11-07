@@ -13,7 +13,9 @@
 #include "cleanup_scan.h"
 #include "cleanup_trash.h"
 #include "gui_cleanup.h"
+#include "gui_progress.h"
 #include "gui_theme.h"
+#include "quarantine.h"
 #include "size_format.h"
 
 #define CLEANUP_PANEL_CLASS L"ByteSieveCleanupPanel"
@@ -530,6 +532,10 @@ static void update_progress(CleanupPanel *p)
         return;
     }
     if (snap.analyzing_projects) {
+        /* Git 분석은 탐지와 다른 단계라 비율로 잇지 않고 움직이는 막대로 보인다. */
+        if (progress_state(p->progress) != PROGRESS_BUSY) {
+            progress_set(p->progress, PROGRESS_BUSY, 0, PROGRESS_RANGE);
+        }
         swprintf(text, sizeof(text) / sizeof(text[0]),
                  L"프로젝트(Git) 분석 중... %u/%u · 후보 %u개", (unsigned)snap.projects_done,
                  (unsigned)snap.projects_total, (unsigned)snap.progress.items);
@@ -542,7 +548,7 @@ static void update_progress(CleanupPanel *p)
     pos = all > 0 ? (int)(done * PROGRESS_RANGE / all) : 0;
     if (pos > p->progress_pos) {
         p->progress_pos = pos;
-        SendMessageW(p->progress, PBM_SETPOS, (WPARAM)pos, 0);
+        progress_set(p->progress, PROGRESS_RUNNING, pos, PROGRESS_RANGE);
     }
     format_size(snap.progress.item_bytes, size, 32);
     swprintf(text, sizeof(text) / sizeof(text[0]),
@@ -584,7 +590,7 @@ static void finish_detect(CleanupPanel *p)
                                                 : L"other";
         swprintf(text, sizeof(text) / sizeof(text[0]), L"%ls: 폴더를 열 수 없습니다 (%ls).",
                  head, kind);
-        SendMessageW(p->progress, PBM_SETPOS, 0, 0);
+        progress_set(p->progress, PROGRESS_FAILED, 0, PROGRESS_RANGE);
     } else {
         swprintf(text, sizeof(text) / sizeof(text[0]),
                  L"%ls: 폴더 %llu · 파일 %llu · 오류 %llu · 건너뛴 폴더 %llu · "
@@ -593,9 +599,8 @@ static void finish_detect(CleanupPanel *p)
                  (unsigned long long)r->error_count, (unsigned long long)r->skipped_dir_count,
                  (unsigned long long)r->excluded_dir_count,
                  (unsigned long long)r->reparse_count, (double)snap.elapsed_ms / 1000.0);
-        if (!r->cancelled) {
-            SendMessageW(p->progress, PBM_SETPOS, PROGRESS_RANGE, 0);
-        }
+        progress_set(p->progress, r->cancelled ? PROGRESS_CANCELLED : PROGRESS_DONE, 0,
+                     PROGRESS_RANGE);
     }
     SetWindowTextW(p->status, text);
     build_states(p);
@@ -628,8 +633,8 @@ static void update_trash_progress(CleanupPanel *p)
         return;
     }
     if (snap.total > 0) {
-        SendMessageW(p->progress, PBM_SETPOS, (WPARAM)(snap.done * PROGRESS_RANGE / snap.total),
-                     0);
+        progress_set(p->progress, PROGRESS_RUNNING, (int)(snap.done * PROGRESS_RANGE / snap.total),
+                     PROGRESS_RANGE);
     }
     format_size(snap.moved_bytes, size, 32);
     swprintf(text, sizeof(text) / sizeof(text[0]),
@@ -770,7 +775,7 @@ static void finish_trash(CleanupPanel *p)
     if (quarantined > 0) {
         swprintf(text, sizeof(text) / sizeof(text[0]),
                  L"휴지통으로 이동 완료: 성공 %u개(%ls 확보) · 실패 %u개 · 취소 %u개 · %.1f초"
-                 L"  |  휴지통이 없어 격리 폴더로 옮김 %u개([격리 폴더] 탭에서 복원·영구 삭제)",
+                 L"  |  휴지통이 없어 격리 폴더로 옮김 %u개([격리 폴더] 페이지에서 복원·영구 삭제)",
                  (unsigned)moved, size, (unsigned)failed, (unsigned)cancelled,
                  (double)elapsed / 1000.0, (unsigned)quarantined);
     } else {
@@ -780,7 +785,10 @@ static void finish_trash(CleanupPanel *p)
                  (double)elapsed / 1000.0);
     }
     SetWindowTextW(p->status, text);
-    SendMessageW(p->progress, PBM_SETPOS, cancelled == 0 ? PROGRESS_RANGE : 0, 0);
+    /* 일부라도 실패하면 빨간색, 취소하면 멈춘 자리에서 노란색, 모두 옮기면 가득. */
+    progress_set(p->progress,
+                 failed > 0 ? PROGRESS_FAILED : cancelled > 0 ? PROGRESS_CANCELLED : PROGRESS_DONE, 0,
+                 PROGRESS_RANGE);
     set_busy(p, 0);
     InvalidateRect(p->list, NULL, TRUE);
     if (p->trash_interactive && failed > 0) {
@@ -1280,7 +1288,7 @@ int cleanup_panel_start(HWND panel, const wchar_t *root)
     update_summary(p);
     set_warning(p);
     p->progress_pos = 0;
-    SendMessageW(p->progress, PBM_SETPOS, 0, 0);
+    progress_set(p->progress, PROGRESS_BUSY, 0, PROGRESS_RANGE);
 
     {
         /* 탐지 뒤 같은 스레드에서 프로젝트(Git) 분석까지 한다(휴면 기준은 기본 90일). */
@@ -1394,7 +1402,7 @@ int cleanup_panel_trash(HWND panel, int confirm)
     p->trash_count = n;
     p->trash_interactive = confirm;
     p->trash_started = GetTickCount64();
-    SendMessageW(p->progress, PBM_SETPOS, 0, 0);
+    progress_set(p->progress, PROGRESS_IDLE, 0, PROGRESS_RANGE);
     set_busy(p, 1);
     update_trash_progress(p);
     return 1;
@@ -1435,12 +1443,17 @@ int cleanup_panel_verify(HWND panel, int expect_cancelled)
     if (expect_cancelled) {
         if (p->result.report.cancelled) {
             PANEL_CHECK(p->result.status == SCAN_PARTIAL);
+            PANEL_CHECK(progress_state(p->progress) == PROGRESS_CANCELLED);
         }
     } else {
         PANEL_CHECK(!p->result.report.cancelled);
         PANEL_CHECK(p->result.status != SCAN_FATAL);
         PANEL_CHECK(SendMessageW(p->progress, PBM_GETPOS, 0, 0) == PROGRESS_RANGE);
+        PANEL_CHECK(progress_state(p->progress) == PROGRESS_DONE);
     }
+    /* Git 분석 단계의 움직이는 막대는 끝나면 멈추고, 막대가 비어 사라져 보이지 않는다. */
+    PANEL_CHECK((GetWindowLongW(p->progress, GWL_STYLE) & PBS_MARQUEE) == 0);
+    PANEL_CHECK(SendMessageW(p->progress, PBM_GETPOS, 0, 0) > 0);
 
     /* 전체 필터: 모든 항목, 파일 크기 내림차순, 표시 합계 = 전체 파일 크기 */
     rows = ListView_GetItemCount(p->list);
@@ -1576,6 +1589,7 @@ int cleanup_panel_verify_trash(HWND panel, size_t expect_moved)
     PANEL_CHECK(IsWindowEnabled(p->start) && !IsWindowEnabled(p->cancel));
     PANEL_CHECK(expect_moved > 0 && p->trash_count == expect_moved);
     PANEL_CHECK(p->moved_count == expect_moved);
+    PANEL_CHECK(progress_state(p->progress) == PROGRESS_DONE); /* 모두 옮겼으면 가득·기본 색 */
     PANEL_CHECK(p->checked_count == 0 && p->checked_bytes == 0);
     PANEL_CHECK(!IsWindowEnabled(p->trash_btn));
     GetWindowTextW(p->status, buf, 256);
@@ -1606,6 +1620,11 @@ int cleanup_panel_verify_trash(HWND panel, size_t expect_moved)
                 wprintf(L"recycled: %ls\n", o->recycled_path);
             }
         } else {
+            if (t->deny == CLEANUP_TRASH_PENDING) {
+                /* 옮기려던 항목이 실패했다: 원인을 알 수 있게 상태와 오류 코드를 쓴다. */
+                fwprintf(stderr, L"trash item: %ls code=0x%08lx %ls\n",
+                         cleanup_trash_status_name(o->status), (unsigned long)o->code, item->path);
+            }
             /* 옮기지 않은 항목(보호 대상)은 그대로 남아 있고 체크할 수 없다. */
             PANEL_CHECK(t->deny != CLEANUP_TRASH_PENDING && o->status == CLEANUP_TRASH_PENDING);
             PANEL_CHECK(GetFileAttributesW(item->path) != INVALID_FILE_ATTRIBUTES);
@@ -1630,4 +1649,58 @@ int cleanup_panel_verify_trash(HWND panel, size_t expect_moved)
     GetWindowTextW(p->selection, buf, 256);
     PANEL_CHECK(wcsstr(buf, L"휴지통으로 옮김") != NULL);
     return failures;
+}
+
+size_t cleanup_panel_quarantined(HWND panel)
+{
+    CleanupPanel *p = panel_of(panel);
+    size_t i, n = 0;
+
+    for (i = 0; p != NULL && p->has_plan && i < p->plan.len; i++) {
+        n += last_outcome(&p->plan.items[i])->status == CLEANUP_TRASH_QUARANTINED;
+    }
+    return n;
+}
+
+size_t cleanup_panel_restore_quarantined(HWND panel)
+{
+    CleanupPanel *p = panel_of(panel);
+    size_t i, k, restored = 0;
+
+    for (i = 0; p != NULL && p->has_plan && i < p->plan.len && i < p->result.len; i++) {
+        const CleanupTrashOutcome *o = last_outcome(&p->plan.items[i]);
+        const CleanupItem *item = &p->result.items[i];
+        QuarantineStatus st = QUARANTINE_FAILED;
+        QuarantineList list;
+        wchar_t *volume;
+        uint32_t code = 0;
+
+        if (o->status != CLEANUP_TRASH_QUARANTINED || o->recycled_path == NULL) {
+            continue;
+        }
+        /* 이번 정리가 격리한 바로 그 항목(격리 위치가 같은 것)만 복원한다. */
+        volume = quarantine_volume_root(item->path);
+        quarantine_list_init(&list);
+        if (volume != NULL && quarantine_list_volume(volume, &list) == QUARANTINE_OK) {
+            for (k = 0; k < list.len; k++) {
+                const QuarantineEntry *e = &list.items[k];
+                if (e->state == QUARANTINE_ENTRY_OK && e->item != NULL &&
+                    _wcsicmp(e->item, o->recycled_path) == 0) {
+                    st = quarantine_restore(e, NULL, &code);
+                    break;
+                }
+            }
+        }
+        if (st == QUARANTINE_OK) {
+            restored++;
+            wprintf(L"restored: %ls\n", item->path);
+        } else {
+            wprintf(L"restore failed: %ls code=%lu %ls\n", quarantine_status_name(st),
+                    (unsigned long)code, item->path);
+        }
+        quarantine_list_free(&list);
+        free(volume);
+    }
+    fflush(stdout);
+    return restored;
 }
