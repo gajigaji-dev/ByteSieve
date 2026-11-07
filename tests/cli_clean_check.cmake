@@ -40,7 +40,10 @@ function(run out_var rc_var)
     execute_process(COMMAND ${CMAKE_COMMAND} -E env ${env_args} "${EXE}" ${ARGN}
                     INPUT_FILE "${FIXTURE}/answer.txt"
                     RESULT_VARIABLE rc OUTPUT_VARIABLE stdout_text ERROR_VARIABLE stderr_text
-                    TIMEOUT 110)
+                    TIMEOUT 110
+                    # CLI 는 파이프로 UTF-8 을 쓴다. 지정하지 않으면 시스템 코드 페이지(예: CP949)로 읽어
+                    # 한글("모든 드라이브" 등)이 깨진다.
+                    ENCODING UTF8)
     set(${out_var} "${stdout_text}\n${stderr_text}" PARENT_SCOPE)
     set(${out_var}_stdout "${stdout_text}" PARENT_SCOPE)
     set(${rc_var} "${rc}" PARENT_SCOPE)

@@ -363,6 +363,44 @@ static int setup(void)
     return 1;
 }
 
+/* 기본 파일 이름·실패 원인 문구(GUI 내보내기가 쓰는 Core 함수). */
+static void test_names(void)
+{
+    ExportTime t = {2026, 3, 7, 9, 5};
+    wchar_t buf[128], now[128];
+
+    export_default_name(L"C:\\Users\\me\\proj", EXPORT_KIND_CSV, &t, buf, 128);
+    CHECK(wcscmp(buf, L"ByteSieve-proj-20260307-0905.csv") == 0);
+    export_default_name(L"C:\\Users\\me\\proj\\", EXPORT_KIND_HTML, &t, buf, 128);
+    CHECK(wcscmp(buf, L"ByteSieve-proj-20260307-0905.html") == 0);
+    /* 드라이브 루트: "D:\" → "D" */
+    export_default_name(L"D:\\", EXPORT_KIND_CSV, &t, buf, 128);
+    CHECK(wcscmp(buf, L"ByteSieve-D-20260307-0905.csv") == 0);
+    /* 파일 이름에 못 쓰는 글자는 _ 로, 한글은 그대로 */
+    export_default_name(L"C:\\a\\보고서*?", EXPORT_KIND_CSV, &t, buf, 128);
+    CHECK(wcscmp(buf, L"ByteSieve-보고서-20260307-0905.csv") == 0);
+    export_default_name(L"C:\\a\\x<y>z", EXPORT_KIND_CSV, &t, buf, 128);
+    CHECK(wcscmp(buf, L"ByteSieve-x_y_z-20260307-0905.csv") == 0);
+    /* 이름이 비면 대상 이름 없이 */
+    export_default_name(NULL, EXPORT_KIND_HTML, &t, buf, 128);
+    CHECK(wcscmp(buf, L"ByteSieve-20260307-0905.html") == 0);
+    export_default_name(L"\\\\", EXPORT_KIND_CSV, &t, buf, 128);
+    CHECK(wcscmp(buf, L"ByteSieve-20260307-0905.csv") == 0);
+    /* 시각을 주지 않으면 지금 시각(형식만 확인) */
+    export_default_name(L"C:\\p", EXPORT_KIND_CSV, NULL, now, 128);
+    CHECK(wcsncmp(now, L"ByteSieve-p-", 12) == 0 &&
+          wcslen(now) == wcslen(L"ByteSieve-p-YYYYMMDD-HHMM.csv"));
+    CHECK(wcscmp(export_kind_ext(EXPORT_KIND_CSV), L"csv") == 0);
+    CHECK(wcscmp(export_kind_ext(EXPORT_KIND_HTML), L"html") == 0);
+
+    CHECK(wcsstr(export_error_text(ERROR_SHARING_VIOLATION), L"사용 중") != NULL);
+    CHECK(wcsstr(export_error_text(ERROR_ACCESS_DENIED), L"권한") != NULL);
+    CHECK(wcsstr(export_error_text(ERROR_DISK_FULL), L"공간") != NULL);
+    CHECK(wcsstr(export_error_text(ERROR_INVALID_PARAMETER), L"결과가 없") != NULL);
+    CHECK(export_error_text(ERROR_PATH_NOT_FOUND) != export_error_text(ERROR_ACCESS_DENIED));
+    CHECK(export_error_text(12345)[0] != L'\0');
+}
+
 int main(void)
 {
     ScanModel m;
@@ -377,6 +415,7 @@ int main(void)
     test_csv(&m);
     test_html(&m);
     test_failures(&m);
+    test_names();
     scan_model_free(&m);
     remove_tree(g_root);
     remove_tree(g_out);

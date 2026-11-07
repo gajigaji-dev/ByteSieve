@@ -141,3 +141,53 @@ int theme_check_width(HWND ref, HFONT font, const wchar_t *text, int dpi, int mi
             MulDiv(THEME_CHECK_BOX + THEME_CHECK_GAP + THEME_CHECK_PAD, dpi, 96);
     return w > min_px ? w : min_px;
 }
+
+COLORREF theme_accent_color(void)
+{
+    DWORD argb = 0;
+    BOOL opaque = FALSE;
+
+    /* DWM 색은 0xAARRGGBB. 너무 밝으면(흰색에 가까우면) 선택 막대가 안 보이므로 시스템 강조색을 쓴다. */
+    if (SUCCEEDED(DwmGetColorizationColor(&argb, &opaque))) {
+        BYTE r = (BYTE)((argb >> 16) & 0xFF), g = (BYTE)((argb >> 8) & 0xFF);
+        BYTE b = (BYTE)(argb & 0xFF);
+        if ((int)r + (int)g + (int)b < 3 * 0xD0) {
+            return RGB(r, g, b);
+        }
+    }
+    return GetSysColor(COLOR_HIGHLIGHT);
+}
+
+HBRUSH theme_bg_brush(void)
+{
+    static HBRUSH brush;
+
+    if (brush == NULL) {
+        brush = CreateSolidBrush(THEME_COLOR_BG);
+        if (brush == NULL) {
+            return GetSysColorBrush(COLOR_BTNFACE);
+        }
+    }
+    return brush;
+}
+
+LRESULT theme_ctlcolor_static(HDC dc)
+{
+    SetBkColor(dc, THEME_COLOR_BG);
+    SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
+    return (LRESULT)theme_bg_brush();
+}
+
+HFONT theme_create_title_font(HFONT base, int dpi)
+{
+    LOGFONTW lf;
+
+    memset(&lf, 0, sizeof(lf));
+    if (base == NULL || GetObjectW(base, sizeof(lf), &lf) != sizeof(lf)) {
+        return NULL;
+    }
+    lf.lfHeight = -MulDiv(20, dpi > 0 ? dpi : 96, 72);
+    lf.lfWidth = 0;
+    lf.lfWeight = FW_SEMIBOLD;
+    return CreateFontIndirectW(&lf);
+}

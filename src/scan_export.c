@@ -758,3 +758,79 @@ int export_html(const ScanModel *model, const ExportInfo *info, const wchar_t *f
               "용량 대비입니다.</footer>\n</main>\n</body>\n</html>\n");
     return writer_close(&w, file, error);
 }
+
+/* ---- 기본 파일 이름·실패 원인(GUI 내보내기) ---- */
+
+const wchar_t *export_kind_ext(ExportKind kind)
+{
+    return kind == EXPORT_KIND_HTML ? L"html" : L"csv";
+}
+
+void export_default_name(const wchar_t *root, ExportKind kind, const ExportTime *time,
+                         wchar_t *buf, size_t len)
+{
+    wchar_t label[64];
+    size_t n, start, i, out = 0;
+    ExportTime now;
+
+    if (buf == NULL || len == 0) {
+        return;
+    }
+    if (root == NULL) {
+        root = L"";
+    }
+    if (time == NULL) {
+        SYSTEMTIME st;
+        GetLocalTime(&st);
+        now.year = st.wYear;
+        now.month = st.wMonth;
+        now.day = st.wDay;
+        now.hour = st.wHour;
+        now.minute = st.wMinute;
+        time = &now;
+    }
+    n = wcslen(root);
+    while (n > 0 && path_is_separator(root[n - 1])) {
+        n--;
+    }
+    start = n;
+    while (start > 0 && !path_is_separator(root[start - 1])) {
+        start--;
+    }
+    for (i = start; i < n && out + 1 < sizeof(label) / sizeof(label[0]); i++) {
+        label[out++] = wcschr(L"\\/:*?\"<>|", root[i]) != NULL || root[i] < 32 ? L'_' : root[i];
+    }
+    while (out > 0 && label[out - 1] == L'_') {
+        out--; /* "D:" → "D" */
+    }
+    label[out] = L'\0';
+    swprintf(buf, len, L"ByteSieve-%ls%ls%04u%02u%02u-%02u%02u.%ls", label, out > 0 ? L"-" : L"",
+             time->year, time->month, time->day, time->hour, time->minute,
+             export_kind_ext(kind));
+}
+
+const wchar_t *export_error_text(unsigned long error)
+{
+    switch (error) {
+    case ERROR_ACCESS_DENIED:
+    case ERROR_WRITE_PROTECT:
+        return L"저장 위치에 쓸 권한이 없습니다(읽기 전용 파일이거나 보호된 폴더).";
+    case ERROR_SHARING_VIOLATION:
+    case ERROR_LOCK_VIOLATION:
+        return L"다른 프로그램(Excel 등)이 파일을 사용 중입니다. 파일을 닫고 다시 시도하세요.";
+    case ERROR_DISK_FULL:
+    case ERROR_HANDLE_DISK_FULL:
+        return L"디스크 공간이 부족합니다.";
+    case ERROR_PATH_NOT_FOUND:
+    case ERROR_FILE_NOT_FOUND:
+    case ERROR_INVALID_NAME:
+        return L"저장 위치를 찾을 수 없거나 파일 이름이 올바르지 않습니다.";
+    case ERROR_NOT_ENOUGH_MEMORY:
+    case ERROR_OUTOFMEMORY:
+        return L"메모리가 부족합니다.";
+    case ERROR_INVALID_PARAMETER:
+        return L"내보낼 스캔 결과가 없습니다.";
+    default:
+        return L"파일을 쓰지 못했습니다.";
+    }
+}

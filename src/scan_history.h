@@ -154,4 +154,53 @@ wchar_t *history_full_path(const wchar_t *root, const wchar_t *rel);
 /* 식별자 이름("grown", "shrunk", "added", "removed"). */
 const wchar_t *history_kind_name(HistoryKind kind);
 
+/* 부호 있는 용량 문구("+1.20 GiB", "-300 B", 0 이면 "0 B"). */
+void history_format_delta(int64_t delta, wchar_t *buf, size_t len);
+
+/* 변화 열 문구: "새 폴더 +1.00 KiB", "삭제됨 -2.00 MiB", 정확하지 않을 수 있으면 끝에 " (?)". */
+void history_change_text(const HistoryChange *c, wchar_t *buf, size_t len);
+
+/*
+ * ---- 스캔 기록 추적(CLI --track 과 GUI 폴더 스캔이 함께 쓴다) ----
+ *
+ * 스캔이 끝난 모델을 직전 스냅숏과 비교하고, 조건이 맞으면 새 스냅숏을 저장한다.
+ *   1. 모델이 비었거나 SCAN_FATAL 이면 아무것도 하지 않는다(NONE).
+ *   2. 기록 폴더(dir, NULL 이면 history_default_dir)와 대상 파일(history_file_for)을 정한다.
+ *      정하지 못하면 FAILED(error = ERROR_PATH_NOT_FOUND).
+ *   3. 직전 스냅숏이 있으면 비교해 diff 에 채운다(has_diff = 1). 읽을 수 없으면 비교하지 않는다.
+ *   4. 취소된 스캔이면 CANCELLED, save 가 0 이면 DISABLED(둘 다 저장하지 않음, 비교는 했을 수 있음).
+ *   5. 저장(폴더 만들기 → 임시 파일에 쓴 뒤 바꿔치기)에 실패하면 FAILED(error 에 Windows 오류).
+ *   6. 저장했으면 직전이 있었으면 COMPARED, 없었으면 BASELINE.
+ * 기록을 다루다 실패해도 스캔 결과에는 영향이 없다(호출자는 상태를 알리기만 한다).
+ */
+typedef enum {
+    HISTORY_TRACK_NONE = 0,  /* 비교·저장하지 않음(모델이 비었거나 SCAN_FATAL) */
+    HISTORY_TRACK_BASELINE,  /* 직전 스냅숏이 없어 이번 스캔을 기준으로 저장했다 */
+    HISTORY_TRACK_COMPARED,  /* 직전 스냅숏과 비교했고 새 스냅숏을 저장했다 */
+    HISTORY_TRACK_CANCELLED, /* 취소된 스캔이라 저장하지 않았다 */
+    HISTORY_TRACK_DISABLED,  /* 저장하지 않게 했다(GUI 자동 저장 꺼짐) */
+    HISTORY_TRACK_FAILED,    /* 기록 위치를 정하지 못했거나 저장하지 못했다 */
+    HISTORY_TRACK_STATUS_COUNT
+} HistoryTrackStatus;
+
+/* 화면용 설명, 식별자 이름("baseline", "compared" 등). */
+const wchar_t *history_track_status_text(HistoryTrackStatus status);
+const wchar_t *history_track_status_name(HistoryTrackStatus status);
+
+typedef struct {
+    HistoryTrackStatus status;
+    int has_diff;        /* 직전 스냅숏과 비교해 diff 를 채웠으면 1 */
+    unsigned long error; /* FAILED 일 때 Windows 오류 */
+    wchar_t *file;       /* 대상 스냅숏 파일 경로(malloc, 정하지 못했으면 NULL) */
+} HistoryTrackResult;
+
+/*
+ * 위 순서로 추적한다. root 는 history_file_for 에 넘길 대상 폴더(NULL 이면 모델 루트 이름).
+ * diff 는 history_diff_init 한 것이어야 하며 이전 내용은 지운다. out 은 history_track_result_free 로 푼다.
+ * 반환값은 out->status.
+ */
+HistoryTrackStatus history_track(const ScanModel *model, const wchar_t *dir, const wchar_t *root,
+                                 int save, HistoryDiff *diff, HistoryTrackResult *out);
+void history_track_result_free(HistoryTrackResult *r);
+
 #endif /* BYTESIEVE_SCAN_HISTORY_H */

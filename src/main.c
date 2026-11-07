@@ -39,48 +39,40 @@ static void set_wide_mode(FILE *stream)
 static void track_history(const CliOptions *opts, const ScanModel *model, HistoryDiff *diff,
                           int *has_previous, wchar_t **file, int *saved)
 {
-    wchar_t dir[MAX_PATH * 2];
-    HistorySnapshot prev, cur;
-    unsigned long err = 0;
+    HistoryTrackResult r;
 
     *has_previous = 0;
     *saved = 0;
     *file = NULL;
-    if (opts->history_dir != NULL) {
-        if (wcslen(opts->history_dir) >= sizeof(dir) / sizeof(dir[0])) {
-            fwprintf(stderr, L"warning: --history-dir is too long; history not saved\n");
-            return;
-        }
-        wcscpy_s(dir, sizeof(dir) / sizeof(dir[0]), opts->history_dir);
-    } else if (history_default_dir(dir, sizeof(dir) / sizeof(dir[0])) != 0) {
-        fwprintf(stderr, L"warning: cannot determine history folder; history not saved\n");
+    if (opts->history_dir != NULL && wcslen(opts->history_dir) >= MAX_PATH * 2) {
+        fwprintf(stderr, L"warning: --history-dir is too long; history not saved\n");
         return;
     }
-    *file = history_file_for(dir, opts->target);
-    if (*file == NULL) {
-        fwprintf(stderr, L"warning: cannot build history file path; history not saved\n");
-        return;
-    }
-
-    history_snapshot_init(&prev);
-    history_snapshot_init(&cur);
-    if (history_snapshot_from_model(&cur, model) != 0) {
-        /* 대상 폴더를 읽지 못했다(SCAN_FATAL). */
-        return;
-    }
-    if (history_load(&prev, *file) == 0 && history_diff(&prev, &cur, diff) == 0) {
-        *has_previous = 1;
-    }
-    if (model->report.cancelled) {
+    /* GUI 폴더 스캔과 같은 추적 함수(scan_history). --track 은 명시적 요청이라 항상 저장한다. */
+    history_track(model, opts->history_dir, opts->target, 1, diff, &r);
+    *has_previous = r.has_diff;
+    switch (r.status) {
+    case HISTORY_TRACK_CANCELLED:
         fwprintf(stderr, L"warning: scan was cancelled; history not saved\n");
-    } else if (history_ensure_dir(dir) != 0 || history_save(&cur, *file, &err) != 0) {
-        fwprintf(stderr, L"warning: cannot save history to %ls (Windows error %lu)\n", *file,
-                 err != 0 ? err : (unsigned long)GetLastError());
-    } else {
+        break;
+    case HISTORY_TRACK_FAILED:
+        if (r.file == NULL) {
+            fwprintf(stderr, L"warning: cannot determine history folder; history not saved\n");
+        } else {
+            fwprintf(stderr, L"warning: cannot save history to %ls (Windows error %lu)\n",
+                     r.file, r.error);
+        }
+        break;
+    case HISTORY_TRACK_BASELINE:
+    case HISTORY_TRACK_COMPARED:
         *saved = 1;
+        break;
+    default:
+        break;
     }
-    history_snapshot_free(&prev);
-    history_snapshot_free(&cur);
+    *file = r.file; /* 소유권을 넘긴다 */
+    r.file = NULL;
+    history_track_result_free(&r);
 }
 
 /* --track 텍스트 모드: 폴더 트리를 만들어야 하므로 모델로 스캔한다. */

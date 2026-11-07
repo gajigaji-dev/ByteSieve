@@ -198,6 +198,9 @@ int cleaner_build_plan(const CleanerList *list, CleanPlan *plan);
  *   query_recycle 모든 드라이브 휴지통의 용량·항목 수. 성공 0, 실패 -1(*code)
  *   empty_recycle 모든 드라이브 휴지통을 확인 창 없이 비운다. 성공 0, 실패 -1(*code)
  *   min_age_hours 임시 파일·오류 보고서에서 이보다 최근에 바뀐 항목을 뺀다(0 이면 24)
+ *   kinds         분석할 대상 종류(CLEANER_KIND_BIT 묶음). 0 이면 모든 종류(CLI·예전 동작).
+ *                 GUI 는 [시스템 정리](CLEANER_KINDS_SYSTEM)와 [개발 캐시](CLEANER_KINDS_CACHE) 화면으로
+ *                 나눠 쓴다. 범위 밖 종류는 분석하지 않아 목록에 행이 생기지 않는다(안전 규칙은 그대로).
  */
 typedef struct {
     int (*app_running)(const wchar_t *exe_name, void *ctx);
@@ -205,7 +208,19 @@ typedef struct {
     int (*empty_recycle)(uint32_t *code, void *ctx);
     void *ctx;
     unsigned min_age_hours;
+    unsigned kinds;
 } CleanerOps;
+
+#define CLEANER_KIND_BIT(kind) (1u << (unsigned)(kind))
+/* 모든 종류. */
+#define CLEANER_KINDS_ALL ((1u << (unsigned)CLEANER_KIND_COUNT) - 1u)
+/* 개발 도구 캐시와 가상 디스크([개발 캐시] 화면). */
+#define CLEANER_KINDS_CACHE (CLEANER_KIND_BIT(CLEANER_DEV_CACHE) | CLEANER_KIND_BIT(CLEANER_VDISK))
+/* 그 밖의 시스템 정크: 임시 파일·오류 보고서·휴지통·브라우저 캐시([시스템 정리] 화면). */
+#define CLEANER_KINDS_SYSTEM (CLEANER_KINDS_ALL & ~CLEANER_KINDS_CACHE)
+
+/* kinds(0 이면 모두)에 kind 가 들어 있으면 1. */
+int cleaner_kinds_include(unsigned kinds, CleanerKind kind);
 
 /* 실제 시스템 연동 함수(GUI·테스트가 직접 쓸 수도 있다). */
 int cleaner_app_running_system(const wchar_t *exe_name, void *ctx);

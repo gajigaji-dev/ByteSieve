@@ -569,6 +569,57 @@ static void test_cancel(Fake *f)
     cleaner_list_free(&l);
 }
 
+/* 분석 범위(CleanerOps.kinds): GUI [시스템 정리]·[개발 캐시] 화면이 나눠 분석한다. */
+static void test_kinds(Fake *f)
+{
+    CleanerList l;
+    CleanerOps ops = make_ops(f);
+    size_t i, temp_entries;
+
+    CHECK(cleaner_kinds_include(0, CLEANER_DEV_CACHE));
+    CHECK(cleaner_kinds_include(CLEANER_KINDS_ALL, CLEANER_VDISK));
+    CHECK(!cleaner_kinds_include(CLEANER_KINDS_SYSTEM, CLEANER_DEV_CACHE));
+    CHECK(!cleaner_kinds_include(CLEANER_KINDS_SYSTEM, CLEANER_VDISK));
+    CHECK(cleaner_kinds_include(CLEANER_KINDS_SYSTEM, CLEANER_RECYCLE_BIN));
+    CHECK(!cleaner_kinds_include(CLEANER_KINDS_CACHE, CLEANER_USER_TEMP));
+    CHECK(cleaner_kinds_include(CLEANER_KINDS_CACHE, CLEANER_DEV_CACHE));
+    CHECK(!cleaner_kinds_include(0, CLEANER_KIND_COUNT));
+    CHECK((CLEANER_KINDS_SYSTEM | CLEANER_KINDS_CACHE) == CLEANER_KINDS_ALL);
+    CHECK((CLEANER_KINDS_SYSTEM & CLEANER_KINDS_CACHE) == 0);
+
+    /* 전체(0) */
+    cleaner_list_init(&l);
+    CHECK(cleaner_analyze(&l, NULL, &ops, NULL, NULL, NULL) == 0);
+    temp_entries =
+        find(&l, CLEANER_USER_TEMP) != NULL ? find(&l, CLEANER_USER_TEMP)->entry_count : 0;
+    CHECK(temp_entries > 0);
+
+    /* 시스템 정리: 개발 캐시·가상 디스크 행이 없고, 같은 판정 */
+    ops.kinds = CLEANER_KINDS_SYSTEM;
+    CHECK(cleaner_analyze(&l, NULL, &ops, NULL, NULL, NULL) == 0);
+    CHECK(find(&l, CLEANER_USER_TEMP) != NULL && find(&l, CLEANER_RECYCLE_BIN) != NULL);
+    CHECK(find(&l, CLEANER_USER_TEMP) != NULL &&
+          find(&l, CLEANER_USER_TEMP)->entry_count == temp_entries);
+    for (i = 0; i < l.len; i++) {
+        CHECK(l.items[i].kind != CLEANER_DEV_CACHE && l.items[i].kind != CLEANER_VDISK);
+    }
+
+    /* 개발 캐시: 그 밖의 종류 행이 없다 */
+    ops.kinds = CLEANER_KINDS_CACHE;
+    CHECK(cleaner_analyze(&l, NULL, &ops, NULL, NULL, NULL) == 0);
+    CHECK(find(&l, CLEANER_USER_TEMP) == NULL && find(&l, CLEANER_RECYCLE_BIN) == NULL);
+    for (i = 0; i < l.len; i++) {
+        CHECK(cleaner_kinds_include(CLEANER_KINDS_CACHE, l.items[i].kind));
+    }
+
+    /* 한 종류만 */
+    ops.kinds = CLEANER_KIND_BIT(CLEANER_USER_TEMP);
+    CHECK(cleaner_analyze(&l, NULL, &ops, NULL, NULL, NULL) == 0);
+    CHECK(l.len == 1 && l.items[0].kind == CLEANER_USER_TEMP &&
+          l.items[0].entry_count == temp_entries);
+    cleaner_list_free(&l);
+}
+
 int main(void)
 {
     wchar_t tmp[MAX_PATH];
@@ -586,6 +637,7 @@ int main(void)
     fake.running = L"firefox.exe";
     test_names();
     test_selection_policy();
+    test_kinds(&fake); /* 정리(test_run) 전에: 같은 픽스처를 읽기만 한다 */
     cleaner_list_init(&list);
     test_analyze(&list, &fake);
     test_run(&list, &fake);

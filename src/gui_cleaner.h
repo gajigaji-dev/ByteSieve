@@ -10,11 +10,13 @@
 #include "cleaner.h"
 
 /*
- * [시스템 정리] 탭의 Cleaner 패널(자식 창): Windows 임시 파일·오류 보고서·휴지통·브라우저 캐시와
- * 공용 개발 캐시(npm·pip·Gradle·Cargo·NuGet, 예전 [공용 캐시] 탭)를 분석해 대상마다 실제 확보 용량
+ * Cleaner 패널(자식 창): Windows 임시 파일·오류 보고서·휴지통·브라우저 캐시와
+ * 공용 개발 캐시(npm·pip·Gradle·Cargo·NuGet)·가상 디스크를 분석해 대상마다 실제 확보 용량
  * (할당 크기, 하드 링크로 다른 곳과 나누는 파일 제외)·파일 크기·파일 수·상태(정리 가능, 프로그램 실행
  * 중, 최근 항목 제외, 캐시 위치 문제 등)·위치 근거를 체크 목록으로 보여 주고, 사용자가 체크하고
  * 확인한 대상만 정리한다(cleaner.h).
+ *   - GUI 는 이 패널을 둘 만든다: [시스템 정리] 페이지(CLEANER_KINDS_SYSTEM)와 [개발 캐시] 페이지
+ *     (CLEANER_KINDS_CACHE). 분석 범위만 다르고 선택 정책·안전 장치·확인 창은 같다(cleaner_panel_set_kinds).
  *   - 분석·정리는 작업 스레드에서 한다. 분석은 읽기 전용이다.
  *   - [모두 선택]은 휴지통과 개발 도구 캐시를 고르지 않는다(cleaner_target_manual_only). 휴지통
  *     비우기는 영구 삭제이고, 개발 도구 캐시는 여러 프로젝트가 함께 써서 지우면 다시 내려받아야 하므로
@@ -34,6 +36,14 @@
 
 int cleaner_panel_register(HINSTANCE inst);
 HWND cleaner_panel_create(HWND parent, int id, HFONT font, int dpi);
+
+/*
+ * 분석 범위(CleanerOps.kinds)를 정한다. 0 이면 모든 종류(기본값). GUI 는 패널을 둘 만들어
+ * [시스템 정리](CLEANER_KINDS_SYSTEM)와 [개발 캐시](CLEANER_KINDS_CACHE) 페이지로 나눈다.
+ * 분석·정리 중에는 바꾸지 않는다(무시). 다음 분석부터 적용된다.
+ */
+void cleaner_panel_set_kinds(HWND panel, unsigned kinds);
+unsigned cleaner_panel_kinds(HWND panel);
 
 /* 분석을 시작한다. 시작했으면 1. */
 int cleaner_panel_refresh(HWND panel);
@@ -56,8 +66,8 @@ size_t cleaner_panel_check_kind(HWND panel, CleanerKind kind, int check);
 int cleaner_panel_run(HWND panel, int confirm);
 
 /*
- * 자체 검사: 분석 결과 화면이 목록과 맞는지, 휴지통 행이 있고 휴지통·개발 도구 캐시가 [모두 선택]으로
- * 체크되지 않는지, 주의 대상의 상태 칸·선택 요약이 맞는지(주의 대상마다 stdout 에 "caution: <이름>"),
+ * 자체 검사: 분석 결과 화면이 목록과 맞는지, 분석 범위 밖 종류의 행이 없는지, (시스템 범위면) 휴지통
+ * 행이 하나 있는지, 휴지통·개발 도구 캐시가 [모두 선택]으로 체크되지 않는지, 주의 대상의 상태 칸·선택 요약이 맞는지(주의 대상마다 stdout 에 "caution: <이름>"),
  * 파일 시스템 대상(임시 파일·브라우저·개발 캐시)의 위치가 모두 expect_root 아래인지 확인한다
  * (아니면 실제 사용자 파일을 볼 수 있으므로 정리하면 안 된다). 실패 수를 반환한다.
  */

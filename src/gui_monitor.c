@@ -9,6 +9,7 @@
 #include <wchar.h>
 
 #include "gui_monitor.h"
+#include "gui_theme.h"
 #include "size_format.h"
 #include "sysmon.h"
 
@@ -491,6 +492,9 @@ static LRESULT CALLBACK panel_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_CREATE:
         panel_create_controls(p);
         return 0;
+    case WM_CTLCOLORSTATIC:
+        /* 정적 글자·체크 상자 배경을 창 배경색(theme BG)에 맞춘다. */
+        return theme_ctlcolor_static((HDC)wp);
     case WM_SIZE:
         panel_layout(p);
         return 0;
@@ -553,7 +557,7 @@ int monitor_panel_register(HINSTANCE inst)
     wc.lpfnWndProc = panel_proc;
     wc.hInstance = inst;
     wc.hCursor = LoadCursorW(NULL, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+    wc.hbrBackground = theme_bg_brush();
     wc.lpszClassName = MONITOR_PANEL_CLASS;
     return RegisterClassExW(&wc) != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS ? 0 : -1;
 }

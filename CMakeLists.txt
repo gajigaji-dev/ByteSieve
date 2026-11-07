@@ -41,7 +41,7 @@ bytesieve_configure(bytesieve_model)
 # 폴더별 용량 변화 추적(스냅숏 저장·비교). 모델에 의존한다.
 add_library(bytesieve_history STATIC src/scan_history.c)
 target_include_directories(bytesieve_history PUBLIC src)
-target_link_libraries(bytesieve_history PUBLIC bytesieve_model)
+target_link_libraries(bytesieve_history PUBLIC bytesieve_model bytesieve_format)
 bytesieve_configure(bytesieve_history)
 
 # 스캔을 별도 스레드에서 돌리는 작업(진행률 스냅샷·취소). GUI 와 테스트가 함께 쓴다.
@@ -97,7 +97,7 @@ target_link_libraries(bytesieve_cleanup_trash PUBLIC bytesieve_cleanup bytesieve
                       shell32 uuid)
 bytesieve_configure(bytesieve_cleanup_trash)
 
-# 정리 계획(탐지 결과 → 대상·선택 정책·요약 → 실행). GUI 두 정리 탭과 CLI(disk-scanner clean)가 함께 쓴다.
+# 정리 계획(탐지 결과 → 대상·선택 정책·요약 → 실행). GUI 두 정리 페이지와 CLI(disk-scanner clean)가 함께 쓴다.
 add_library(bytesieve_plan STATIC src/clean_plan.c)
 target_include_directories(bytesieve_plan PUBLIC src)
 target_link_libraries(bytesieve_plan PUBLIC bytesieve_cleanup_trash bytesieve_project shell32 ole32)
@@ -136,7 +136,7 @@ target_include_directories(bytesieve_booster PUBLIC src)
 target_link_libraries(bytesieve_booster PUBLIC bytesieve_path advapi32 shell32 ole32 psapi user32)
 bytesieve_configure(bytesieve_booster)
 
-# 스퀘어리파이드 트리맵 배치(순수 계산). GUI 폴더 스캔 탭의 트리맵 보기가 쓴다.
+# 스퀘어리파이드 트리맵 배치(순수 계산). GUI 폴더 스캔 페이지의 트리맵 보기가 쓴다.
 add_library(bytesieve_treemap STATIC src/treemap.c)
 target_include_directories(bytesieve_treemap PUBLIC src)
 bytesieve_configure(bytesieve_treemap)
@@ -171,17 +171,25 @@ target_include_directories(bytesieve_ui_lang PUBLIC src)
 target_link_libraries(bytesieve_ui_lang PUBLIC advapi32)
 bytesieve_configure(bytesieve_ui_lang)
 
-# Win32 GUI: 폴더 스캔 탭(진행률 표시줄, 폴더 트리, 용량 순위), 드라이브 대시보드 탭,
-# 정리 후보 탭(개발 캐시·빌드 결과물·임시·로그 탐지, 선택 항목 휴지통 이동),
-# 격리 폴더 탭(휴지통 없는 드라이브에서 격리한 항목의 복원·영구 삭제),
-# 시스템 탭(RAM·CPU 실시간 사용률 막대·그래프).
-# gui_theme: Windows 11 창 외곽(DWM), 언어별 UI 글꼴, 글자 폭에 맞춘 컨트롤 크기.
-# 시스템 정리 탭(gui_cleaner, 공용 개발 캐시 포함)·프로젝트 정리 탭(gui_cleanup)·Booster 탭(gui_booster).
-add_executable(bytesieve-gui WIN32 src/gui_main.c src/gui_theme.c src/gui_drives.c
-               src/gui_cleanup.c src/gui_quarantine.c src/gui_monitor.c
+# GUI 사이드바 메뉴 모델(목적별 그룹·키 이동·위치 판정). 순수 계산이라 창 없이 단위 테스트한다.
+add_library(bytesieve_nav STATIC src/nav_model.c)
+target_include_directories(bytesieve_nav PUBLIC src)
+target_link_libraries(bytesieve_nav PUBLIC bytesieve_ui_lang)
+bytesieve_configure(bytesieve_nav)
+
+# Win32 GUI: 폴더 스캔 페이지(진행률 표시줄, 폴더 트리, 용량 순위), 드라이브 대시보드 페이지,
+# 프로젝트 정리 페이지(개발 캐시·빌드 결과물·임시·로그 탐지, 선택 항목 휴지통 이동),
+# 격리 폴더 페이지(휴지통 없는 드라이브에서 격리한 항목의 복원·영구 삭제),
+# 모니터 페이지(RAM·CPU 실시간 사용률 막대·그래프).
+# gui_main: 창 골격(사이드바·페이지 제목·페이지 전환)과 자체 검사 진행만 맡는다.
+# gui_nav: 왼쪽 사이드바(목적별 메뉴, 직접 그림). gui_scan: 폴더 스캔 페이지 패널.
+# gui_theme: Windows 11 창 외곽(DWM), 색 토큰, 언어별 UI 글꼴, 글자 폭에 맞춘 컨트롤 크기.
+# 시스템 정리·개발 캐시 페이지(gui_cleaner 패널 둘, 분석 범위만 다름)·프로젝트 정리(gui_cleanup)·부스터(gui_booster).
+add_executable(bytesieve-gui WIN32 src/gui_main.c src/gui_nav.c src/gui_scan.c src/gui_theme.c
+               src/gui_drives.c src/gui_cleanup.c src/gui_quarantine.c src/gui_monitor.c
                src/gui_treemap.c src/gui_cleaner.c src/gui_booster.c)
 target_link_libraries(bytesieve-gui PRIVATE bytesieve_job bytesieve_history bytesieve_export
-                      bytesieve_treemap bytesieve_ui_lang bytesieve_cleaner bytesieve_booster
+                      bytesieve_treemap bytesieve_ui_lang bytesieve_nav bytesieve_cleaner bytesieve_booster
                       bytesieve_drive bytesieve_format bytesieve_cleanup_job
                       bytesieve_cleanup_trash bytesieve_dev_cache bytesieve_sysmon comctl32
                       comdlg32 shell32 ole32 dwmapi)
@@ -192,7 +200,7 @@ add_executable(bytesieve-bench src/bench.c)
 target_link_libraries(bytesieve-bench PRIVATE bytesieve_model bytesieve_cleanup bytesieve_format psapi)
 bytesieve_configure(bytesieve-bench)
 
-# disk-scanner clean: GUI 정리 탭과 같은 탐지(cleanup_job·cleaner)·계획(clean_plan)·실행을 쓰는 CLI.
+# disk-scanner clean: GUI 정리 페이지와 같은 탐지(cleanup_job·cleaner)·계획(clean_plan)·실행을 쓰는 CLI.
 add_library(bytesieve_cli_clean STATIC src/cli_clean.c src/cli_devenv.c)
 target_include_directories(bytesieve_cli_clean PUBLIC src)
 target_link_libraries(bytesieve_cli_clean PUBLIC bytesieve_plan bytesieve_cleaner bytesieve_cleanup_job
@@ -407,6 +415,11 @@ target_link_libraries(test_ui_lang PRIVATE bytesieve_ui_lang)
 bytesieve_configure(test_ui_lang)
 add_test(NAME ui_lang COMMAND test_ui_lang)
 
+add_executable(test_nav_model tests/test_nav_model.c)
+target_link_libraries(test_nav_model PRIVATE bytesieve_nav)
+bytesieve_configure(test_nav_model)
+add_test(NAME nav_model COMMAND test_nav_model)
+
 add_executable(test_treemap tests/test_treemap.c)
 target_link_libraries(test_treemap PRIVATE bytesieve_treemap)
 bytesieve_configure(test_treemap)
@@ -473,56 +486,61 @@ add_test(NAME gui_scan COMMAND bytesieve-gui --self-test ${CMAKE_CURRENT_SOURCE_
 add_test(NAME gui_cancel COMMAND bytesieve-gui --self-test-cancel ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME gui_missing_dir COMMAND bytesieve-gui --self-test ${CMAKE_CURRENT_SOURCE_DIR}/no-such-dir)
 set_tests_properties(gui_missing_dir PROPERTIES WILL_FAIL TRUE)
-# 드라이브 탭으로 전환해 조회를 마친 뒤 목록이 시스템 드라이브 정보와 맞는지 확인한다.
+# 드라이브 페이지로 전환해 조회를 마친 뒤 목록이 시스템 드라이브 정보와 맞는지 확인한다.
 add_test(NAME gui_drives COMMAND bytesieve-gui --self-test-drives)
-# 정리 후보 탭: 소스 트리(빌드 폴더 포함)를 탐지해 목록·합계·정렬·필터를 확인한다.
+# 프로젝트 정리 페이지: 소스 트리(빌드 폴더 포함)를 탐지해 목록·합계·정렬·필터를 확인한다.
 add_test(NAME gui_cleanup COMMAND bytesieve-gui --self-test-cleanup ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME gui_cleanup_cancel
          COMMAND bytesieve-gui --self-test-cleanup-cancel ${CMAKE_CURRENT_SOURCE_DIR})
-# 정리 후보 탭: 임시 픽스처를 탐지해 옮길 수 있는 항목을 모두 휴지통으로 옮기고(확인 창 없이)
+# 프로젝트 정리 페이지: 임시 픽스처를 탐지해 옮길 수 있는 항목을 모두 휴지통으로 옮기고(확인 창 없이)
 # 결과 화면·파일 상태를 확인한다. 보호 대상(접근 거부로 일부 누락)은 남아야 한다.
 add_test(NAME gui_trash
          COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:bytesieve-gui>
                  -DFIXTURE=${CMAKE_CURRENT_BINARY_DIR}/gui_trash_fixture
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/gui_trash_check.cmake)
-# 격리 폴더 탭: 픽스처를 휴지통 없는 드라이브처럼 다뤄(BYTESIEVE_QUARANTINE_ROOT) 정리 → 격리 →
+# 격리 폴더 페이지: 픽스처를 휴지통 없는 드라이브처럼 다뤄(BYTESIEVE_QUARANTINE_ROOT) 정리 → 격리 →
 # 복원(같은 이름은 덮어쓰지 않고 건너뜀) → 영구 삭제까지 화면과 파일 상태를 확인한다.
 add_test(NAME gui_quarantine
          COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:bytesieve-gui>
                  -DFIXTURE=${CMAKE_CURRENT_BINARY_DIR}/gui_quarantine_fixture
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/gui_quarantine_check.cmake)
-# 폴더 스캔 탭 변화 추적: 기준 스캔 → 픽스처 변경 → 변화 순위 보기·변화 열 확인.
+# 폴더 스캔 페이지 변화 추적: 기준 스캔 → 픽스처 변경 → 변화 순위 보기·변화 열 확인.
 add_test(NAME gui_history
          COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:bytesieve-gui>
                  -DFIXTURE=${CMAKE_CURRENT_BINARY_DIR}/gui_history_fixture
                  -DHIST=${CMAKE_CURRENT_BINARY_DIR}/gui_history_check
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/gui_history_check.cmake)
-# 폴더 스캔 탭 정밀 스캔: 하드 링크 픽스처를 정밀 스캔(보정 열·보기·분석 줄) → 기본 스캔(열 숨김) 확인.
+# 폴더 스캔 페이지 정밀 스캔: 하드 링크 픽스처를 정밀 스캔(보정 열·보기·분석 줄) → 기본 스캔(열 숨김) 확인.
 add_test(NAME gui_precise
          COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:bytesieve-gui>
                  -DFIXTURE=${CMAKE_CURRENT_BINARY_DIR}/gui_precise_fixture
                  -DHIST=${CMAKE_CURRENT_BINARY_DIR}/gui_precise_history
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/gui_precise_check.cmake)
-# 폴더 스캔 탭 내보내기: 스캔 → CSV·HTML 보고서 저장(대화 상자 없이) → 파일 내용 확인.
+# 폴더 스캔 페이지 내보내기: 스캔 → CSV·HTML 보고서 저장(대화 상자 없이) → 파일 내용 확인.
 add_test(NAME gui_export
          COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:bytesieve-gui>
                  -DFIXTURE=${CMAKE_CURRENT_BINARY_DIR}/gui_export_fixture
                  -DOUT=${CMAKE_CURRENT_BINARY_DIR}/gui_export_out
                  -DHIST=${CMAKE_CURRENT_BINARY_DIR}/gui_export_history
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/gui_export_check.cmake)
-# 시스템 탭: 몇 초 동안 RAM·CPU 를 측정해 화면·1초 갱신 간격·측정 실패 표시를 확인한다.
+# 모니터 페이지: 몇 초 동안 RAM·CPU 를 측정해 화면·1초 갱신 간격·측정 실패 표시를 확인한다.
 add_test(NAME gui_monitor COMMAND bytesieve-gui --self-test-monitor)
-# Cleaner 탭: 사용자 폴더·TEMP 를 픽스처로 돌려 분석 → 화면 확인 → 휴지통 비우기를 뺀 정리 가능한
-# 대상을 모두 정리(픽스처의 격리 폴더로) → 오래된 항목만 옮기고 최근 항목·프로필 설정은 남는지 확인.
+# 시스템 정리·개발 캐시 페이지: 사용자 폴더·TEMP 를 픽스처로 돌려 시스템 정리 분석 → 화면 확인 → 휴지통
+# 비우기를 뺀 정리 가능한 대상을 정리 → 개발 캐시 분석·확인·정리(픽스처의 격리 폴더로) → 오래된 항목만 옮기고 최근 항목·프로필 설정은 남는지 확인.
 add_test(NAME gui_cleaner
          COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:bytesieve-gui>
                  -DFIXTURE=${CMAKE_CURRENT_BINARY_DIR}/gui_cleaner_fixture
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/gui_cleaner_check.cmake)
-# Booster 탭: 시작 프로그램·프로세스 목록과 CPU 측정, 보호 대상(자신·시스템)은 고를 수 없는지(읽기만 함).
+# 부스터 페이지: 시작 프로그램·프로세스 목록과 CPU 측정, 보호 대상(자신·시스템)은 고를 수 없는지(읽기만 함).
 add_test(NAME gui_booster COMMAND bytesieve-gui --self-test-booster)
 set_tests_properties(gui_cleaner gui_booster PROPERTIES TIMEOUT 120)
-# 표시 언어: 언어마다 창을 만들어 번역 문구·언어별 글꼴, 최소 창 크기에서 단추 문구가 잘리지 않고
-# 탭 영역 안에 있는지 확인한다(문구가 긴 언어에서 배치가 깨지지 않게).
+# 사이드바: 키보드(↑↓·Home·End)·마우스로 모든 페이지를 오가며 고른 페이지만 보이는지, 제목, 처음 열 때
+# 조회가 한 번만 일어나는지 확인한다(조회는 세기만 하고 실제로 하지 않아 사용자 시스템을 읽지 않음).
+add_test(NAME gui_nav COMMAND bytesieve-gui --self-test-nav)
+set_tests_properties(gui_nav PROPERTIES PASS_REGULAR_EXPRESSION
+                     "nav: scan drives cleanup cleaner cache quarantine monitor booster")
+# 표시 언어: 언어마다 창을 만들어 번역 문구·언어별 글꼴, 최소 창 크기에서 사이드바·단추 문구가 잘리지 않고
+# 페이지 패널 안에 있는지 확인한다(문구가 긴 언어에서 배치가 깨지지 않게).
 foreach(lang ko en ja zh-Hans)
     add_test(NAME gui_lang_${lang} COMMAND bytesieve-gui --self-test-lang ${lang})
     set_tests_properties(gui_lang_${lang} PROPERTIES PASS_REGULAR_EXPRESSION "lang: ${lang}, font: ")
