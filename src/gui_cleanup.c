@@ -53,7 +53,8 @@ enum {
 };
 
 /* 목록 열. 첫 열(용량)에 체크 상자가 붙는다. */
-enum { COL_SIZE, COL_TYPE, COL_ECO, COL_PATH, COL_FILES, COL_NOTE, COL_CLEAN, COL_COUNT };
+/* COL_RECLAIM: 실제 확보 가능(할당 크기, 하드 링크로 항목 밖과 나누는 파일 제외). 정렬은 파일 크기 순. */
+enum { COL_RECLAIM, COL_SIZE, COL_TYPE, COL_ECO, COL_PATH, COL_FILES, COL_NOTE, COL_CLEAN, COL_COUNT };
 
 /* 유형 필터 콤보 상자의 항목 순서와 비트. */
 static const struct {
@@ -121,6 +122,7 @@ typedef struct {
     ItemState *states; /* result.len 개 */
     size_t checked_count;
     uint64_t checked_bytes;
+    uint64_t checked_reclaim; /* 선택한 항목의 실제 확보 가능 합 */
     size_t moved_count;       /* 휴지통 또는 격리 폴더로 옮긴 수 */
     uint64_t moved_bytes;
     size_t quarantined_count; /* moved_count 중 격리 폴더로 옮긴 수 */
@@ -200,6 +202,9 @@ static void note_text(const CleanupItem *item, wchar_t *buf, size_t len)
     if (item->flags & CLEANUP_ITEM_INCOMPLETE) {
         used += (size_t)swprintf(buf + used, len - used, L"일부 누락 · ");
     }
+    if ((item->flags & CLEANUP_ITEM_MEASURED) && item->shared_bytes > 0) {
+        used += (size_t)swprintf(buf + used, len - used, L"하드 링크 공유 · ");
+    }
     /* 끝의 " · " 제거 */
     if (used >= 3) {
         buf[used - 3] = L'\0';
@@ -269,6 +274,7 @@ static void free_states(CleanupPanel *p)
     p->states = NULL;
     p->checked_count = 0;
     p->checked_bytes = 0;
+    p->checked_reclaim = 0;
     p->moved_count = 0;
     p->moved_bytes = 0;
     p->quarantined_count = 0;
@@ -295,10 +301,12 @@ static void recount_checked(CleanupPanel *p)
 
     p->checked_count = 0;
     p->checked_bytes = 0;
+    p->checked_reclaim = 0;
     for (i = 0; p->states != NULL && i < p->result.len; i++) {
         if (p->states[i].checked) {
             p->checked_count++;
             p->checked_bytes += p->result.items[i].bytes;
+            p->checked_reclaim += cleanup_item_reclaim(&p->result.items[i]);
         }
     }
 }
@@ -308,20 +316,20 @@ static void update_selection(CleanupPanel *p)
     wchar_t text[256], size[32], moved[32];
     int busy = p->job != NULL || p->trash != NULL;
 
-    format_size(p->checked_bytes, size, 32);
+    format_size(p->checked_reclaim, size, 32);
     if (p->moved_count > 0 && p->quarantined_count > 0) {
         format_size(p->moved_bytes, moved, 32);
         swprintf(text, sizeof(text) / sizeof(text[0]),
-                 L"선택 %u개 · 예상 확보 %ls   /   휴지통으로 옮김 %u개 · %ls (격리 폴더 %u개)",
+                 L"선택 %u개 · 실제 확보 %ls   /   휴지통으로 옮김 %u개 · %ls (격리 폴더 %u개)",
                  (unsigned)p->checked_count, size, (unsigned)p->moved_count, moved,
                  (unsigned)p->quarantined_count);
     } else if (p->moved_count > 0) {
         format_size(p->moved_bytes, moved, 32);
         swprintf(text, sizeof(text) / sizeof(text[0]),
-                 L"선택 %u개 · 예상 확보 %ls   /   휴지통으로 옮김 %u개 · %ls",
+                 L"선택 %u개 · 실제 확보 %ls   /   휴지통으로 옮김 %u개 · %ls",
                  (unsigned)p->checked_count, size, (unsigned)p->moved_count, moved);
     } else {
-        swprintf(text, sizeof(text) / sizeof(text[0]), L"선택 %u개 · 예상 확보 %ls",
+        swprintf(text, sizeof(text) / sizeof(text[0]), L"선택 %u개 · 실제 확보 %ls",
                  (unsigned)p->checked_count, size);
     }
     SetWindowTextW(p->selection, p->states != NULL ? text : L"");
@@ -342,9 +350,11 @@ static void set_checked(CleanupPanel *p, size_t index, int on)
     if (on) {
         p->checked_count++;
         p->checked_bytes += p->result.items[index].bytes;
+        p->checked_reclaim += cleanup_item_reclaim(&p->result.items[index]);
     } else {
         p->checked_count--;
         p->checked_bytes -= p->result.items[index].bytes;
+        p->checked_reclaim -= cleanup_item_reclaim(&p->result.items[index]);
     }
 }
 
@@ -372,7 +382,7 @@ static unsigned current_eco_mask(const CleanupPanel *p)
 
 static void update_summary(CleanupPanel *p)
 {
-    wchar_t text[256], shown[32], total[32];
+    wchar_t text[256], shown[32], total[32], reclaim[32];
 
     if (!p->has_result) {
         SetWindowTextW(p->summary, L"");
@@ -380,9 +390,10 @@ static void update_summary(CleanupPanel *p)
     }
     format_size(p->view_bytes, shown, 32);
     format_size(p->result.total_bytes, total, 32);
+    format_size(p->result.total_reclaim, reclaim, 32);
     swprintf(text, sizeof(text) / sizeof(text[0]),
-             L"표시 %u개 · %ls   /   전체 %u개 · 예상 확보 %ls", (unsigned)p->view_len, shown,
-             (unsigned)p->result.len, total);
+             L"표시 %u개 · %ls   /   전체 %u개 · 실제 확보 %ls (파일 크기 %ls)",
+             (unsigned)p->view_len, shown, (unsigned)p->result.len, reclaim, total);
     SetWindowTextW(p->summary, text);
 }
 
@@ -562,7 +573,7 @@ static void update_trash_progress(CleanupPanel *p)
 }
 
 /*
- * 확인 창: 선택한 항목의 유형·용량·경로와 예상 확보 용량, 주의 사항을 보여 준다.
+ * 확인 창: 선택한 항목의 유형·용량·경로와 실제 확보 용량, 주의 사항을 보여 준다.
  * 기본 버튼은 [아니요]이며 [예]일 때만 1.
  */
 static int confirm_trash(CleanupPanel *p, const size_t *index, size_t count)
@@ -591,8 +602,9 @@ static int confirm_trash(CleanupPanel *p, const size_t *index, size_t count)
         }                                                                             \
     } while (0)
 
-    format_size(p->checked_bytes, size, 32);
-    APPEND(L"선택한 %u개 항목을 Windows 휴지통으로 옮깁니다.\n예상 확보 용량: %ls\n\n",
+    format_size(p->checked_reclaim, size, 32);
+    APPEND(L"선택한 %u개 항목을 Windows 휴지통으로 옮깁니다.\n실제 확보 용량: %ls"
+           L"(휴지통·격리 폴더를 비우면 확보)\n\n",
            (unsigned)count, size);
     for (i = 0; i < count && i < CONFIRM_LIST_MAX; i++) {
         const CleanupItem *item = &p->result.items[index[i]];
@@ -799,6 +811,10 @@ static void on_get_dispinfo(CleanupPanel *p, NMLVDISPINFOW *di)
     }
     item = &p->result.items[p->view[row]];
     switch (di->item.iSubItem) {
+    case COL_RECLAIM:
+        format_size(cleanup_item_reclaim(item), p->cell, 64);
+        di->item.pszText = p->cell;
+        break;
     case COL_SIZE:
         format_size(item->bytes, p->cell, 64);
         di->item.pszText = p->cell;
@@ -873,7 +889,7 @@ static void panel_layout(CleanupPanel *p)
                pscale(p, 20), TRUE);
     y += h + gap;
 
-    /* 선택 줄: [모두 선택] [선택 해제] [휴지통으로 이동...]  선택 n개 · 예상 확보 */
+    /* 선택 줄: [모두 선택] [선택 해제] [휴지통으로 이동...]  선택 n개 · 실제 확보 */
     MoveWindow(p->check_all, 0, y, bw, h, TRUE);
     MoveWindow(p->check_none, bw + gap, y, bw, h, TRUE);
     MoveWindow(p->trash_btn, 2 * (bw + gap), y, trash_w, h, TRUE);
@@ -902,7 +918,8 @@ static void panel_create_controls(CleanupPanel *p)
         int width;
         int fmt;
     } cols[COL_COUNT] = {
-        {L"용량", 90, LVCFMT_RIGHT},
+        {L"실제 확보", 90, LVCFMT_RIGHT},
+        {L"파일 크기", 90, LVCFMT_RIGHT},
         {L"유형", 90, LVCFMT_LEFT},
         {L"개발 환경", 90, LVCFMT_LEFT},
         {L"경로", 440, LVCFMT_LEFT},
@@ -1330,7 +1347,7 @@ int cleanup_panel_verify(HWND panel, int expect_cancelled)
         PANEL_CHECK(SendMessageW(p->progress, PBM_GETPOS, 0, 0) == PROGRESS_RANGE);
     }
 
-    /* 전체 필터: 모든 항목, 용량 내림차순, 표시 합계 = 예상 확보 용량 */
+    /* 전체 필터: 모든 항목, 파일 크기 내림차순, 표시 합계 = 전체 파일 크기 */
     rows = ListView_GetItemCount(p->list);
     PANEL_CHECK(rows == (int)p->result.len && p->view_len == p->result.len);
     PANEL_CHECK(p->view_bytes == p->result.total_bytes);
@@ -1344,6 +1361,11 @@ int cleanup_panel_verify(HWND panel, int expect_cancelled)
 
         cell_text(p, 0, COL_SIZE, buf, 64);
         format_size(top->bytes, expect, 64);
+        PANEL_CHECK(wcscmp(buf, expect) == 0);
+        /* 실제 확보: 탐지에서 센 값(할당 크기·하드 링크) */
+        PANEL_CHECK(top->flags & CLEANUP_ITEM_MEASURED);
+        cell_text(p, 0, COL_RECLAIM, buf, 64);
+        format_size(cleanup_item_reclaim(top), expect, 64);
         PANEL_CHECK(wcscmp(buf, expect) == 0);
         cell_text(p, 0, COL_TYPE, buf, 64);
         PANEL_CHECK(wcscmp(buf, category_label(top->category)) == 0);

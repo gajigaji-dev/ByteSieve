@@ -84,6 +84,9 @@ typedef struct {
 
 const DevCacheKindInfo *dev_cache_kind_info(DevCacheKind kind);
 
+/* 위치 근거 화면 문구: "기본 위치", "환경 변수 <이름>", "설정 파일 <경로>". */
+void dev_cache_source_text(DevCacheSource source, const wchar_t *origin, wchar_t *buf, size_t len);
+
 typedef struct {
     DevCacheKind kind;
     DevCacheStatus status;
@@ -93,6 +96,8 @@ typedef struct {
     wchar_t *home;   /* 캐시 폴더의 부모(정리 판정의 탐지 경로, NO_PATH 이면 NULL) */
     int measured;    /* 용량을 셌으면 1 */
     uint64_t bytes;  /* 하위 전체 파일의 논리 크기 */
+    uint64_t reclaim_bytes; /* 실제 확보 가능(reclaim.h: 할당 크기, 캐시 밖과 하드 링크로 나누는 파일 제외) */
+    uint64_t shared_bytes;  /* 하드 링크로 캐시 밖과 나눠 지워도 비지 않는 점유 */
     uint64_t files;
     uint64_t dirs;
     uint64_t errors;

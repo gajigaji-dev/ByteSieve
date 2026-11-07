@@ -266,8 +266,14 @@ static void test_defaults(void)
         c = find(&l, DEV_CACHE_CARGO_REGISTRY, 0);
         dev_cache_to_item(c, &item);
         CHECK(item.path == c->path && item.category == CLEANUP_CACHE &&
-              item.eco == CLEANUP_ECO_RUST && item.flags == CLEANUP_ITEM_DIR &&
-              item.bytes == 500 && item.files == 1);
+              item.eco == CLEANUP_ECO_RUST &&
+              item.flags == (CLEANUP_ITEM_DIR | CLEANUP_ITEM_MEASURED) && item.bytes == 500 &&
+              item.files == 1);
+        /* 실제 확보 가능: 링크가 하나뿐인 파일이라 할당 크기 그대로(500바이트 파일은 MFT 상주이면
+         * 0, 아니면 클러스터 하나) — 논리 크기보다 크거나 공유 몫이 생기면 안 된다. */
+        CHECK(item.reclaim_bytes == c->reclaim_bytes && item.shared_bytes == 0 &&
+              c->shared_bytes == 0);
+        CHECK(cleanup_item_reclaim(&item) == c->reclaim_bytes);
     }
     cleanup_guard_free(&guard);
     dev_cache_list_free(&l);

@@ -1,4 +1,4 @@
-# GUI Cleaner 탭 자체 검사(bytesieve-gui --self-test-cleaner).
+# GUI 시스템 정리 탭(Cleaner + 공용 개발 캐시) 자체 검사(bytesieve-gui --self-test-cleaner).
 #
 #   cmake -DEXE=<bytesieve-gui> -DFIXTURE=<빈 폴더로 만들 경로> -P gui_cleaner_check.cmake
 #
@@ -8,6 +8,9 @@
 # [모두 선택]이 휴지통 비우기·개발 도구 캐시를 고르지 않는지, 주의 캐시 표시 포함) → [모두 선택] 뒤
 # 개발 도구 캐시를 직접 체크해 정리 가능한 대상을 모두 정리 → 결과를 확인한다.
 # 실제 휴지통은 조회만 하고 비우지 않는다.
+# 예전 [공용 캐시] 탭 검사의 경우를 함께 본다: 모든 도구의 캐시, 캐시 구조가 아닌 폴더를 가리키는
+# 환경 변수(NUGET_HTTP_CACHE_PATH → mydocs, 이유와 함께 정리할 수 없는 행), 남아야 하는 도구 설정·설치한
+# 도구. 실제 확보 용량은 하드 링크로 캐시 밖(outside\store.jar)과 나누는 파일을 뺀 값이어야 한다.
 #
 # FIXTURE\
 #   temp\old.log, temp\olddir\x.bin                (3일 전)  → 격리 폴더
@@ -17,6 +20,13 @@
 #   local\Google\Chrome\User Data\Default\Preferences         (남아야 함)
 #   local\npm-cache\_cacache\…                                → 격리 폴더
 #   home\.gradle\wrapper\dists\gradle-8.5-bin\…  (주의 캐시)  → 격리 폴더
+#   home\.gradle\caches\modules-2\…  (linked.jar 는 outside\store.jar 와 하드 링크) → 격리 폴더
+#   home\.gradle\gradle.properties, home\.cargo\bin\cargo.exe        (남아야 함)
+#   home\.cargo\registry\cache\…, home\.cargo\git\db\…               → 격리 폴더
+#   home\.nuget\packages\serilog\3.0.0\… (주의 캐시)               → 격리 폴더
+#   local\pip\Cache\http-v2\…                                        → 격리 폴더
+#   mydocs\report.docx  (NUGET_HTTP_CACHE_PATH, 캐시 구조 아님)        (남아야 함)
+#   outside\store.jar                                               (남아야 함)
 
 foreach(var EXE FIXTURE)
     if(NOT DEFINED ${var})
@@ -35,6 +45,21 @@ file(WRITE "${FIXTURE}/local/Google/Chrome/User Data/Default/Cache/Cache_Data/da
      "${hundred}${hundred}${hundred}")
 file(WRITE "${FIXTURE}/local/npm-cache/_cacache/index-v5/a" "${hundred}")
 file(WRITE "${FIXTURE}/home/.gradle/wrapper/dists/gradle-8.5-bin/abc/gradle-8.5-bin.zip" "${hundred}")
+string(REPEAT "${hundred}" 100 tenk)
+file(WRITE "${FIXTURE}/home/.gradle/caches/modules-2/files-2.1/m.jar" "${tenk}")
+file(WRITE "${FIXTURE}/outside/store.jar" "${tenk}${tenk}")
+file(CREATE_LINK "${FIXTURE}/outside/store.jar"
+     "${FIXTURE}/home/.gradle/caches/modules-2/files-2.1/linked.jar" RESULT link_rc)
+if(NOT link_rc EQUAL 0)
+    message(FATAL_ERROR "could not create hard link: ${link_rc}")
+endif()
+file(WRITE "${FIXTURE}/home/.gradle/gradle.properties" "secret=keep")
+file(WRITE "${FIXTURE}/home/.cargo/registry/cache/c.crate" "${hundred}")
+file(WRITE "${FIXTURE}/home/.cargo/git/db/d" "git")
+file(WRITE "${FIXTURE}/home/.cargo/bin/cargo.exe" "keep")
+file(WRITE "${FIXTURE}/home/.nuget/packages/serilog/3.0.0/.nupkg.metadata" "{}")
+file(WRITE "${FIXTURE}/local/pip/Cache/http-v2/b" "${hundred}")
+file(WRITE "${FIXTURE}/mydocs/report.docx" "doc")
 file(MAKE_DIRECTORY "${FIXTURE}/home" "${FIXTURE}/roaming")
 
 # 오래된 항목: 파일을 먼저, 폴더는 안을 다 만든 뒤에 시각을 3일 전으로 바꾼다.
@@ -61,10 +86,12 @@ file(TO_NATIVE_PATH "${FIXTURE}/temp" native_temp)
 file(TO_NATIVE_PATH "${FIXTURE}/home" native_home)
 file(TO_NATIVE_PATH "${FIXTURE}/local" native_local)
 file(TO_NATIVE_PATH "${FIXTURE}/roaming" native_roaming)
+file(TO_NATIVE_PATH "${FIXTURE}/mydocs" native_docs)
 execute_process(COMMAND ${CMAKE_COMMAND} -E env
                         --unset=npm_config_cache --unset=NPM_CONFIG_USERCONFIG
                         --unset=PIP_CACHE_DIR --unset=PIP_CONFIG_FILE --unset=GRADLE_USER_HOME
-                        --unset=CARGO_HOME --unset=NUGET_PACKAGES --unset=NUGET_HTTP_CACHE_PATH
+                        --unset=CARGO_HOME --unset=NUGET_PACKAGES
+                        "NUGET_HTTP_CACHE_PATH=${native_docs}"
                         "TEMP=${native_temp}" "TMP=${native_temp}"
                         "USERPROFILE=${native_home}" "LOCALAPPDATA=${native_local}"
                         "APPDATA=${native_roaming}" "BYTESIEVE_QUARANTINE_ROOT=${native_fixture}"
@@ -80,21 +107,43 @@ if(out MATCHES "recycled: ")
 endif()
 string(REGEX MATCHALL "quarantined: [^\r\n]+" moved "${out}")
 list(LENGTH moved moved_count)
-if(moved_count LESS 5)
-    message(SEND_ERROR "expected at least 5 quarantined items, got ${moved_count}\n${out}")
+if(moved_count LESS 10)
+    message(SEND_ERROR "expected at least 10 quarantined items, got ${moved_count}\n${out}")
+endif()
+# 캐시 구조가 아닌 폴더를 가리키는 환경 변수: 이유(unrecognized)와 위치 근거가 보이고 정리하지 않는다.
+if(NOT out MATCHES "dev: nuget_http = unrecognized \\(env NUGET_HTTP_CACHE_PATH\\)")
+    message(SEND_ERROR "unrecognized NUGET_HTTP_CACHE_PATH row missing:\n${out}")
+endif()
+if(NOT out MATCHES "dev: npm = found \\(default\\)")
+    message(SEND_ERROR "npm cache row missing:\n${out}")
+endif()
+# 실제 확보: Gradle 캐시는 store.jar 와 나누는 linked.jar(20000바이트)를 공유로 빼야 한다.
+# MFT 에 상주하는 작은 파일(100바이트 npm 캐시 등)은 지워도 공간이 늘지 않아 실제 확보 0 이다.
+string(REGEX MATCH "reclaim: gradle = ([0-9]+)/([0-9]+) shared ([0-9]+)" gradle_line "${out}")
+if(NOT gradle_line)
+    message(SEND_ERROR "Gradle reclaim line missing:\n${out}")
+else()
+    set(g_reclaim "${CMAKE_MATCH_1}")
+    set(g_bytes "${CMAKE_MATCH_2}")
+    set(g_shared "${CMAKE_MATCH_3}")
+    if(NOT g_bytes EQUAL 30000 OR g_shared LESS 20000 OR NOT g_reclaim LESS 20000)
+        message(SEND_ERROR "unexpected Gradle reclaim: ${gradle_line}")
+    endif()
 endif()
 # Gradle 래퍼 배포판은 주의 캐시로 표시되어야 한다.
-if(NOT out MATCHES "caution: [^\r\n]*Gradle")
+if(NOT out MATCHES "caution: gradle_wrapper")
     message(SEND_ERROR "Gradle wrapper was not marked as caution:\n${out}")
 endif()
 foreach(gone "temp/old.log" "temp/olddir" "local/Microsoft/Windows/WER/ReportArchive/r1"
-             "local/npm-cache" "home/.gradle/wrapper/dists")
+             "local/npm-cache" "home/.gradle/wrapper/dists" "home/.gradle/caches"
+             "home/.cargo/registry" "home/.cargo/git" "home/.nuget/packages" "local/pip/Cache")
     if(EXISTS "${FIXTURE}/${gone}")
         message(SEND_ERROR "${gone} should have been cleaned")
     endif()
 endforeach()
 foreach(kept "temp/fresh.txt" "local/Google/Chrome/User Data/Default/Preferences"
-             "local/Microsoft/Windows/WER/ReportArchive")
+             "local/Microsoft/Windows/WER/ReportArchive" "home/.gradle/gradle.properties"
+             "home/.cargo/bin/cargo.exe" "mydocs/report.docx" "outside/store.jar")
     if(NOT EXISTS "${FIXTURE}/${kept}")
         message(SEND_ERROR "${kept} should have been kept")
     endif()

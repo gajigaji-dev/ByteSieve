@@ -31,7 +31,6 @@ typedef enum {
     UI_T_NAV_SCAN,
     UI_T_NAV_DRIVES,
     UI_T_NAV_CLEANUP,
-    UI_T_NAV_CACHE,
     UI_T_NAV_QUARANTINE,
     UI_T_NAV_MONITOR,
     UI_T_NAV_CLEANER,

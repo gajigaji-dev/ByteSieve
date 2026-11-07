@@ -11,7 +11,6 @@
 #include <wchar.h>
 
 #include "gui_booster.h"
-#include "gui_cache.h"
 #include "gui_cleaner.h"
 #include "gui_cleanup.h"
 #include "gui_drives.h"
@@ -64,7 +63,6 @@ enum {
     IDC_CLEAR_HISTORY,
     IDC_EXPORT_CSV,
     IDC_EXPORT_HTML,
-    IDC_CACHE,
     IDC_PRECISE,
     IDC_TREEMAP,
     IDC_CLEANER,
@@ -74,14 +72,14 @@ enum {
 /* 내보내기 형식. */
 typedef enum { EXPORT_KIND_CSV, EXPORT_KIND_HTML } ExportKind;
 
-/* 탭 순서. */
+/* 탭 순서. 정리는 [시스템 정리](Cleaner: 임시 파일·휴지통·브라우저 캐시·공용 개발 캐시)와
+ * [프로젝트 정리](고른 폴더 안의 node_modules·빌드 결과물 등 정리 후보) 두 탭으로 나눈다. */
 enum {
     TAB_SCAN,
     TAB_DRIVES,
     TAB_CLEANER,
-    TAB_BOOSTER,
     TAB_CLEANUP,
-    TAB_CACHE,
+    TAB_BOOSTER,
     TAB_QUARANTINE,
     TAB_MONITOR,
     TAB_COUNT
@@ -89,8 +87,8 @@ enum {
 
 /* 탭 이름(TAB_* 순서). */
 static const UiText k_tab_text[TAB_COUNT] = {
-    UI_T_NAV_SCAN,    UI_T_NAV_DRIVES, UI_T_NAV_CLEANER,    UI_T_NAV_BOOSTER,
-    UI_T_NAV_CLEANUP, UI_T_NAV_CACHE,  UI_T_NAV_QUARANTINE, UI_T_NAV_MONITOR};
+    UI_T_NAV_SCAN,    UI_T_NAV_DRIVES,     UI_T_NAV_CLEANER, UI_T_NAV_CLEANUP,
+    UI_T_NAV_BOOSTER, UI_T_NAV_QUARANTINE, UI_T_NAV_MONITOR};
 
 /* 순위 목록 열. */
 /* COL_UNIQUE·COL_DUP 는 정밀 스캔 결과일 때만 보인다(기본 스캔이면 너비 0). */
@@ -126,7 +124,7 @@ typedef enum {
     SELF_TEST_SCAN,  /* 스캔 → 화면 검증 → 종료 */
     SELF_TEST_CANCEL, /* 스캔 시작 직후 취소 → 화면 검증 → 종료 */
     SELF_TEST_DRIVES, /* 드라이브 탭 새로고침 → 화면 검증 → 종료 */
-    SELF_TEST_CLEANUP,       /* 정리 후보 탭 탐지 → 화면 검증 → 종료 */
+    SELF_TEST_CLEANUP,       /* 프로젝트 정리(정리 후보) 탭 탐지 → 화면 검증 → 종료 */
     SELF_TEST_CLEANUP_CANCEL, /* 정리 후보 탐지 시작 직후 취소 → 화면 검증 → 종료 */
     SELF_TEST_TRASH, /* 정리 후보 탐지 → 모두 선택 → 휴지통 이동(확인 창 없이) → 화면 검증 → 종료 */
     SELF_TEST_MONITOR, /* 시스템 탭 측정 몇 회 → 화면·갱신 간격·실패 표시 검증 → 종료 */
@@ -137,11 +135,9 @@ typedef enum {
     SELF_TEST_CLEAR_HISTORY, /* 스캔 → 기록 삭제(확인 창 없이) → 화면 반영 검증·출력 → 종료 */
     SELF_TEST_EXPORT, /* 스캔 → CSV·HTML 내보내기(대화 상자 없이) → 화면 검증·출력 → 종료 */
     SELF_TEST_PRECISE, /* [정밀 스캔] 체크 → 스캔 → 하드 링크 보정 열·보기·분석 줄 검증·출력 → 종료 */
-    SELF_TEST_CACHE,  /* 공용 캐시 탭 탐지 → 픽스처 안인지·화면 검증 → 정리 가능한 캐시를 모두
-                       * 휴지통으로(확인 창 없이) → 결과 검증 → 종료 */
     SELF_TEST_LANG,   /* 지정한 언어로 창을 만들어 번역 문구·글꼴·최소 창 크기의 배치 검증 → 종료 */
-    SELF_TEST_CLEANER, /* Cleaner 탭 분석 → 픽스처 안인지·화면 검증 → 휴지통을 뺀 정리 가능한 대상을
-                        * 모두 정리(확인 창 없이) → 결과 검증 → 종료 */
+    SELF_TEST_CLEANER, /* 시스템 정리 탭 분석 → 픽스처 안인지·화면 검증 → 휴지통을 뺀 정리 가능한
+                        * 대상을 모두 정리(확인 창 없이) → 결과 검증 → 종료 */
     SELF_TEST_BOOSTER /* Booster 탭 목록·CPU 측정 → 화면·보호 판정 검증(아무것도 바꾸지 않음) → 종료 */
 } SelfTest;
 
@@ -150,7 +146,7 @@ typedef struct {
     HWND path, browse, scan, cancel, progress, status, tree, list, view, analysis;
     HWND precise; /* [정밀 스캔(하드 링크)] 체크 상자 */
     HWND autosave, clear_history, export_csv, export_html;
-    HWND tabs, drives, cleanup, cache, quarantine, monitor, cleaner, booster;
+    HWND tabs, drives, cleanup, quarantine, monitor, cleaner, booster;
     HWND treemap; /* 보기가 트리맵일 때 목록 자리에 보인다 */
     int map_syncing; /* 트리맵 조작을 트리에 반영하는 중(트리 선택으로 기준 폴더를 바꾸지 않음) */
     HFONT font;
@@ -179,8 +175,6 @@ typedef struct {
     const wchar_t *quarantine_root;     /* SELF_TEST_QUARANTINE: 탐지 경로(가짜 볼륨 루트) */
     const wchar_t *quarantine_conflict; /* SELF_TEST_QUARANTINE: 복원 전에 만들 같은 이름 파일 */
     const wchar_t *export_prefix;  /* SELF_TEST_EXPORT: 내보낼 파일 경로(확장자 제외) */
-    const wchar_t *cache_root;     /* SELF_TEST_CACHE: 찾은 캐시가 모두 이 폴더 안이어야 정리한다 */
-    size_t cache_expect;           /* SELF_TEST_CACHE: 선택해 옮기기 시작한 캐시 수 */
     const wchar_t *cleaner_root;   /* SELF_TEST_CLEANER: 분석한 위치가 모두 이 폴더 안이어야 정리한다 */
     size_t cleaner_expect;         /* SELF_TEST_CLEANER: 골라 정리를 시작한 대상 수 */
     int export_enabled_before_scan; /* SELF_TEST_EXPORT: 스캔 전 내보내기 버튼이 켜져 있었으면 1 */
@@ -333,8 +327,6 @@ static void layout(void)
                body_h > 0 ? body_h : 0, TRUE);
     MoveWindow(g_app.cleanup, x + m, rc.top + m, w - 2 * m > 0 ? w - 2 * m : 0,
                body_h > 0 ? body_h : 0, TRUE);
-    MoveWindow(g_app.cache, x + m, rc.top + m, w - 2 * m > 0 ? w - 2 * m : 0,
-               body_h > 0 ? body_h : 0, TRUE);
     MoveWindow(g_app.quarantine, x + m, rc.top + m, w - 2 * m > 0 ? w - 2 * m : 0,
                body_h > 0 ? body_h : 0, TRUE);
     MoveWindow(g_app.monitor, x + m, rc.top + m, w - 2 * m > 0 ? w - 2 * m : 0,
@@ -382,12 +374,11 @@ static void show_tab(int tab)
     show_view_windows(show_scan);
     ShowWindow(g_app.drives, tab == TAB_DRIVES ? SW_SHOW : SW_HIDE);
     ShowWindow(g_app.cleanup, tab == TAB_CLEANUP ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_app.cache, tab == TAB_CACHE ? SW_SHOW : SW_HIDE);
     ShowWindow(g_app.quarantine, tab == TAB_QUARANTINE ? SW_SHOW : SW_HIDE);
     ShowWindow(g_app.monitor, tab == TAB_MONITOR ? SW_SHOW : SW_HIDE);
     ShowWindow(g_app.cleaner, tab == TAB_CLEANER ? SW_SHOW : SW_HIDE);
     ShowWindow(g_app.booster, tab == TAB_BOOSTER ? SW_SHOW : SW_HIDE);
-    /* Cleaner 는 처음 열 때 분석하고, Booster 는 처음 열 때 목록·측정을 시작한다. */
+    /* 시스템 정리(Cleaner)는 처음 열 때 분석하고, Booster 는 처음 열 때 목록·측정을 시작한다. */
     if (tab == TAB_CLEANER && !cleaner_panel_loaded(g_app.cleaner)) {
         cleaner_panel_refresh(g_app.cleaner);
     }
@@ -396,9 +387,6 @@ static void show_tab(int tab)
     }
     if (tab == TAB_DRIVES && !drive_panel_loaded(g_app.drives)) {
         drive_panel_refresh(g_app.drives);
-    }
-    if (tab == TAB_CACHE && !cache_panel_loaded(g_app.cache)) {
-        cache_panel_refresh(g_app.cache);
     }
     if (tab == TAB_QUARANTINE) {
         quarantine_panel_refresh(g_app.quarantine);
@@ -1925,13 +1913,13 @@ static int verify_monitor_tab(void)
     return failures == 0 ? 0 : 1;
 }
 
-/* 공용 캐시 탭: 탭 전환 상태와 패널 내용(찾은 캐시가 모두 cache_root 안인지 포함). 실패 수. */
-static int verify_cache_tab(void)
+/* 시스템 정리 탭: 탭 전환 상태와 패널 내용(분석한 위치가 모두 cleaner_root 안인지 포함). 실패 수. */
+static int verify_cleaner_tab(void)
 {
-    int failures = cache_panel_verify(g_app.cache, g_app.cache_root);
+    int failures = cleaner_panel_verify(g_app.cleaner, g_app.cleaner_root);
 
-    SELF_CHECK(current_tab() == TAB_CACHE);
-    SELF_CHECK(is_shown(g_app.cache) && !is_shown(g_app.cleanup) && !is_shown(g_app.drives));
+    SELF_CHECK(current_tab() == TAB_CLEANER);
+    SELF_CHECK(is_shown(g_app.cleaner) && !is_shown(g_app.cleanup) && !is_shown(g_app.drives));
     SELF_CHECK(!is_shown(g_app.tree) && !is_shown(g_app.list) && !is_shown(g_app.path));
     SELF_CHECK(GetWindow(g_app.tabs, GW_HWNDNEXT) == NULL);
     return failures;
@@ -2246,7 +2234,6 @@ static void create_controls(void)
 
     g_app.drives = drive_panel_create(g_app.hwnd, IDC_DRIVES, g_app.font, g_app.dpi);
     g_app.cleanup = cleanup_panel_create(g_app.hwnd, IDC_CLEANUP, g_app.font, g_app.dpi);
-    g_app.cache = cache_panel_create(g_app.hwnd, IDC_CACHE, g_app.font, g_app.dpi);
     g_app.quarantine =
         quarantine_panel_create(g_app.hwnd, IDC_QUARANTINE, g_app.font, g_app.dpi);
     g_app.monitor = monitor_panel_create(g_app.hwnd, IDC_MONITOR, g_app.font, g_app.dpi);
@@ -2395,27 +2382,6 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 }
             }
             return 0;
-        case IDC_CACHE:
-            if (HIWORD(wp) == KPN_FINISHED && g_app.self_test == SELF_TEST_CACHE) {
-                /* 찾은 캐시가 모두 픽스처 안이고 화면이 맞을 때만 정리한다(실제 캐시 보호). */
-                int failures = verify_cache_tab();
-                g_app.cache_expect = failures == 0 ? cache_panel_check_all(g_app.cache, 1) : 0;
-                if (failures != 0 || g_app.cache_expect == 0 ||
-                    !cache_panel_trash(g_app.cache, 0)) {
-                    fwprintf(stderr, L"self-test failed: cache cleanup did not start "
-                                     L"(%u selected)\n",
-                             (unsigned)g_app.cache_expect);
-                    KillTimer(hwnd, TIMER_SELF_TEST);
-                    g_app.self_test_exit = 1;
-                    DestroyWindow(hwnd);
-                }
-            } else if (HIWORD(wp) == KPN_TRASHED && g_app.self_test == SELF_TEST_CACHE) {
-                KillTimer(hwnd, TIMER_SELF_TEST);
-                g_app.self_test_exit =
-                    cache_panel_verify_trash(g_app.cache, g_app.cache_expect) == 0 ? 0 : 1;
-                DestroyWindow(hwnd);
-            }
-            return 0;
         case IDC_QUARANTINE:
             /* 남은 항목(같은 이름 때문에 건너뛴 것)까지 영구 삭제했으면 목록이 비어야 한다. */
             if (HIWORD(wp) == QPN_PURGED && g_app.self_test == SELF_TEST_QUARANTINE) {
@@ -2438,7 +2404,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 /* 분석한 위치가 모두 픽스처 안이고 화면이 맞을 때만 정리한다(실제 파일 보호).
                  * [모두 선택]은 휴지통 비우기(영구 삭제)와 개발 도구 캐시를 고르지 않으므로
                  * 개발 도구 캐시는 사용자처럼 직접 체크한다. 휴지통은 고르지 않는다. */
-                int failures = cleaner_panel_verify(g_app.cleaner, g_app.cleaner_root);
+                int failures = verify_cleaner_tab();
                 g_app.cleaner_expect = 0;
                 if (failures == 0) {
                     cleaner_panel_check_all(g_app.cleaner, 1);
@@ -2524,9 +2490,6 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
  *                                         탐지 후 모두 정리(BYTESIEVE_QUARANTINE_ROOT=<dir> 이면 격리
  *                                         폴더로) → 격리 폴더 탭 확인 → <file> 을 만든 뒤 모두 복원
  *                                         (그 항목은 같은 이름이라 건너뜀) → 남은 항목 영구 삭제 → 종료
- *   bytesieve-gui --self-test-cache <dir>  공용 캐시 탭에서 탐지한 캐시가 모두 <dir> 안인지 확인한 뒤
- *                                         정리 가능한 캐시를 모두 휴지통으로 옮기고(확인 창 없음)
- *                                         결과를 검증하고 종료(USERPROFILE 등을 <dir> 안으로 돌려 실행)
  *   bytesieve-gui --self-test-monitor     시스템 탭에서 RAM·CPU 를 몇 번 측정한 뒤 화면을 검증하고 종료
  *   bytesieve-gui --self-test-precise <dir> [정밀 스캔]을 체크하고 스캔한 뒤 하드 링크 보정 열·보기·
  *                                          분석 줄을 검증하고 기본·중복 제외 집계를 stdout 에 쓴 뒤 종료
@@ -2541,7 +2504,7 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
  *   bytesieve-gui --self-test-export <dir> <prefix>
  *                                         스캔 후 <prefix>.csv·<prefix>.html 로 내보내고(대화 상자 없음)
  *                                         화면을 검증한 뒤 폴더 수를 stdout 에 쓰고 종료
- *   bytesieve-gui --self-test-cleaner <dir> Cleaner 탭에서 분석한 위치가 모두 <dir> 안인지 확인한 뒤
+ *   bytesieve-gui --self-test-cleaner <dir> 시스템 정리 탭에서 분석한 위치가 모두 <dir> 안인지 확인한 뒤
  *                                         휴지통 비우기를 뺀 정리 가능한 대상을 모두 정리하고(확인 창
  *                                         없음) 결과를 검증하고 종료(TEMP·LOCALAPPDATA 등을 <dir> 안으로)
  *   bytesieve-gui --self-test-booster     Booster 탭의 시작 프로그램·프로세스 목록과 CPU 측정을 검증하고
@@ -2608,9 +2571,6 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmd, int show)
         cleanup_target = argv[2];
         g_app.quarantine_root = argv[2];
         g_app.quarantine_conflict = argv[3];
-    } else if (argv != NULL && argc >= 3 && wcscmp(argv[1], L"--self-test-cache") == 0) {
-        g_app.self_test = SELF_TEST_CACHE;
-        g_app.cache_root = argv[2];
     } else if (argv != NULL && argc >= 2 && wcscmp(argv[1], L"--self-test-monitor") == 0) {
         g_app.self_test = SELF_TEST_MONITOR;
     } else if (argv != NULL && argc >= 3 && wcscmp(argv[1], L"--self-test-cleaner") == 0) {
@@ -2660,7 +2620,6 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmd, int show)
     InitCommonControlsEx(&icc);
     drive_panel_register(inst);
     cleanup_panel_register(inst);
-    cache_panel_register(inst);
     quarantine_panel_register(inst);
     monitor_panel_register(inst);
     cleaner_panel_register(inst);
@@ -2738,16 +2697,6 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmd, int show)
         } else {
             SetTimer(g_app.hwnd, TIMER_SELF_TEST, SELF_TEST_TIMEOUT_MS, NULL);
             show_tab(TAB_DRIVES);
-        }
-    }
-    if (g_app.self_test == SELF_TEST_CACHE) {
-        show_tab(TAB_CACHE);
-        if (!cache_panel_busy(g_app.cache)) {
-            fwprintf(stderr, L"self-test failed: cache detection did not start\n");
-            g_app.self_test_exit = 1;
-            DestroyWindow(g_app.hwnd);
-        } else {
-            SetTimer(g_app.hwnd, TIMER_SELF_TEST, SELF_TEST_TIMEOUT_MS, NULL);
         }
     }
     if (g_app.self_test == SELF_TEST_CLEANER) {

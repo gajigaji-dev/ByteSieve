@@ -176,7 +176,7 @@ static const wchar_t *category_label(CleanupCategory cat)
 
 /*
  * node 또는 그 상위 폴더 중 이름이 정리 후보 규칙에 맞는 가장 가까운 것의 유형. 이름만 보므로
- * 실제 정리 대상인지(표시 파일·보호 경로)는 [정리 후보] 탭이 따로 판단한다.
+ * 실제 정리 대상인지(표시 파일·보호 경로)는 [프로젝트 정리] 탭이 따로 판단한다.
  */
 static CleanupCategory category_of(const TreemapView *t, size_t node)
 {
