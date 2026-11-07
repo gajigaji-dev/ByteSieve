@@ -8,9 +8,12 @@
 #include <wchar.h>
 
 #include "cleaner.h"
+#include "devenv_history.h"
 #include "gui_cleaner.h"
 #include "path.h"
+#include "scan_history.h"
 #include "size_format.h"
+#include "vdisk.h"
 
 #define CLEANER_PANEL_CLASS L"ByteSieveCleanerPanel"
 #define WM_APP_SCAN_PROGRESS (WM_APP + 1)
@@ -45,6 +48,7 @@ enum {
     COL_GROUP,
     COL_RECLAIM,
     COL_SIZE,
+    COL_GROWTH, /* 개발 캐시·가상 디스크: 직전 기록보다 늘어난·줄어든 용량 */
     COL_FILES,
     COL_STATE,
     COL_EXCLUDED,
@@ -86,6 +90,7 @@ typedef struct {
     ULONGLONG run_started;
     CleanPlanTotals totals; /* 마지막 실행 합계 */
     int has_run;
+    int growth_saved;       /* 마지막 분석에서 증가 기록을 저장했음 */
 
     wchar_t cell[512];
 } CleanerPanel;
@@ -258,6 +263,35 @@ static void set_checked(CleanerPanel *p, size_t i, int on)
     recount(p);
 }
 
+/* 증감 칸: "+1.20 GiB (7일 전보다)", "변화 없음 (3일 전과 같음)", "첫 기록". 추적하지 않으면 빈칸. */
+static void growth_text(const CleanerTarget *t, wchar_t *buf, size_t len)
+{
+    wchar_t size[32];
+    FILETIME ft;
+    uint64_t now, days = 0;
+
+    buf[0] = L'\0';
+    if (!cleaner_target_tracked(t)) {
+        return;
+    }
+    if (!t->has_growth) {
+        swprintf(buf, len, L"첫 기록");
+        return;
+    }
+    GetSystemTimeAsFileTime(&ft);
+    now = ((uint64_t)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
+    if (now > t->growth_since) {
+        days = (now - t->growth_since) / 864000000000ull;
+    }
+    if (t->growth == 0) {
+        swprintf(buf, len, L"변화 없음 (%llu일 전과 같음)", (unsigned long long)days);
+        return;
+    }
+    format_size((uint64_t)(t->growth < 0 ? -t->growth : t->growth), size, 32);
+    swprintf(buf, len, L"%lc%ls (%llu일 전보다)", t->growth > 0 ? L'+' : L'-', size,
+             (unsigned long long)days);
+}
+
 /* 마지막 실행에서 옮기지 못한 항목(건너뜀·실패·거부). 아직 시도 안 했거나 취소한 것은 아니다. */
 static int entry_unmoved(const CleanPlanEntry *e)
 {
@@ -301,6 +335,28 @@ static void update_detail(CleanerPanel *p)
         swprintf(shared, sizeof(shared) / sizeof(shared[0]),
                  L"\r\n하드 링크로 다른 곳과 나누는 %ls는 지워도 비지 않아 실제 확보에서 뺐습니다.",
                  size);
+    }
+    if (t->kind == CLEANER_VDISK) {
+        /* 가상 디스크: 실제 점유와 줄이는 명령 */
+        Vdisk v;
+        wchar_t hint[1100], alloc[32];
+        memset(&v, 0, sizeof(v));
+        v.kind = t->vdisk_kind;
+        v.path = t->location;
+        v.sparse = t->vdisk_sparse;
+        vdisk_hint(&v, hint, sizeof(hint) / sizeof(hint[0]));
+        format_size(t->vdisk_alloc, alloc, 32);
+        for (k = 0; hint[k] != L'\0'; k++) {
+            if (hint[k] == L'\n') {
+                hint[k] = L' '; /* 정적 칸은 한 덩어리로 보인다 */
+            }
+        }
+        swprintf(text, sizeof(text) / sizeof(text[0]),
+                 L"%ls\r\n위치: %ls · 실제 점유 %ls%ls\r\n줄이는 방법: %ls", note,
+                 t->location != NULL ? t->location : L"(모름)", alloc,
+                 t->vdisk_sparse ? L"(스파스)" : L"", hint);
+        SetWindowTextW(p->detail, text);
+        return;
     }
     swprintf(text, sizeof(text) / sizeof(text[0]), L"%ls%ls\r\n위치: %ls%ls · %ls%ls%ls%ls",
              cleaner_target_caution(t) ? L"[주의] " : L"", note,
@@ -364,6 +420,39 @@ static void free_plan(CleanerPanel *p)
     p->has_plan = 0;
 }
 
+/*
+ * 개발 캐시·가상 디스크 증가 추적: 기록 폴더(스캔 기록과 같은 곳)의 devenv-history.tsv 와 비교하고,
+ * [스캔 기록 자동 저장]이 켜져 있으면 지금 용량을 더해 저장한다. 실패해도 분석 결과는 그대로 보인다.
+ */
+static void record_growth(CleanerPanel *p)
+{
+    wchar_t dir[MAX_PATH * 2], *file;
+    DevHistory hist;
+    FILETIME ft;
+    uint64_t now;
+    int record;
+
+    p->growth_saved = 0;
+    if (p->targets.cancelled || history_default_dir(dir, sizeof(dir) / sizeof(dir[0])) != 0) {
+        return;
+    }
+    file = devhist_file_in(dir);
+    if (file == NULL) {
+        return;
+    }
+    devhist_init(&hist);
+    GetSystemTimeAsFileTime(&ft);
+    now = ((uint64_t)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
+    record = history_autosave_enabled(dir);
+    if (devhist_load(&hist, file) == 0 &&
+        cleaner_apply_growth(&p->targets, &hist, now, record) > 0 && record &&
+        history_ensure_dir(dir) == 0 && devhist_save(&hist, file, NULL) == 0) {
+        p->growth_saved = 1;
+    }
+    devhist_free(&hist);
+    free(file);
+}
+
 static void finish_scan(CleanerPanel *p)
 {
     size_t i, ready = 0;
@@ -378,6 +467,9 @@ static void finish_scan(CleanerPanel *p)
     p->scan = NULL;
     p->has_result = 1;
     free_plan(p);
+    if (rc == 0) {
+        record_growth(p);
+    }
     if (rc == 0 && cleaner_build_plan(&p->targets, &p->plan) == 0) {
         p->has_plan = 1;
     }
@@ -672,8 +764,12 @@ static void on_get_dispinfo(CleanerPanel *p, NMLVDISPINFOW *di)
     case COL_GROUP:
         di->item.pszText = (wchar_t *)cleaner_group_text(kind_of(t)->group);
         break;
+    case COL_GROWTH:
+        growth_text(t, p->cell, 512);
+        break;
     case COL_RECLAIM:
         if (t->status == CLEANER_NOT_FOUND || t->status == CLEANER_ERROR ||
+            t->status == CLEANER_INFO_ONLY ||
             (t->kind == CLEANER_DEV_CACHE && t->dev_status != DEV_CACHE_FOUND)) {
             swprintf(p->cell, 64, L"-");
         } else {
@@ -761,6 +857,7 @@ static void panel_create_controls(CleanerPanel *p)
     } cols[COL_COUNT] = {
         {L"대상", 200, LVCFMT_LEFT},     {L"분류", 110, LVCFMT_LEFT},
         {L"실제 확보", 90, LVCFMT_RIGHT}, {L"파일 크기", 90, LVCFMT_RIGHT},
+        {L"증감", 150, LVCFMT_LEFT},
         {L"파일 수", 70, LVCFMT_RIGHT},   {L"상태", 220, LVCFMT_LEFT},
         {L"제외", 220, LVCFMT_LEFT},     {L"위치", 320, LVCFMT_LEFT},
         {L"위치 근거", 200, LVCFMT_LEFT},
@@ -1186,6 +1283,24 @@ int cleaner_panel_verify(HWND panel, const wchar_t *expect_root)
             PANEL_CHECK(t->status == CLEANER_DENIED && !can_check(p, i) && t->entry_count == 0);
             ListView_GetItemText(p->list, (int)i, COL_STATE, buf, 512);
             PANEL_CHECK(wcscmp(buf, dev_cache_status_text(t->dev_status)) == 0);
+            ListView_GetItemText(p->list, (int)i, COL_RECLAIM, buf, 512);
+            PANEL_CHECK(wcscmp(buf, L"-") == 0);
+            continue;
+        }
+        /* 증감 칸: 추적 대상은 "첫 기록" 또는 증감, 아니면 빈칸 */
+        growth_text(t, want, 512);
+        ListView_GetItemText(p->list, (int)i, COL_GROWTH, buf, 512);
+        PANEL_CHECK(wcscmp(buf, want) == 0 && (buf[0] != L'\0') == cleaner_target_tracked(t));
+        if (cleaner_target_tracked(t)) {
+            if (t->has_growth) {
+                wprintf(L"growth: %ls = %lld\n", target_id(t), (long long)t->growth);
+            } else {
+                wprintf(L"growth: %ls = first\n", target_id(t));
+            }
+        }
+        if (t->kind == CLEANER_VDISK) {
+            /* 가상 디스크는 분석만: 고를 수 없고 실제 확보는 "-" */
+            PANEL_CHECK(t->status == CLEANER_INFO_ONLY && !can_check(p, i) && t->entry_count == 0);
             ListView_GetItemText(p->list, (int)i, COL_RECLAIM, buf, 512);
             PANEL_CHECK(wcscmp(buf, L"-") == 0);
             continue;

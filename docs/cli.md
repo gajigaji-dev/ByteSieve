@@ -5,6 +5,7 @@ disk-scanner [--max-depth N] [--jsonl] [--track [--history-dir DIR]] [--threads 
 disk-scanner -h | --help
 disk-scanner find <directory> ...        # 정리 후보 찾기: 아래 [find](#정리-후보-찾기-disk-scanner-find) 참고
 disk-scanner clean project|system ...   # 정리: 아래 [clean](#정리-disk-scanner-clean) 참고
+disk-scanner devenv ...                 # 개발 환경 분석: 아래 [devenv](#개발-환경-분석-disk-scanner-devenv) 참고
 ```
 
 | 옵션 | 설명 |
@@ -241,6 +242,50 @@ Projects: 2 (1 dormant after 90 days, 1 with uncommitted changes, 1 with unpushe
 JSON 문서에는 `projects` 배열(`index`, `root`, `git`, `git_source`(`git`·`direct`·`none`), `branch`, `last_commit`·`last_modified`·`last_activity`(유닉스 초, 모르면
 `null`), `age_days`, `dormant`, `changes`·`unpushed`(모르면 `null`), `has_remote`, `remote_differs`, `modified_incomplete`, `candidates`)과 `dormant_days`·`git_available`이,
 후보·대상마다 `project`(1부터, `projects`의 `index`), `recovery`, `dirty`, `unpushed`, `dormant`가 붙습니다. `--jsonl`은 프로젝트마다 `project` 이벤트를 냅니다.
+
+## 개발 환경 분석 (`disk-scanner devenv`)
+
+공용 개발 캐시와 WSL2·Docker 가상 디스크를 보여 주고, 지난 기록보다 얼마나 늘었는지 알려 줍니다. **읽기 전용**이며 아무것도 지우지 않습니다
+(GUI [시스템 정리]와 같은 분석).
+
+```
+disk-scanner devenv [--json | --jsonl] [--no-record]
+```
+
+| 옵션 | 설명 |
+|---|---|
+| `--json` | JSON 문서 하나(UTF-8) |
+| `--jsonl` | JSON Lines 이벤트(`devenv_cache`·`devenv_vdisk`·`complete`) |
+| `--no-record` | 지난 기록과 비교만 하고 이번 용량은 기록하지 않는다 |
+
+- **공용 개발 캐시**: npm·pip·Gradle(2)·Cargo(2)·NuGet(2)·pnpm 저장소·Yarn v1 캐시·Yarn Berry 전역 캐시·Maven 로컬 저장소·Go 모듈/빌드 캐시·Conda 패키지.
+  위치는 환경 변수(`npm_config_store_dir`, `YARN_CACHE_FOLDER`, `YARN_GLOBAL_FOLDER`, `GOMODCACHE`, `GOPATH`, `GOCACHE`(`off`면 없음), `GOENV`, `CONDA_PKGS_DIRS` 등)와
+  설정 파일(`.npmrc`의 `store-dir`, `.m2\settings.xml`의 `localRepository`(`${user.home}` 포함), `%APPDATA%\go\env`)을 먼저 보고 없으면 기본 위치를 씁니다.
+  설정으로 정한 위치는 그 도구의 캐시 구조가 보일 때만 정리 대상입니다([cleanup.md](cleanup.md#공용-개발-캐시)).
+- **가상 디스크**: WSL 배포판(레지스트리 `HKCU\...\Lxss`의 `BasePath`)과 Docker Desktop(`%LOCALAPPDATA%\Docker\wsl\…`)의 `.vhdx` 크기·실제 점유(스파스면 더 작음)와
+  줄이는 명령(`wsl --shutdown` 뒤 `Optimize-VHD` 또는 `diskpart`의 `compact vdisk`, Docker는 먼저 `docker system prune`)을 보여 줍니다.
+  가상 디스크는 지우면 배포판·컨테이너가 모두 사라지므로 **정리 대상이 아닙니다**(`clean system`에도 `info_only`로만 나옴).
+- **증가 기록**: 기록 폴더(`BYTESIEVE_HISTORY_DIR`, 없으면 `%LOCALAPPDATA%\ByteSieve\history`)의 `devenv-history.tsv`에 캐시·가상 디스크마다 용량을 남기고
+  (임시 파일에 쓴 뒤 바꿔치기, 캐시마다 최근 60개), 직전 기록과의 차이를 `Change`로 보입니다. `--no-record`이거나 GUI에서 [스캔 기록 자동 저장]을 끄면
+  기록하지 않습니다. GUI [시스템 정리]도 분석할 때마다 같은 파일에 기록합니다.
+
+```
+Developer caches: 3 found, 14.7 KiB (reclaim 20.0 KiB)
+  Cache           Tool    Size       Reclaim    Change               State          Location
+  npm             npm     14.6 KiB   16.0 KiB   +9.77 KiB (3 d)      ready          C:\Users\me\AppData\Local\npm-cache
+Virtual disks (WSL2 / Docker): 1, 60.0 GiB
+  Ubuntu [wsl]  size 60.0 GiB, on disk 60.0 GiB, change +2.00 GiB (7 d)
+    C:\Users\me\AppData\Local\Packages\...\LocalState\ext4.vhdx
+    How to shrink (stop WSL/Docker first; some commands need admin):
+      wsl --shutdown
+      Optimize-VHD -Path "...ext4.vhdx" -Mode Full   (Hyper-V, admin)
+      ...
+History: recorded to C:\Users\me\AppData\Local\ByteSieve\history\devenv-history.tsv
+```
+
+JSON 문서: `{"version":1,"command":"devenv","caches":[{"id","tool","label","location","state","source","origin","bytes","reclaim","shared","files","caution","cleanable",
+"change":{"bytes":<증감, 음수 가능>,"since":<직전 기록 유닉스 초>}|null}],"vdisks":[{"name","kind":"wsl|docker","path","size","alloc","sparse","modified","change","hint"}],
+"history":{"file","recorded","previous_records"},"exit_code"}`. 종료 코드는 `0` 완료, `2` 인자 오류·분석 실패(기록 저장 실패는 경고만)입니다.
 
 ## 종료 코드(`find`·`clean`)
 

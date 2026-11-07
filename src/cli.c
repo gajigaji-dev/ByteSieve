@@ -14,6 +14,7 @@ void cli_print_usage(FILE *out)
              L"                    [--threads N] <directory>\n"
              L"       disk-scanner -h | --help\n"
              L"       disk-scanner find <directory> ...         (see disk-scanner find --help)\n"
+             L"       disk-scanner devenv ...                 (see disk-scanner devenv --help)\n"
              L"       disk-scanner clean project|system ...   (see disk-scanner clean --help)\n"
              L"\n"
              L"Counts files, directories, total size and size on disk under <directory>,\n"

@@ -56,6 +56,11 @@ static const CleanerKindInfo g_kinds[CLEANER_KIND_COUNT] = {
      L"여러 프로젝트가 함께 쓰는 패키지 관리자·빌드 도구 캐시입니다. 정리하면 다음 빌드·설치 때 "
      L"다시 내려받습니다.",
      0, NULL},
+    {L"vdisk", CLEANER_GROUP_VDISK, L"가상 디스크",
+     L"WSL 배포판·Docker Desktop의 가상 디스크(.vhdx)입니다. 안에서 파일을 지워도 이 파일은 저절로 "
+     L"줄지 않습니다. 지우면 배포판·컨테이너가 모두 사라지므로 ByteSieve는 정리하지 않고 줄이는 방법만 "
+     L"알려 줍니다(WSL 을 끈 뒤 압축, 관리자 권한 필요).",
+     0, NULL},
 };
 
 const CleanerKindInfo *cleaner_kind_info(CleanerKind kind)
@@ -74,6 +79,8 @@ const wchar_t *cleaner_group_text(CleanerGroup group)
         return L"브라우저 캐시";
     case CLEANER_GROUP_DEV:
         return L"개발 도구 캐시";
+    case CLEANER_GROUP_VDISK:
+        return L"가상 디스크(WSL·Docker)";
     default:
         return L"";
     }
@@ -96,6 +103,8 @@ const wchar_t *cleaner_status_text(CleanerStatus status)
         return L"조회 실패";
     case CLEANER_CANCELLED:
         return L"분석 취소됨";
+    case CLEANER_INFO_ONLY:
+        return L"분석만(정리하지 않음)";
     default:
         return L"";
     }
@@ -118,6 +127,8 @@ const wchar_t *cleaner_status_name(CleanerStatus status)
         return L"error";
     case CLEANER_CANCELLED:
         return L"cancelled";
+    case CLEANER_INFO_ONLY:
+        return L"info_only";
     default:
         return L"unknown";
     }
@@ -1058,10 +1069,93 @@ static int analyze_dev(Analyze *a)
     return rc;
 }
 
+/* 가상 디스크: 분석만(INFO_ONLY). 항목이 없어 정리 계획에서 고를 수 없다. */
+static int analyze_vdisk(Analyze *a)
+{
+    VdiskList disks;
+    size_t i;
+    int rc = 0;
+
+    vdisk_list_init(&disks);
+    if (vdisk_find(&disks) != 0) {
+        vdisk_list_free(&disks);
+        return -1;
+    }
+    for (i = 0; i < disks.len && rc == 0; i++) {
+        const Vdisk *v = &disks.items[i];
+        CleanerTarget *t = list_add(a->list, CLEANER_VDISK, v->path);
+        if (t == NULL || (t->label = path_dup(v->name)) == NULL) {
+            rc = -1;
+            break;
+        }
+        t->status = CLEANER_INFO_ONLY;
+        t->vdisk_kind = v->kind;
+        t->bytes = v->size;
+        t->vdisk_alloc = v->alloc;
+        t->vdisk_sparse = v->sparse;
+        t->modified = v->modified;
+        t->files = 1;
+    }
+    vdisk_list_free(&disks);
+    return rc;
+}
+
+int cleaner_target_tracked(const CleanerTarget *t)
+{
+    if (t == NULL) {
+        return 0;
+    }
+    if (t->kind == CLEANER_VDISK) {
+        return 1;
+    }
+    return t->kind == CLEANER_DEV_CACHE && t->dev_status == DEV_CACHE_FOUND &&
+           (t->status == CLEANER_READY || t->status == CLEANER_EMPTY ||
+            t->status == CLEANER_DENIED);
+}
+
+uint64_t cleaner_target_tracked_bytes(const CleanerTarget *t)
+{
+    if (!cleaner_target_tracked(t)) {
+        return 0;
+    }
+    return t->kind == CLEANER_VDISK ? t->bytes : t->bytes + t->denied_bytes;
+}
+
+int cleaner_apply_growth(CleanerList *list, DevHistory *hist, uint64_t now, int record)
+{
+    size_t i;
+    int added = 0;
+
+    for (i = 0; list != NULL && hist != NULL && i < list->len; i++) {
+        CleanerTarget *t = &list->items[i];
+        const DevRecord *prev;
+        const wchar_t *id;
+        uint64_t bytes;
+        if (!cleaner_target_tracked(t) || t->location == NULL) {
+            continue;
+        }
+        id = cleaner_target_id(t);
+        bytes = cleaner_target_tracked_bytes(t);
+        prev = devhist_latest(hist, id, t->location);
+        t->has_growth = prev != NULL;
+        if (prev != NULL) {
+            t->growth = (int64_t)bytes - (int64_t)prev->bytes;
+            t->growth_since = prev->time;
+        }
+        if (record) {
+            if (devhist_add(hist, now, id, t->location, bytes) != 0) {
+                return -1;
+            }
+            added++;
+        }
+    }
+    return added;
+}
+
 int cleaner_analyze(CleanerList *list, const CleanupGuard *guard, const CleanerOps *ops,
                     cleaner_cancel_fn cancel, cleaner_progress_fn progress, void *ctx)
 {
-    enum { STEPS = 7 };
+    enum { STEPS = 8 };
     Analyze a;
     CleanupGuard own;
     wchar_t *local;
@@ -1108,6 +1202,7 @@ int cleaner_analyze(CleanerList *list, const CleanupGuard *guard, const CleanerO
     STEP(CLEANER_EDGE, analyze_chromium(&a, CLEANER_EDGE, local, L"Microsoft", L"Edge"));
     STEP(CLEANER_FIREFOX, analyze_firefox(&a, local));
     STEP(CLEANER_DEV_CACHE, analyze_dev(&a));
+    STEP(CLEANER_VDISK, analyze_vdisk(&a));
 #undef STEP
 
     free(local);

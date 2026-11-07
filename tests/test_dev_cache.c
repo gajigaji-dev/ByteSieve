@@ -28,6 +28,8 @@ static wchar_t g_root[MAX_PATH];
 static const wchar_t *const g_tool_env[] = {
     L"npm_config_cache", L"NPM_CONFIG_USERCONFIG", L"PIP_CACHE_DIR", L"PIP_CONFIG_FILE",
     L"GRADLE_USER_HOME", L"CARGO_HOME",            L"NUGET_PACKAGES", L"NUGET_HTTP_CACHE_PATH",
+    L"npm_config_store_dir", L"YARN_CACHE_FOLDER", L"YARN_GLOBAL_FOLDER", L"GOMODCACHE",
+    L"GOPATH", L"GOCACHE", L"GOENV", L"CONDA_PKGS_DIRS",
     NULL};
 
 static wchar_t *fixture(const wchar_t *name)
@@ -227,6 +229,14 @@ static void test_defaults(void)
     CHECK(make(L"home\\.nuget\\packages\\newtonsoft.json\\13.0.1\\.nupkg.metadata", 60));
     CHECK(make(L"local\\NuGet\\v3-cache\\abc$ps_api\\x.dat", 70) &&
           make(L"local\\NuGet\\http-cache\\def$ps_api\\y.dat", 80));
+    /* pnpm·Yarn·Maven·Go·Conda 기본 위치 */
+    CHECK(make(L"local\\pnpm\\store\\v10\\files\\00\\a", 11));
+    CHECK(make(L"local\\Yarn\\Cache\\v6\\npm-left-pad\\b", 12));
+    CHECK(make(L"local\\Yarn\\Berry\\cache\\left-pad-npm-1.3.0.zip", 13));
+    CHECK(make(L"home\\.m2\\repository\\org\\x\\x.jar", 14));
+    CHECK(make(L"home\\go\\pkg\\mod\\cache\\download\\c", 15));
+    CHECK(make(L"local\\go-build\\00\\d", 16));
+    CHECK(make(L"home\\.conda\\pkgs\\urls.txt", 17));
 
     dev_cache_list_init(&l);
     cleanup_guard_init(&guard);
@@ -236,6 +246,10 @@ static void test_defaults(void)
     CHECK(l.len == DEV_CACHE_KIND_COUNT + 1 && count_kind(&l, DEV_CACHE_NUGET_HTTP) == 2);
     for (i = 0; i < l.len; i++) {
         c = &l.items[i];
+        if (c->status != DEV_CACHE_FOUND) {
+            fwprintf(stderr, L"  %ls: %ls (%ls)\n", dev_cache_kind_info(c->kind)->id,
+                     dev_cache_status_name(c->status), c->path != NULL ? c->path : L"-");
+        }
         CHECK(c->status == DEV_CACHE_FOUND);
         CHECK(!c->measured);
         /* 세기 전에는 정리하지 않는다 */
@@ -325,6 +339,65 @@ static void test_cancel_and_guard(void)
 }
 
 /* 환경 변수·설정 파일로 바꾼 위치, 캐시 구조 확인, 링크·파일·잘못된 값. */
+/* 새 도구의 위치 결정: Maven settings.xml(${user.home}), Go env 파일·GOPATH·GOCACHE=off,
+ * Conda CONDA_PKGS_DIRS, pnpm store-dir, Yarn 환경 변수(캐시 구조가 아니면 UNRECOGNIZED). */
+static void test_new_tools(void)
+{
+    DevCacheList l;
+    DevCache *c;
+
+    CHECK(make(L"home\\m2repo\\com\\y\\y.jar", 10));
+    CHECK(write_text(L"home\\.m2\\settings.xml",
+                     "<settings>\n  <localRepository>${user.home}\\m2repo</localRepository>\n"
+                     "</settings>\n"));
+    CHECK(make(L"gomods\\cache\\download\\z", 10));
+    CHECK(write_text(L"roaming\\go\\env", "GOMODCACHE=..\\..\\gomods\nGOCACHE=off-not-used\n"));
+    CHECK(make(L"condapkgs\\urls.txt", 5));
+    CHECK(make(L"pnpms\\v3\\files\\q", 5));
+    CHECK(write_text(L"home\\.npmrc", "store-dir=..\\pnpms\n"));
+    CHECK(make(L"notyarn\\readme.md", 5));
+    set_env(L"CONDA_PKGS_DIRS", L"condapkgs");
+    set_env(L"YARN_CACHE_FOLDER", L"notyarn");
+    SetEnvironmentVariableW(L"GOCACHE", L"off");
+
+    dev_cache_list_init(&l);
+    CHECK(dev_cache_detect(&l) == 0);
+    c = find(&l, DEV_CACHE_MAVEN, 0);
+    CHECK(c != NULL && c->source == DEV_CACHE_SRC_CONFIG && c->status == DEV_CACHE_FOUND &&
+          is_at(c->path, L"home\\m2repo"));
+    c = find(&l, DEV_CACHE_GO_MOD, 0);
+    CHECK(c != NULL && c->source == DEV_CACHE_SRC_CONFIG && c->status == DEV_CACHE_FOUND &&
+          is_at(c->path, L"gomods"));
+    c = find(&l, DEV_CACHE_GO_BUILD, 0);
+    CHECK(c != NULL && c->status == DEV_CACHE_NO_PATH); /* GOCACHE=off: 캐시를 쓰지 않음 */
+    c = find(&l, DEV_CACHE_CONDA, 0);
+    CHECK(c != NULL && c->source == DEV_CACHE_SRC_ENV && c->status == DEV_CACHE_FOUND &&
+          is_at(c->path, L"condapkgs"));
+    c = find(&l, DEV_CACHE_PNPM, 0);
+    CHECK(c != NULL && c->source == DEV_CACHE_SRC_CONFIG && c->status == DEV_CACHE_FOUND &&
+          is_at(c->path, L"pnpms"));
+    c = find(&l, DEV_CACHE_YARN, 0);
+    CHECK(c != NULL && c->source == DEV_CACHE_SRC_ENV && c->status == DEV_CACHE_UNRECOGNIZED);
+    dev_cache_list_free(&l);
+
+    /* GOPATH(첫 항목)\pkg\mod 는 go env 파일이 없을 때 */
+    write_text(L"roaming\\go\\env", "");
+    set_env(L"GOPATH", L"gp1");
+    CHECK(make(L"gp1\\pkg\\mod\\cache\\x", 3));
+    dev_cache_list_init(&l);
+    CHECK(dev_cache_detect(&l) == 0);
+    c = find(&l, DEV_CACHE_GO_MOD, 0);
+    CHECK(c != NULL && c->source == DEV_CACHE_SRC_ENV && is_at(c->path, L"gp1\\pkg\\mod"));
+    dev_cache_list_free(&l);
+
+    set_env(L"CONDA_PKGS_DIRS", NULL);
+    set_env(L"YARN_CACHE_FOLDER", NULL);
+    set_env(L"GOPATH", NULL);
+    SetEnvironmentVariableW(L"GOCACHE", NULL);
+    write_text(L"home\\.npmrc", "");
+    write_text(L"home\\.m2\\settings.xml", "");
+}
+
 static void test_overrides(void)
 {
     DevCacheList l;
@@ -558,6 +631,7 @@ int main(void)
     test_cancel_and_guard();
     test_job();
     test_overrides();
+    test_new_tools();
     test_trash_each();
     test_protected_install();
     remove_tree(g_root);

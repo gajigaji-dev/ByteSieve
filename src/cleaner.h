@@ -9,6 +9,8 @@
 #include "cleanup_scan.h"
 #include "cleanup_trash.h"
 #include "dev_cache.h"
+#include "devenv_history.h"
+#include "vdisk.h"
 
 /*
  * Cleaner: 프로젝트 밖의 시스템 정크(Windows 임시 파일·휴지통·브라우저 캐시·개발 도구 캐시)를
@@ -51,6 +53,7 @@ typedef enum {
     CLEANER_EDGE,          /* Edge 캐시 */
     CLEANER_FIREFOX,       /* Firefox 캐시 */
     CLEANER_DEV_CACHE,     /* 공용 개발 캐시 하나 */
+    CLEANER_VDISK,         /* WSL2·Docker 가상 디스크(.vhdx) 하나: 분석만, 정리하지 않음 */
     CLEANER_KIND_COUNT
 } CleanerKind;
 
@@ -59,6 +62,7 @@ typedef enum {
     CLEANER_GROUP_RECYCLE,     /* 휴지통 */
     CLEANER_GROUP_BROWSER,     /* 브라우저 캐시 */
     CLEANER_GROUP_DEV,         /* 개발 도구 캐시 */
+    CLEANER_GROUP_VDISK,       /* 가상 디스크(WSL·Docker) */
     CLEANER_GROUP_COUNT
 } CleanerGroup;
 
@@ -83,6 +87,7 @@ typedef enum {
     CLEANER_DENIED,      /* 항목이 모두 안전 판정에서 거부됨(보호 경로·링크·읽기 오류) */
     CLEANER_ERROR,       /* 조회 실패(code 참고) */
     CLEANER_CANCELLED,   /* 분석을 취소해 다 세지 못함 */
+    CLEANER_INFO_ONLY,   /* 분석만 하고 정리하지 않음(가상 디스크) */
     CLEANER_STATUS_COUNT
 } CleanerStatus;
 
@@ -125,6 +130,14 @@ typedef struct {
     size_t denied_count;  /* 보호 경로·링크·읽기 오류로 뺀 항목 */
     uint64_t denied_bytes;
     DevCacheKind dev_kind; /* DEV_CACHE 일 때 */
+    VdiskKind vdisk_kind;  /* VDISK 일 때 */
+    uint64_t vdisk_alloc;  /* VDISK 일 때 실제 점유(스파스면 bytes 보다 작다) */
+    int vdisk_sparse;
+    uint64_t modified;     /* VDISK 일 때 마지막 수정(FILETIME UTC) */
+    /* 증가 추적(cleaner_apply_growth): 직전 기록과 비교 */
+    int has_growth;        /* 직전 기록이 있어 growth 를 셌음 */
+    int64_t growth;        /* 지금 - 직전 기록(바이트) */
+    uint64_t growth_since; /* 직전 기록 시각(FILETIME UTC) */
     DevCacheStatus dev_status; /* DEV_CACHE 일 때 위치 상태(FOUND 가 아니면 정리할 수 없는 이유) */
     DevCacheSource dev_source; /* DEV_CACHE 일 때 위치 근거 */
     wchar_t *dev_origin;       /* 환경 변수 이름 또는 설정 파일 경로(소유, NULL 가능) */
@@ -153,6 +166,20 @@ int cleaner_target_manual_only(const CleanerTarget *t);
 
 /* 정리 뒤 오프라인 빌드가 안 되는 등 더 주의할 대상이면 1(개발 캐시의 dev_cache caution). */
 int cleaner_target_caution(const CleanerTarget *t);
+
+/*
+ * 증가 추적 대상이면 1: 찾은 공용 개발 캐시(용량을 다 셌을 때)와 가상 디스크. 기록하는 용량은
+ * cleaner_target_tracked_bytes(개발 캐시는 정리할 수 있는 것과 보호로 뺀 것의 합, 가상 디스크는 파일 크기).
+ */
+int cleaner_target_tracked(const CleanerTarget *t);
+uint64_t cleaner_target_tracked_bytes(const CleanerTarget *t);
+
+/*
+ * 추적 대상마다 hist 의 직전 기록(같은 id·위치)과 비교해 has_growth·growth·growth_since 를 채우고,
+ * record 가 1 이면 지금 용량을 now 시각으로 hist 에 더한다(파일 저장은 호출자가 devhist_save).
+ * 더한 기록 수, 메모리가 부족하면 -1.
+ */
+int cleaner_apply_growth(CleanerList *list, DevHistory *hist, uint64_t now, int record);
 
 /* 영문 식별자: 개발 캐시는 캐시 종류("npm", "gradle_wrapper"), 그 밖은 대상 종류("user_temp"). CLI --include 에 쓴다. */
 const wchar_t *cleaner_target_id(const CleanerTarget *t);

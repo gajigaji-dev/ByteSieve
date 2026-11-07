@@ -11,6 +11,7 @@
 #include "cleanup_rules.h"
 #include "cli.h"
 #include "cli_clean.h"
+#include "cli_devenv.h"
 #include "jsonl.h"
 #include "scan_history.h"
 #include "scan_model.h"
@@ -281,6 +282,32 @@ static int run_clean(int argc, wchar_t **argv)
                          NULL);
 }
 
+/* disk-scanner devenv ...: 개발 캐시·가상 디스크 분석과 증가 기록(cli_devenv.h). */
+static int run_devenv(int argc, wchar_t **argv)
+{
+    CliDevenvOptions opts;
+    wchar_t err[512];
+
+    switch (cli_devenv_parse_args(argc, argv, &opts, err, sizeof(err) / sizeof(err[0]))) {
+    case CLI_PARSE_HELP:
+        set_wide_mode(stdout);
+        cli_devenv_print_usage(stdout);
+        return EXIT_COMPLETE;
+    case CLI_PARSE_ERROR:
+        fwprintf(stderr, L"error: %ls\n\n", err);
+        cli_devenv_print_usage(stderr);
+        return EXIT_FATAL;
+    default:
+        break;
+    }
+    if (opts.json || opts.jsonl) {
+        _setmode(_fileno(stdout), _O_BINARY);
+    } else {
+        set_wide_mode(stdout);
+    }
+    return cli_devenv_run(&opts, stdout, stderr);
+}
+
 int wmain(int argc, wchar_t **argv)
 {
     CliOptions opts;
@@ -288,7 +315,11 @@ int wmain(int argc, wchar_t **argv)
     CliParseResult parsed;
 
     set_wide_mode(stderr);
-    /* 정리 명령. 이름이 clean·find 인 폴더를 스캔하려면 "disk-scanner -- clean" 또는 ".\clean". */
+    /* 개발 환경 분석(읽기 전용). */
+    if (argc >= 2 && wcscmp(argv[1], L"devenv") == 0) {
+        return run_devenv(argc - 1, argv + 1);
+    }
+    /* 정리 명령. 이름이 clean·find·devenv 인 폴더를 스캔하려면 "disk-scanner -- clean" 또는 ".\clean". */
     if (argc >= 2 && (wcscmp(argv[1], L"clean") == 0 || wcscmp(argv[1], L"find") == 0)) {
         return run_clean(argc - 1, argv + 1);
     }

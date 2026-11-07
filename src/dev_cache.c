@@ -47,6 +47,28 @@ static const DevCacheKindInfo g_kinds[DEV_CACHE_KIND_COUNT] = {
     {L"nuget_http", L"NuGet", L"HTTP 캐시", CLEANUP_ECO_DOTNET, 0,
      L"NuGet 피드 응답 캐시입니다. 다음 복원 때 다시 내려받습니다('dotnet nuget locals "
      L"http-cache --clear'와 같은 효과)."},
+    {L"pnpm", L"pnpm", L"패키지 저장소", CLEANUP_ECO_NODE, 0,
+     L"pnpm이 프로젝트의 node_modules에 하드 링크로 나눠 주는 패키지 저장소입니다. 프로젝트 쪽 파일은 남고 "
+     L"다음 설치 때 다시 내려받습니다(쓰지 않는 패키지만 지우려면 'pnpm store prune'). 프로젝트와 링크를 "
+     L"나누는 파일은 지워도 비지 않으므로 실제 확보는 그만큼 작습니다."},
+    {L"yarn", L"Yarn", L"패키지 캐시(v1)", CLEANUP_ECO_NODE, 0,
+     L"Yarn 1(classic)이 내려받은 패키지 캐시입니다. 다음 설치 때 다시 내려받습니다('yarn cache clean'과 "
+     L"같은 효과)."},
+    {L"yarn_berry", L"Yarn", L"전역 캐시(Berry)", CLEANUP_ECO_NODE, 0,
+     L"Yarn 2 이상(Berry)의 전역 캐시입니다. 다음 설치 때 다시 내려받습니다. 프로젝트 안의 .yarn\\cache"
+     L"(zero-install)는 건드리지 않습니다."},
+    {L"maven", L"Maven", L"로컬 저장소", CLEANUP_ECO_JAVA, 1,
+     L"Maven 로컬 저장소입니다. 다음 빌드 때 의존성을 모두 다시 내려받으므로 인터넷이 없으면 빌드할 수 "
+     L"없고, 'mvn install'로 직접 넣은 내 아티팩트도 사라집니다. settings.xml은 건드리지 않습니다."},
+    {L"go_mod", L"Go", L"모듈 캐시", CLEANUP_ECO_GO, 0,
+     L"Go가 내려받은 모듈 캐시입니다. 다음 빌드 때 다시 내려받습니다('go clean -modcache'와 같은 효과). "
+     L"파일이 읽기 전용이라 일부를 옮기지 못하면 'go clean -modcache'로 지우세요."},
+    {L"go_build", L"Go", L"빌드 캐시", CLEANUP_ECO_GO, 0,
+     L"Go 빌드 결과 캐시입니다. 다음 빌드·테스트가 느려집니다('go clean -cache'와 같은 효과)."},
+    {L"conda", L"Conda", L"패키지 캐시", CLEANUP_ECO_PYTHON, 1,
+     L"conda가 내려받은 패키지(pkgs)입니다. 이미 만든 환경은 하드 링크로 파일을 갖고 있어 그대로지만, 새 "
+     L"환경을 만들거나 패키지를 바꿀 때 다시 내려받습니다. 쓰지 않는 것만 지우려면 'conda clean --all'을 "
+     L"권합니다."},
 };
 
 const DevCacheKindInfo *dev_cache_kind_info(DevCacheKind kind)
@@ -551,6 +573,35 @@ static int has_signature(const wchar_t *dir, SigKind kind, const wchar_t *const 
     return found;
 }
 
+/* dir 바로 아래에 이름이 suffix 로 끝나는 파일이 있으면 1(앞쪽 SIGNATURE_PROBE 개만 본다). */
+static int has_file_suffix(const wchar_t *dir, const wchar_t *suffix)
+{
+    wchar_t *pattern = path_join(dir, L"*");
+    WIN32_FIND_DATAW fd;
+    HANDLE h;
+    size_t sl = wcslen(suffix);
+    int found = 0, probed = 0;
+
+    if (pattern == NULL) {
+        return 0;
+    }
+    h = FindFirstFileExW(pattern, FindExInfoBasic, &fd, FindExSearchNameMatch, NULL, 0);
+    free(pattern);
+    if (h == INVALID_HANDLE_VALUE) {
+        return 0;
+    }
+    do {
+        size_t n = wcslen(fd.cFileName);
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            continue;
+        }
+        probed++;
+        found = n >= sl && _wcsicmp(fd.cFileName + n - sl, suffix) == 0;
+    } while (!found && probed < SIGNATURE_PROBE && FindNextFileW(h, &fd));
+    FindClose(h);
+    return found;
+}
+
 /* 종류별 캐시 구조 확인. */
 static int looks_like(DevCacheKind kind, const wchar_t *path)
 {
@@ -562,6 +613,11 @@ static int looks_like(DevCacheKind kind, const wchar_t *path)
     static const wchar_t *const wrapper[] = {L"gradle-", NULL};
     static const wchar_t *const registry[] = {L"index", L"cache", L"src", NULL};
     static const wchar_t *const git[] = {L"db", L"checkouts", NULL};
+    static const wchar_t *const pnpm[] = {L"v3", L"v4", L"v5", L"v10", L"v11", NULL};
+    static const wchar_t *const yarn[] = {L"v6", L"v5", L"v4", L"v3", L"v7", NULL};
+    static const wchar_t *const maven[] = {L"org", L"com", L"io", L"net", L"javax", L"junit", NULL};
+    static const wchar_t *const go_mod[] = {L"cache", NULL};
+    static const wchar_t *const go_build[] = {L"00", L"01", L"0a", L"ff", NULL};
 
     switch (kind) {
     case DEV_CACHE_NPM:
@@ -580,6 +636,21 @@ static int looks_like(DevCacheKind kind, const wchar_t *path)
         return has_signature(path, SIG_NUGET_PACKAGES, NULL, 0);
     case DEV_CACHE_NUGET_HTTP:
         return has_signature(path, SIG_DOLLAR, NULL, 0);
+    case DEV_CACHE_PNPM:
+        return has_signature(path, SIG_NAMES, pnpm, 0);
+    case DEV_CACHE_YARN:
+        return has_signature(path, SIG_NAMES, yarn, 0);
+    case DEV_CACHE_YARN_BERRY:
+        return has_file_suffix(path, L".zip");
+    case DEV_CACHE_MAVEN:
+        return has_signature(path, SIG_NAMES, maven, 0);
+    case DEV_CACHE_GO_MOD:
+        return has_signature(path, SIG_NAMES, go_mod, 0);
+    case DEV_CACHE_GO_BUILD:
+        return has_signature(path, SIG_NAMES, go_build, 0) || has_file_suffix(path, L"trim.txt");
+    case DEV_CACHE_CONDA:
+        return has_file_suffix(path, L"urls.txt") || has_file_suffix(path, L".conda") ||
+               has_file_suffix(path, L".tar.bz2");
     default:
         return 0;
     }
@@ -792,6 +863,214 @@ static int detect_nuget(DevCacheList *l, const Bases *b)
     return r;
 }
 
+/* pnpm 저장소: npm_config_store_dir → .npmrc 의 store-dir → %LOCALAPPDATA%\pnpm\store */
+static int detect_pnpm(DevCacheList *l, const Bases *b)
+{
+    static const wchar_t *const keys[] = {L"store-dir", NULL};
+    wchar_t *p = env_path(L"npm_config_store_dir"), *rc;
+    int r;
+
+    if (p != NULL) {
+        return add_entry(l, DEV_CACHE_PNPM, DEV_CACHE_SRC_ENV, L"npm_config_store_dir", p);
+    }
+    rc = env_path(L"NPM_CONFIG_USERCONFIG");
+    if (rc == NULL) {
+        rc = under(b->profile, L".npmrc");
+    }
+    if (rc != NULL) {
+        r = add_from_config(l, DEV_CACHE_PNPM, rc, config_value(rc, NULL, keys, 0));
+        free(rc);
+        if (r != 0) {
+            return r < 0 ? -1 : 0;
+        }
+    }
+    return add_entry(l, DEV_CACHE_PNPM, DEV_CACHE_SRC_DEFAULT, NULL,
+                     under(b->local, L"pnpm\\store"));
+}
+
+/* 환경 변수가 가리킨 폴더 아래 sub(없으면 그 폴더), 없으면 기본 위치. */
+static int detect_env_or_default(DevCacheList *l, DevCacheKind kind, const wchar_t *env,
+                                 const wchar_t *sub, wchar_t *def)
+{
+    wchar_t *p = env_path(env);
+
+    if (p != NULL) {
+        wchar_t *q = sub != NULL ? path_join(p, sub) : p;
+        if (q != p) {
+            free(p);
+        }
+        free(def);
+        return add_entry(l, kind, DEV_CACHE_SRC_ENV, env, q);
+    }
+    return add_entry(l, kind, DEV_CACHE_SRC_DEFAULT, NULL, def);
+}
+
+/* Maven: ~/.m2/settings.xml 의 <localRepository> → ~/.m2/repository */
+static int detect_maven(DevCacheList *l, const Bases *b)
+{
+    wchar_t *settings = under(b->profile, L".m2\\settings.xml");
+    wchar_t *text = settings != NULL ? read_text(settings) : NULL;
+    int r = 0;
+
+    if (text != NULL) {
+        wchar_t *open = wcsstr(text, L"<localRepository>"), *close;
+        if (open != NULL && (close = wcsstr(open, L"</localRepository>")) != NULL) {
+            wchar_t *value, *user;
+            open += wcslen(L"<localRepository>");
+            *close = L'\0';
+            value = path_dup(open);
+            /* ${user.home} 는 Maven 속성이라 환경 변수로 바뀌지 않는다. */
+            if (value != NULL && (user = wcsstr(value, L"${user.home}")) != NULL &&
+                b->profile != NULL) {
+                size_t need = wcslen(value) + wcslen(b->profile) + 1;
+                wchar_t *joined = malloc(need * sizeof(*joined));
+                if (joined != NULL) {
+                    *user = L'\0';
+                    swprintf(joined, need, L"%ls%ls%ls", value, b->profile,
+                             user + wcslen(L"${user.home}"));
+                }
+                free(value);
+                value = joined;
+            }
+            r = add_from_config(l, DEV_CACHE_MAVEN, settings, value);
+        }
+        free(text);
+    }
+    free(settings);
+    if (r != 0) {
+        return r < 0 ? -1 : 0;
+    }
+    return add_entry(l, DEV_CACHE_MAVEN, DEV_CACHE_SRC_DEFAULT, NULL,
+                     under(b->profile, L".m2\\repository"));
+}
+
+/* go env 파일(%APPDATA%\go\env, GOENV 로 바꿀 수 있음)의 KEY=VALUE. */
+static wchar_t *go_env_file(const Bases *b)
+{
+    wchar_t *p = env_path(L"GOENV");
+    return p != NULL ? p : under(b->roaming, L"go\\env");
+}
+
+/* Go 모듈 캐시: GOMODCACHE → go env 파일 GOMODCACHE → GOPATH(첫 항목)\pkg\mod → go env GOPATH → ~/go/pkg/mod */
+static int detect_go_mod(DevCacheList *l, const Bases *b)
+{
+    static const wchar_t *const modkeys[] = {L"GOMODCACHE", NULL};
+    static const wchar_t *const pathkeys[] = {L"GOPATH", NULL};
+    wchar_t *p = env_path(L"GOMODCACHE"), *file, buf[MAX_PATH * 2];
+    int r;
+    DWORD n;
+
+    if (p != NULL) {
+        return add_entry(l, DEV_CACHE_GO_MOD, DEV_CACHE_SRC_ENV, L"GOMODCACHE", p);
+    }
+    file = go_env_file(b);
+    if (file != NULL) {
+        r = add_from_config(l, DEV_CACHE_GO_MOD, file, config_value(file, NULL, modkeys, 0));
+        if (r != 0) {
+            free(file);
+            return r < 0 ? -1 : 0;
+        }
+    }
+    /* GOPATH 는 ';' 로 여럿일 수 있다: 첫 항목을 쓴다. */
+    n = GetEnvironmentVariableW(L"GOPATH", buf, (DWORD)(sizeof(buf) / sizeof(buf[0])));
+    if (n > 0 && n < sizeof(buf) / sizeof(buf[0])) {
+        wchar_t *semi = wcschr(buf, L';'), *gp;
+        if (semi != NULL) {
+            *semi = L'\0';
+        }
+        gp = value_to_path(buf, NULL);
+        if (gp != NULL) {
+            free(file);
+            r = add_entry(l, DEV_CACHE_GO_MOD, DEV_CACHE_SRC_ENV, L"GOPATH", path_join(gp, L"pkg\\mod"));
+            free(gp);
+            return r;
+        }
+    }
+    if (file != NULL) {
+        wchar_t *gp = config_value(file, NULL, pathkeys, 0);
+        if (gp != NULL) {
+            wchar_t *semi = wcschr(gp, L';');
+            if (semi != NULL) {
+                *semi = L'\0';
+            }
+            {
+                wchar_t *dir = parent_of(file), *path = dir != NULL ? value_to_path(gp, dir) : NULL;
+                free(dir);
+                free(gp);
+                if (path != NULL) {
+                    r = add_entry(l, DEV_CACHE_GO_MOD, DEV_CACHE_SRC_CONFIG, file,
+                                  path_join(path, L"pkg\\mod"));
+                    free(path);
+                    free(file);
+                    return r;
+                }
+            }
+        }
+        free(file);
+    }
+    return add_entry(l, DEV_CACHE_GO_MOD, DEV_CACHE_SRC_DEFAULT, NULL,
+                     under(b->profile, L"go\\pkg\\mod"));
+}
+
+/* Go 빌드 캐시: GOCACHE("off" 면 위치 없음) → go env 파일 GOCACHE → %LOCALAPPDATA%\go-build */
+static int detect_go_build(DevCacheList *l, const Bases *b)
+{
+    static const wchar_t *const keys[] = {L"GOCACHE", NULL};
+    wchar_t raw[16], *p, *file;
+    int r;
+    DWORD n = GetEnvironmentVariableW(L"GOCACHE", raw, 16);
+
+    if (n > 0 && n < 16 && _wcsicmp(raw, L"off") == 0) {
+        return add_entry(l, DEV_CACHE_GO_BUILD, DEV_CACHE_SRC_ENV, L"GOCACHE", NULL);
+    }
+    p = env_path(L"GOCACHE");
+    if (p != NULL) {
+        return add_entry(l, DEV_CACHE_GO_BUILD, DEV_CACHE_SRC_ENV, L"GOCACHE", p);
+    }
+    file = go_env_file(b);
+    if (file != NULL) {
+        r = add_from_config(l, DEV_CACHE_GO_BUILD, file, config_value(file, NULL, keys, 0));
+        free(file);
+        if (r != 0) {
+            return r < 0 ? -1 : 0;
+        }
+    }
+    return add_entry(l, DEV_CACHE_GO_BUILD, DEV_CACHE_SRC_DEFAULT, NULL,
+                     under(b->local, L"go-build"));
+}
+
+/* Conda: CONDA_PKGS_DIRS(첫 항목) → 사용자 폴더의 설치(miniconda3·anaconda3·miniforge3·mambaforge) 중
+ * 처음 있는 것의 pkgs → ~/.conda/pkgs */
+static int detect_conda(DevCacheList *l, const Bases *b)
+{
+    static const wchar_t *const installs[] = {L".conda\\pkgs", L"miniconda3\\pkgs",
+                                              L"anaconda3\\pkgs", L"miniforge3\\pkgs",
+                                              L"mambaforge\\pkgs"};
+    wchar_t buf[MAX_PATH * 2];
+    DWORD n = GetEnvironmentVariableW(L"CONDA_PKGS_DIRS", buf, (DWORD)(sizeof(buf) / sizeof(buf[0])));
+    size_t i;
+
+    if (n > 0 && n < sizeof(buf) / sizeof(buf[0])) {
+        wchar_t *comma = wcschr(buf, L','), *p;
+        if (comma != NULL) {
+            *comma = L'\0';
+        }
+        p = value_to_path(buf, NULL);
+        if (p != NULL) {
+            return add_entry(l, DEV_CACHE_CONDA, DEV_CACHE_SRC_ENV, L"CONDA_PKGS_DIRS", p);
+        }
+    }
+    for (i = 0; i < sizeof(installs) / sizeof(installs[0]); i++) {
+        wchar_t *p = under(b->profile, installs[i]);
+        if (p != NULL && dir_exists(p)) {
+            return add_entry(l, DEV_CACHE_CONDA, DEV_CACHE_SRC_DEFAULT, NULL, p);
+        }
+        free(p);
+    }
+    return add_entry(l, DEV_CACHE_CONDA, DEV_CACHE_SRC_DEFAULT, NULL,
+                     under(b->profile, L".conda\\pkgs"));
+}
+
 int dev_cache_detect(DevCacheList *list)
 {
     Bases b;
@@ -810,7 +1089,13 @@ int dev_cache_detect(DevCacheList *list)
         detect_home_sub(list, DEV_CACHE_CARGO_REGISTRY, L"CARGO_HOME", L".cargo", L"registry",
                         &b) != 0 ||
         detect_home_sub(list, DEV_CACHE_CARGO_GIT, L"CARGO_HOME", L".cargo", L"git", &b) != 0 ||
-        detect_nuget(list, &b) != 0) {
+        detect_nuget(list, &b) != 0 || detect_pnpm(list, &b) != 0 ||
+        detect_env_or_default(list, DEV_CACHE_YARN, L"YARN_CACHE_FOLDER", NULL,
+                              under(b.local, L"Yarn\\Cache")) != 0 ||
+        detect_env_or_default(list, DEV_CACHE_YARN_BERRY, L"YARN_GLOBAL_FOLDER", L"cache",
+                              under(b.local, L"Yarn\\Berry\\cache")) != 0 ||
+        detect_maven(list, &b) != 0 || detect_go_mod(list, &b) != 0 ||
+        detect_go_build(list, &b) != 0 || detect_conda(list, &b) != 0) {
         rc = -1;
     }
     free(b.profile);
