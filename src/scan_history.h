@@ -71,7 +71,12 @@ int history_default_dir(wchar_t *buf, size_t len);
 /* 폴더를 (상위까지) 만든다. 이미 있으면 성공. 성공 0. */
 int history_ensure_dir(const wchar_t *dir);
 
-/* dir 안에서 대상 폴더 root 의 스냅숏 파일 경로(malloc). 대소문자·끝 구분자는 무시한다. */
+/*
+ * dir 안에서 대상 폴더 root 의 스냅숏 파일 경로(malloc). 대소문자·끝 구분자는 무시한다.
+ * root 는 스캐너와 같게 GetFullPathNameW 로 절대 경로로 바꾼 뒤 키로 쓴다. 따라서 "D:" 처럼
+ * 드라이브만 쓴 상대 경로는 드라이브 루트가 아니라 그 드라이브의 현재 디렉터리를 뜻한다("D:\" 와는
+ * 현재 디렉터리가 루트일 때만 같다). 실제로 스캔한 폴더와 같은 기록을 비교하기 위함이다.
+ */
 wchar_t *history_file_for(const wchar_t *dir, const wchar_t *root);
 
 /*

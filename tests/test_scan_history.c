@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
+#include <wctype.h>
 
 #include "path.h"
 #include "scan_history.h"
@@ -345,10 +346,50 @@ static void test_files_and_errors(void)
     free(f2);
     free(f3);
     f1 = history_file_for(L"C:\\h", L"D:\\");
-    f2 = history_file_for(L"C:\\h", L"d:");
+    f2 = history_file_for(L"C:\\h", L"d:\\");
     CHECK(f1 != NULL && f2 != NULL && wcscmp(f1, f2) == 0);
     free(f1);
     free(f2);
+    /*
+     * "X:" 는 Win32 에서 드라이브 X 의 현재 디렉터리다(스캐너도 그 폴더를 스캔한다).
+     * 그래서 결과가 프로세스의 현재 디렉터리에 따라 달라지므로, 현재 디렉터리를 정해 두고 확인한다
+     * (CI 러너는 저장소가 D:\a\... 에 있어 "d:" 가 드라이브 루트가 아니다).
+     */
+    {
+        wchar_t saved[MAX_PATH], drive_root[4], drive_rel[3];
+        DWORD got = GetCurrentDirectoryW(MAX_PATH, saved);
+
+        CHECK(got > 0 && got < MAX_PATH);
+        CHECK(iswalpha(g_root[0]) && g_root[1] == L':' && path_is_separator(g_root[2]));
+        drive_root[0] = (wchar_t)towupper(g_root[0]);
+        drive_root[1] = L':';
+        drive_root[2] = L'\\';
+        drive_root[3] = L'\0';
+        drive_rel[0] = (wchar_t)towlower(g_root[0]);
+        drive_rel[1] = L':';
+        drive_rel[2] = L'\0';
+
+        /* 현재 디렉터리가 드라이브 루트면 "X:" 와 "X:\" 는 같은 파일 */
+        CHECK(SetCurrentDirectoryW(drive_root));
+        f1 = history_file_for(L"C:\\h", drive_root);
+        f2 = history_file_for(L"C:\\h", drive_rel);
+        CHECK(f1 != NULL && f2 != NULL && wcscmp(f1, f2) == 0);
+        free(f2);
+
+        /* 하위 폴더에 있으면 "X:" 는 그 폴더(스캔 대상과 같은 키)이고 루트와는 다른 파일 */
+        CHECK(SetCurrentDirectoryW(g_root));
+        f2 = history_file_for(L"C:\\h", drive_rel);
+        f3 = history_file_for(L"C:\\h", g_root);
+        CHECK(f2 != NULL && f3 != NULL && wcscmp(f2, f3) == 0);
+        CHECK(f1 != NULL && f2 != NULL && wcscmp(f1, f2) != 0);
+        free(f1);
+        free(f2);
+        free(f3);
+
+        if (got > 0 && got < MAX_PATH) {
+            SetCurrentDirectoryW(saved);
+        }
+    }
 
     /* 기록 폴더: 환경 변수가 우선 */
     SetEnvironmentVariableW(L"BYTESIEVE_HISTORY_DIR", L"C:\\custom\\hist\\");
