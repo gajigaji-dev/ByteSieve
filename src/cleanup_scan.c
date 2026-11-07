@@ -25,10 +25,14 @@ typedef struct {
     cleanup_progress_fn progress;
     cleanup_cancel_fn cancel;
     void *ctx;
+    ReclaimMap links; /* 링크가 여러 개인 파일(그룹 = 항목 번호) */
+    wchar_t *buf;     /* 파일 경로(확장) 버퍼 */
+    size_t buf_cap;
     uint64_t dirs_scanned;
     uint64_t found_bytes; /* 지금까지 항목에 더한 용량(진행률 표시용) */
 
     /* 지금 열거 중인 폴더(on_dir_begin ~ on_dir_end) */
+    wchar_t *cur_ext;  /* 확장 경로(파일 조회용) */
     wchar_t *cur_dir;  /* 표시용 경로 */
     size_t cur_first;  /* 이 폴더에서 처음 만든 항목 번호 */
     unsigned cur_markers; /* 이 폴더의 프로젝트 표시 파일이 가리키는 개발 환경(비트) */
@@ -91,6 +95,67 @@ static size_t add_item(DetectCtx *c, const wchar_t *name, CleanupCategory catego
     return r->len++;
 }
 
+uint64_t cleanup_item_reclaim(const CleanupItem *item)
+{
+    return (item->flags & CLEANUP_ITEM_MEASURED) ? item->reclaim_bytes : item->bytes;
+}
+
+/* 지금 폴더의 name 을 조회해 항목 index 의 실제 확보 가능 용량에 더한다. */
+static void measure_file(DetectCtx *c, size_t index, const ScanEntry *entry)
+{
+    CleanupItem *item = &c->r->items[index];
+    uint64_t hint = entry->alloc_known ? entry->alloc_size : entry->size;
+    size_t a = c->cur_ext != NULL ? wcslen(c->cur_ext) : 0, b = wcslen(entry->name);
+    ReclaimFile f;
+    ReclaimSum sum;
+    int ok = 0;
+
+    memset(&f, 0, sizeof(f));
+    f.alloc = hint;
+    if (c->cur_ext != NULL) {
+        if (a + b + 2 > c->buf_cap) {
+            size_t cap = (a + b + 2) * 2;
+            wchar_t *grown = realloc(c->buf, cap * sizeof(*grown));
+            if (grown != NULL) {
+                c->buf = grown;
+                c->buf_cap = cap;
+            }
+        }
+        if (a + b + 2 <= c->buf_cap) {
+            int sep = a > 0 && !path_is_separator(c->cur_ext[a - 1]);
+            memcpy(c->buf, c->cur_ext, a * sizeof(wchar_t));
+            if (sep) {
+                c->buf[a] = L'\\';
+            }
+            memcpy(c->buf + a + sep, entry->name, (b + 1) * sizeof(wchar_t));
+            ok = 1;
+        }
+    }
+    if (ok) {
+        reclaim_query(c->buf, entry->attributes, entry->size, hint, &f);
+    }
+    memset(&sum, 0, sizeof(sum));
+    reclaim_tally(&c->links, (uint32_t)index, &f, &sum);
+    item->reclaim_bytes += sum.bytes;
+}
+
+/* 정산: 링크가 여러 개인 파일을 항목에 나눠 더한다. */
+static void apply_item(uint32_t group, uint64_t alloc, int freed, void *ctx)
+{
+    CleanupResult *r = ctx;
+    CleanupItem *item;
+
+    if (group >= r->len) {
+        return;
+    }
+    item = &r->items[group];
+    if (freed) {
+        item->reclaim_bytes += alloc;
+    } else {
+        item->shared_bytes += alloc;
+    }
+}
+
 /* id 가 가리키는 소유 항목. 없거나 버린 항목이면 NULL. */
 static CleanupItem *owner_of(DetectCtx *c, uintptr_t id)
 {
@@ -139,6 +204,7 @@ static uintptr_t on_entry(const ScanEntry *entry, uintptr_t parent, int will_des
         owner->files++;
         owner->bytes += entry->size;
         c->found_bytes += entry->size;
+        measure_file(c, (size_t)(parent - 1), entry);
         return 0;
     }
 
@@ -146,9 +212,12 @@ static uintptr_t on_entry(const ScanEntry *entry, uintptr_t parent, int will_des
         c->cur_markers |= cleanup_marker_ecos(entry->name);
         c->cur_leveldb |= cleanup_is_leveldb_marker(entry->name);
         category = cleanup_classify_file(entry->name);
-        if (category != CLEANUP_NONE &&
-            add_item(c, entry->name, category, 0, entry->size, 1) != ITEM_NONE) {
-            c->found_bytes += entry->size;
+        if (category != CLEANUP_NONE) {
+            index = add_item(c, entry->name, category, 0, entry->size, 1);
+            if (index != ITEM_NONE) {
+                c->found_bytes += entry->size;
+                measure_file(c, index, entry);
+            }
         }
         return 0;
     }
@@ -170,7 +239,9 @@ static void on_dir_begin(const ScanDirInfo *dir, void *ctx)
     DetectCtx *c = ctx;
 
     free(c->cur_dir);
+    free(c->cur_ext);
     c->cur_dir = path_strip_extended(dir->path);
+    c->cur_ext = path_dup(dir->path);
     c->cur_first = c->r->len;
     c->cur_markers = 0;
     c->cur_leveldb = 0;
@@ -286,7 +357,9 @@ static void finalize(CleanupResult *r)
         if (r->root_protected) {
             item->flags |= CLEANUP_ITEM_PROTECTED;
         }
+        item->flags |= CLEANUP_ITEM_MEASURED;
         r->total_bytes += item->bytes;
+        r->total_reclaim += item->reclaim_bytes;
         r->category_bytes[item->category] += item->bytes;
         r->category_count[item->category]++;
         r->eco_bytes[item->eco] += item->bytes;
@@ -316,6 +389,7 @@ ScanStatus cleanup_scan(CleanupResult *out, const wchar_t *root, const CleanupPr
     out->root_protected = cleanup_protect_contains(protect, out->root);
 
     memset(&c, 0, sizeof(c));
+    reclaim_map_init(&c.links);
     c.r = out;
     c.protect = protect;
     /* 사용자가 보호 경로 안을 직접 골랐으면 제외하지 않고 경고만 한다. */
@@ -329,6 +403,11 @@ ScanStatus cleanup_scan(CleanupResult *out, const wchar_t *root, const CleanupPr
 
     out->status = scan_tree_ex(root, SCAN_DEPTH_UNLIMITED, 0, &out->report, &hooks, &c);
     free(c.cur_dir);
+    free(c.cur_ext);
+    free(c.buf);
+    /* 항목 번호가 그룹이므로 버린 항목을 빼기 전에 정산한다. */
+    reclaim_settle(&c.links, apply_item, out);
+    reclaim_map_free(&c.links);
     finalize(out);
 
     if (progress != NULL) {

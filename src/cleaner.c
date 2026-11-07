@@ -12,6 +12,7 @@
 #include <wchar.h>
 
 #include "cleaner.h"
+#include "reclaim.h"
 #include "path.h"
 #include "scanner.h"
 
@@ -169,6 +170,7 @@ static void target_free(CleanerTarget *t)
     free(t->entries);
     free(t->label);
     free(t->location);
+    free(t->dev_origin);
     memset(t, 0, sizeof(*t));
 }
 
@@ -253,6 +255,8 @@ static int target_add_entry(CleanerTarget *t, CleanupItem *item, wchar_t *root)
     t->entries[t->entry_count].root = root;
     t->entry_count++;
     t->bytes += item->bytes;
+    t->reclaim_bytes += cleanup_item_reclaim(item);
+    t->shared_bytes += item->shared_bytes;
     t->files += item->files;
     return 0;
 }
@@ -467,6 +471,30 @@ static int check_cancel(CancelCtx *c)
         c->cancelled = 1;
     }
     return c->cancelled;
+}
+
+static int cancel_hook(void *ctx)
+{
+    return check_cancel((CancelCtx *)ctx);
+}
+
+/* 정리할 항목의 실제 확보 가능 용량을 센다(폴더는 다시 훑는다). */
+static void measure_item(CleanupItem *item, uint32_t attributes, CancelCtx *cc)
+{
+    ReclaimSum sum;
+
+    memset(&sum, 0, sizeof(sum));
+    if (item->flags & CLEANUP_ITEM_DIR) {
+        ScanReport report;
+        scan_report_init(&report);
+        reclaim_scan_tree(item->path, &report, &sum, cancel_hook, cc);
+        scan_report_free(&report);
+    } else {
+        reclaim_add_file(item->path, attributes, item->bytes, &sum);
+    }
+    item->reclaim_bytes = sum.bytes;
+    item->shared_bytes = sum.shared_bytes;
+    item->flags |= CLEANUP_ITEM_MEASURED;
 }
 
 typedef struct {
@@ -696,6 +724,7 @@ static int add_children(Analyze *a, CleanerTarget *t, const wchar_t *dir)
             free(item.path);
             continue;
         }
+        measure_item(&item, fd.dwFileAttributes, &a->cc);
         {
             wchar_t *root = path_dup(dir);
             if (root == NULL || target_add_entry(t, &item, root) != 0) {
@@ -711,22 +740,12 @@ static int add_children(Analyze *a, CleanerTarget *t, const wchar_t *dir)
     return 1;
 }
 
-typedef struct {
-    CancelCtx *cc;
-} ScanCancel;
-
-static int scan_cancel_hook(void *ctx)
-{
-    return check_cancel(((ScanCancel *)ctx)->cc);
-}
-
 /* 캐시 폴더 하나(root 아래)를 스캐너로 세어 정리 대상으로 붙인다. 없으면 0, 메모리 부족 -1. */
 static int add_cache_dir(Analyze *a, CleanerTarget *t, const wchar_t *root, const wchar_t *name)
 {
     CleanupItem item;
     ScanReport report;
-    ScanHooks hooks;
-    ScanCancel sc;
+    ReclaimSum sum;
     ScanStatus st;
     DWORD attr;
     wchar_t *path = path_join(root, name), *root_copy;
@@ -744,18 +763,18 @@ static int add_cache_dir(Analyze *a, CleanerTarget *t, const wchar_t *root, cons
         free(path);
         return 1;
     }
-    memset(&hooks, 0, sizeof(hooks));
-    hooks.should_cancel = scan_cancel_hook;
-    sc.cc = &a->cc;
     scan_report_init(&report);
-    st = scan_tree_ex(path, SCAN_DEPTH_UNLIMITED, 0, &report, &hooks, &sc);
+    memset(&sum, 0, sizeof(sum));
+    st = reclaim_scan_tree(path, &report, &sum, cancel_hook, &a->cc);
     memset(&item, 0, sizeof(item));
     item.path = path;
     item.category = CLEANUP_CACHE;
     item.eco = CLEANUP_ECO_GENERIC;
-    item.flags = CLEANUP_ITEM_DIR |
+    item.flags = CLEANUP_ITEM_DIR | CLEANUP_ITEM_MEASURED |
                  (st != SCAN_COMPLETE || report.cancelled ? CLEANUP_ITEM_INCOMPLETE : 0u);
     item.bytes = report.total_bytes;
+    item.reclaim_bytes = sum.bytes;
+    item.shared_bytes = sum.shared_bytes;
     item.files = report.file_count;
     item.dirs = report.dir_count;
     scan_report_free(&report);
@@ -856,6 +875,7 @@ static int analyze_recycle(Analyze *a)
         return 0;
     }
     t->bytes = bytes;
+    t->reclaim_bytes = bytes;
     t->files = items;
     t->status = items > 0 ? CLEANER_READY : CLEANER_EMPTY;
     return 0;
@@ -997,12 +1017,15 @@ static int analyze_firefox(Analyze *a, const wchar_t *local)
     return 0;
 }
 
-static int dev_cancel_hook(void *ctx)
+/* 사용자에게 알릴 만한 캐시 상태: 찾았거나, 설정한 위치에 문제가 있어 정리할 수 없음.
+ * 설치하지 않아 없는 캐시(NOT_FOUND·NO_PATH)는 목록에 넣지 않는다. */
+static int dev_listed(DevCacheStatus status)
 {
-    return check_cancel((CancelCtx *)ctx);
+    return status == DEV_CACHE_FOUND || status == DEV_CACHE_NOT_DIR || status == DEV_CACHE_LINK ||
+           status == DEV_CACHE_UNRECOGNIZED;
 }
 
-/* 공용 개발 캐시: dev_cache 가 찾은 것(FOUND)마다 한 대상. */
+/* 공용 개발 캐시: dev_cache 가 찾은 것마다 한 대상(dev_listed). */
 static int analyze_dev(Analyze *a)
 {
     DevCacheList caches;
@@ -1020,7 +1043,7 @@ static int analyze_dev(Analyze *a)
         CleanerTarget *t;
         wchar_t label[128];
 
-        if (c->status != DEV_CACHE_FOUND) {
+        if (!dev_listed(c->status)) {
             continue;
         }
         t = list_add(a->list, CLEANER_DEV_CACHE, c->path);
@@ -1029,13 +1052,24 @@ static int analyze_dev(Analyze *a)
             break;
         }
         t->dev_kind = c->kind;
+        t->dev_status = c->status;
+        t->dev_source = c->source;
+        if (c->origin != NULL && (t->dev_origin = path_dup(c->origin)) == NULL) {
+            rc = -1;
+            break;
+        }
         swprintf(label, 128, L"%ls %ls", k->tool, k->label);
         t->label = path_dup(label);
+        if (c->status != DEV_CACHE_FOUND) {
+            /* 링크·폴더 아님·캐시 구조 아님: 정리하지 않고 이유만 보인다. */
+            t->status = CLEANER_DENIED;
+            continue;
+        }
         if (a->cc.cancelled) {
             t->status = CLEANER_CANCELLED;
             continue;
         }
-        dev_cache_measure(c, dev_cancel_hook, &a->cc);
+        dev_cache_measure(c, cancel_hook, &a->cc);
         if (dev_cache_check(a->guard, c) == CLEANUP_TRASH_PENDING) {
             CleanupItem item;
             wchar_t *path = path_dup(c->path), *root = path_dup(c->home);

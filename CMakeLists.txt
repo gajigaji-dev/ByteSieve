@@ -57,10 +57,17 @@ target_include_directories(bytesieve_cleanup_rules PUBLIC src)
 target_link_libraries(bytesieve_cleanup_rules PUBLIC bytesieve_path advapi32)
 bytesieve_configure(bytesieve_cleanup_rules)
 
+# 실제 확보 가능 용량(할당 크기·하드 링크 판정). 파일을 읽기 속성으로만 조회하며 아무것도 바꾸지 않는다.
+add_library(bytesieve_reclaim STATIC src/reclaim.c)
+target_include_directories(bytesieve_reclaim PUBLIC src)
+target_link_libraries(bytesieve_reclaim PUBLIC bytesieve_scanner bytesieve_path)
+bytesieve_configure(bytesieve_reclaim)
+
 # 정리 후보 탐지 엔진(scan_tree_ex 기반). 읽기 전용이며 아무것도 삭제·수정하지 않는다.
 add_library(bytesieve_cleanup STATIC src/cleanup_scan.c)
 target_include_directories(bytesieve_cleanup PUBLIC src)
-target_link_libraries(bytesieve_cleanup PUBLIC bytesieve_scanner bytesieve_cleanup_rules)
+target_link_libraries(bytesieve_cleanup PUBLIC bytesieve_scanner bytesieve_cleanup_rules
+                      bytesieve_reclaim)
 bytesieve_configure(bytesieve_cleanup)
 
 # 탐지를 별도 스레드에서 돌리는 작업(진행률 스냅샷·취소).
@@ -143,9 +150,9 @@ bytesieve_configure(bytesieve_ui_lang)
 # 격리 폴더 탭(휴지통 없는 드라이브에서 격리한 항목의 복원·영구 삭제),
 # 시스템 탭(RAM·CPU 실시간 사용률 막대·그래프).
 # gui_theme: Windows 11 창 외곽(DWM), 언어별 UI 글꼴, 글자 폭에 맞춘 컨트롤 크기.
-# Cleaner 탭(gui_cleaner)·Booster 탭(gui_booster).
+# 시스템 정리 탭(gui_cleaner, 공용 개발 캐시 포함)·프로젝트 정리 탭(gui_cleanup)·Booster 탭(gui_booster).
 add_executable(bytesieve-gui WIN32 src/gui_main.c src/gui_theme.c src/gui_drives.c
-               src/gui_cleanup.c src/gui_cache.c src/gui_quarantine.c src/gui_monitor.c
+               src/gui_cleanup.c src/gui_quarantine.c src/gui_monitor.c
                src/gui_treemap.c src/gui_cleaner.c src/gui_booster.c)
 target_link_libraries(bytesieve-gui PRIVATE bytesieve_job bytesieve_history bytesieve_export
                       bytesieve_treemap bytesieve_ui_lang bytesieve_cleaner bytesieve_booster
@@ -357,6 +364,11 @@ target_link_libraries(test_cleanup_rules PRIVATE bytesieve_cleanup_rules)
 bytesieve_configure(test_cleanup_rules)
 add_test(NAME cleanup_rules COMMAND test_cleanup_rules)
 
+add_executable(test_reclaim tests/test_reclaim.c)
+target_link_libraries(test_reclaim PRIVATE bytesieve_cleanup)
+bytesieve_configure(test_reclaim)
+add_test(NAME reclaim COMMAND test_reclaim)
+
 add_executable(test_cleanup_scan tests/test_cleanup_scan.c)
 target_link_libraries(test_cleanup_scan PRIVATE bytesieve_cleanup_job)
 bytesieve_configure(test_cleanup_scan)
@@ -425,12 +437,6 @@ add_test(NAME gui_export
                  -DOUT=${CMAKE_CURRENT_BINARY_DIR}/gui_export_out
                  -DHIST=${CMAKE_CURRENT_BINARY_DIR}/gui_export_history
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/gui_export_check.cmake)
-# 공용 캐시 탭: 사용자 폴더를 픽스처로 돌려 탐지 → 화면 확인 → 정리 가능한 캐시를 모두 휴지통으로
-# → 도구 폴더·설정·설치한 도구와 캐시 구조가 아닌 폴더는 남는지 확인(넣은 휴지통 항목만 지움).
-add_test(NAME gui_cache
-         COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:bytesieve-gui>
-                 -DFIXTURE=${CMAKE_CURRENT_BINARY_DIR}/gui_cache_fixture
-                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/gui_cache_check.cmake)
 # 시스템 탭: 몇 초 동안 RAM·CPU 를 측정해 화면·1초 갱신 간격·측정 실패 표시를 확인한다.
 add_test(NAME gui_monitor COMMAND bytesieve-gui --self-test-monitor)
 # Cleaner 탭: 사용자 폴더·TEMP 를 픽스처로 돌려 분석 → 화면 확인 → 휴지통 비우기를 뺀 정리 가능한
@@ -450,7 +456,7 @@ foreach(lang ko en ja zh-Hans)
 endforeach()
 set_tests_properties(gui_scan gui_cancel gui_missing_dir gui_drives gui_cleanup
                      gui_cleanup_cancel gui_trash gui_quarantine gui_monitor gui_history
-                     gui_export gui_cache gui_precise PROPERTIES TIMEOUT 120)
+                     gui_export gui_precise PROPERTIES TIMEOUT 120)
 # 폴더 스캔 자체 검사가 사용자 기록 폴더(%LOCALAPPDATA%)에 스냅숏을 쓰지 않게 한다.
 set_tests_properties(gui_scan gui_cancel gui_missing_dir PROPERTIES
                      ENVIRONMENT "BYTESIEVE_HISTORY_DIR=${CMAKE_CURRENT_BINARY_DIR}/gui_test_history")

@@ -8,9 +8,9 @@ CTest에 등록된 테스트는 69개입니다.
 
 | 분류 | 테스트 | 확인 내용 |
 |---|---|---|
-| 단위 테스트(23개) | `path`, `scanner`, `scan_alloc`, `scan_parallel`, `hardlink`, `scan_model`, `scan_history`, `export`, `scan_job`, `jsonl`, `cli`, `drive`, `sysmon`, `size_format`, `treemap`, `ui_lang`, `cleanup_rules`, `cleanup_scan`, `cleanup_trash`, `dev_cache`, `quarantine`, `cleaner`, `booster` | 아래 참고 |
+| 단위 테스트(24개) | `path`, `scanner`, `scan_alloc`, `scan_parallel`, `hardlink`, `scan_model`, `scan_history`, `export`, `scan_job`, `jsonl`, `cli`, `drive`, `sysmon`, `size_format`, `treemap`, `ui_lang`, `cleanup_rules`, `reclaim`, `cleanup_scan`, `cleanup_trash`, `dev_cache`, `quarantine`, `cleaner`, `booster` | 아래 참고 |
 | CLI·도구 검사(27개) | `no_args`, `help`, `scan_*`, `cli_*`, `bench_smoke` | 종료 코드, 텍스트·JSONL 출력, 인자 오류, 접근 거부 픽스처, 격리 폴더 제외(`cli_skip_quarantine`·`cli_jsonl_skip_quarantine`), `--track` 기준 → 변경 → 비교(`cli_track`), 성능 측정 도구의 스캐너 진단 출력(`bench_smoke`) |
-| GUI 자체 검사(19개) | `gui_scan`, `gui_cancel`, `gui_missing_dir`, `gui_drives`, `gui_cleanup`, `gui_cleanup_cancel`, `gui_trash`, `gui_quarantine`, `gui_history`, `gui_precise`, `gui_export`, `gui_cache`, `gui_monitor`, `gui_cleaner`, `gui_booster`, `gui_lang_ko`, `gui_lang_en`, `gui_lang_ja`, `gui_lang_zh-Hans` | 숨긴 창에서 실제 작업을 실행하고 화면 상태를 검증(`gui_scan`은 트리맵, `gui_drives`는 암호화 열 포함). `gui_cleaner`는 사용자 폴더·TEMP 를 픽스처로 돌리고 [모두 선택]이 휴지통·개발 도구 캐시를 고르지 않는지, Gradle 래퍼 캐시가 "정리 가능 · 주의"로 표시되는지 확인한 뒤 개발 도구 캐시를 직접 체크해 정리한 항목을 픽스처의 격리 폴더로 보내며(실제 휴지통은 조회만 하고 비우지 않음), `gui_booster`는 목록·CPU 측정·보호 판정만 확인하고 아무것도 바꾸지 않음. `gui_lang_*`는 언어마다 번역 문구·언어별 글꼴과, 최소 창 크기에서 폴더 스캔 탭 단추 문구가 잘리지 않고 탭 영역 안에 있는지 확인 |
+| GUI 자체 검사(18개) | `gui_scan`, `gui_cancel`, `gui_missing_dir`, `gui_drives`, `gui_cleanup`, `gui_cleanup_cancel`, `gui_trash`, `gui_quarantine`, `gui_history`, `gui_precise`, `gui_export`, `gui_monitor`, `gui_cleaner`, `gui_booster`, `gui_lang_ko`, `gui_lang_en`, `gui_lang_ja`, `gui_lang_zh-Hans` | 숨긴 창에서 실제 작업을 실행하고 화면 상태를 검증(`gui_scan`은 트리맵, `gui_drives`는 암호화 열, `gui_cleanup`은 프로젝트 정리 탭의 실제 확보 열 포함). `gui_cleaner`(시스템 정리 탭)는 사용자 폴더·TEMP 를 픽스처로 돌리고 [모두 선택]이 휴지통·개발 도구 캐시를 고르지 않는지, Gradle 래퍼 캐시가 "정리 가능 · 주의"로 표시되는지, 예전 `gui_cache`가 보던 공용 캐시(npm·pip·Gradle·Cargo·NuGet)의 위치 근거와 캐시 구조가 아닌 위치(`NUGET_HTTP_CACHE_PATH` → 문서 폴더)가 이유와 함께 정리되지 않는지, 하드 링크로 캐시 밖과 나누는 파일이 실제 확보에서 빠지는지 확인한 뒤 개발 도구 캐시를 직접 체크해 정리한 항목을 픽스처의 격리 폴더로 보내며(실제 휴지통은 조회만 하고 비우지 않음, 도구 설정·설치한 도구는 남음), `gui_booster`는 목록·CPU 측정·보호 판정만 확인하고 아무것도 바꾸지 않음. `gui_lang_*`는 언어마다 번역 문구·언어별 글꼴과, 최소 창 크기에서 폴더 스캔 탭 단추 문구가 잘리지 않고 탭 영역 안에 있는지 확인 |
 
 ## 주요 단위 테스트 범위
 
@@ -46,6 +46,10 @@ CTest에 등록된 테스트는 69개입니다.
 - `drive`·`sysmon`: 가짜 조회 함수로 이동식 드라이브 오류·API 실패·이상값 재현. 암호화: 셸 속성 값 → 상태 변환(알려진 값·모르는 값·값 없음),
   상태마다 식별자·화면 문구, 목록을 만들 때 실패 항목의 용량은 지우고 암호화 상태(잠김)는 남기는지, 실제 시스템 드라이브는 관리자 권한 없이
   상태를 읽고 네트워크·광학·없는 드라이브는 조회하지 않는지(`gui_drives`도 암호화 열 문구를 확인)
+- `reclaim`: 임시 폴더에 하드 링크 픽스처를 만들어, 링크가 하나인 파일은 할당 크기만큼, 링크가 모두 대상 안이면 한 번만, 대상 밖에
+  링크가 남으면 공유로 세는지, 조회하지 못한 파일은 추정하는지, 확장 경로(`\\?\`)도 같은 결과인지, 그룹(항목)마다 따로 판정하는 표가
+  1000개를 넣어 늘어나도 맞는지. `GetFileInformationByName` 경로와 파일을 여는 대체 경로를 모두 돌린다. 정리 후보 탐지가 pnpm 처럼 store 와
+  링크를 나누는 `node_modules` 항목에서 그 파일을 공유로 빼는지(`cleanup_item_reclaim`, `total_reclaim`)도 본다.
 - `cleaner`: `TEMP`·`LOCALAPPDATA`·`USERPROFILE`·`APPDATA`를 픽스처로, `BYTESIEVE_QUARANTINE_ROOT`를 픽스처로 두고 휴지통 조회·비우기와
   프로그램 실행 여부는 가짜 함수로 바꾼다(실제 휴지통은 건드리지 않음). 분석: 임시 파일 중 최근 24시간 안에 바뀐 파일·최근 파일이 든 폴더 제외,
   오류 보고서, 휴지통 용량, Chrome 프로필(Preferences 있는 폴더)만의 캐시, 없는 Edge, 실행 중인 Firefox, npm 캐시.
@@ -84,8 +88,6 @@ build\Debug\bytesieve-gui.exe --self-test-trash C:\some\dir     # 주의: 옮길
 $env:BYTESIEVE_QUARANTINE_ROOT = "C:\some\dir"                # 이 폴더 안을 휴지통 없는 드라이브로 다룸
 build\Debug\bytesieve-gui.exe --self-test-quarantine C:\some\dir C:\some\dir\app\server.log
                                                                  # 주의: 격리 → 복원 → 남은 항목 영구 삭제
-$env:USERPROFILE = "C:\fx\home"; $env:LOCALAPPDATA = "C:\fx\local"; $env:APPDATA = "C:\fx\roaming"
-build\Debug\bytesieve-gui.exe --self-test-cache C:\fx             # 주의: 찾은 캐시를 확인 창 없이 휴지통으로
 build\Debug\bytesieve-gui.exe --self-test-monitor
 build\Debug\bytesieve-gui.exe --self-test-booster        # 목록·CPU 측정·보호 판정만 확인(아무것도 바꾸지 않음)
 # 주의: --self-test-cleaner 는 분석한 대상을 확인 창 없이 정리한다. 반드시 TEMP·TMP·LOCALAPPDATA·USERPROFILE·APPDATA 와
@@ -94,9 +96,9 @@ build\Debug\bytesieve-gui.exe --self-test-cleaner C:\fx
 build\Debug\bytesieve-gui.exe --self-test-lang en      # ko·en·ja·zh-Hans, 성공하면 언어·글꼴·최소 폭을 stdout에 출력
 ```
 
-`--self-test-cache`는 찾은 캐시가 **하나라도** 지정한 폴더 밖이면(실제 사용자 캐시를 볼 수 있으므로) 아무것도 옮기지 않고 실패합니다.
-사용자 폴더 환경 변수를 테스트 폴더로 돌리고 `npm_config_cache`·`PIP_CACHE_DIR`·`GRADLE_USER_HOME`·`CARGO_HOME`·`NUGET_PACKAGES` 등을 지운 뒤
-실행하세요(`gui_cache`가 그렇게 합니다).
+`--self-test-cleaner`는 분석한 위치(공용 개발 캐시 포함)가 **하나라도** 지정한 폴더 밖이면(실제 사용자 파일·캐시를 볼 수 있으므로) 아무것도
+옮기지 않고 실패합니다. 사용자 폴더 환경 변수를 테스트 폴더로 돌리고 `npm_config_cache`·`PIP_CACHE_DIR`·`GRADLE_USER_HOME`·`CARGO_HOME`·
+`NUGET_PACKAGES` 등을 지운 뒤 실행하세요(`gui_cleaner`가 그렇게 합니다). 예전 `--self-test-cache`(공용 캐시 탭)는 탭을 합치며 없앴습니다.
 
 `--self-test-trash`는 확인 창 없이 실제로 휴지통으로 옮기므로 테스트용 폴더에만 쓰세요. `--self-test-quarantine`도 확인 창 없이
 옮기고 영구 삭제하므로 테스트용 폴더에만 쓰세요(격리 폴더 탭은 이 폴더만 보여 주어 사용자의 실제 격리 항목은 건드리지 않습니다).

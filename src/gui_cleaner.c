@@ -39,8 +39,19 @@ enum {
     IDC_C_DETAIL
 };
 
-/* 목록 열. 첫 열(대상)에 체크 상자가 붙는다. */
-enum { COL_TARGET, COL_GROUP, COL_SIZE, COL_FILES, COL_STATE, COL_EXCLUDED, COL_LOCATION, COL_COUNT };
+/* 목록 열. 첫 열(대상)에 체크 상자가 붙는다. COL_SOURCE 는 개발 도구 캐시의 위치 근거. */
+enum {
+    COL_TARGET,
+    COL_GROUP,
+    COL_RECLAIM,
+    COL_SIZE,
+    COL_FILES,
+    COL_STATE,
+    COL_EXCLUDED,
+    COL_LOCATION,
+    COL_SOURCE,
+    COL_COUNT
+};
 
 typedef struct {
     HFONT font;
@@ -67,7 +78,8 @@ typedef struct {
     ULONGLONG started;
 
     size_t checked_count;
-    uint64_t checked_bytes;
+    uint64_t checked_bytes;   /* 체크한 대상(휴지통 제외)의 파일 크기 합 */
+    uint64_t checked_reclaim; /* 체크한 대상(휴지통 제외)의 실제 확보 가능 합 */
     int recycle_checked;
     size_t caution_checked; /* 체크한 대상 중 주의(cleaner_target_caution) 수 */
     size_t dev_checked;     /* 체크한 대상 중 개발 도구 캐시 수 */
@@ -144,7 +156,7 @@ static void state_text(const CleanerPanel *p, size_t i, wchar_t *buf, size_t len
             return;
         }
         format_size(r->moved_bytes, size, 32);
-        swprintf(buf, len, L"정리함 %u개 · %ls 확보%ls%ls", (unsigned)r->moved, size,
+        swprintf(buf, len, L"정리함 %u개 · %ls%ls%ls", (unsigned)r->moved, size,
                  r->quarantined > 0 ? L" (일부 격리 폴더)" : L"",
                  r->failed + r->skipped + r->cancelled > 0 ? L" ·" : L"");
         if (r->skipped > 0) {
@@ -163,6 +175,8 @@ static void state_text(const CleanerPanel *p, size_t i, wchar_t *buf, size_t len
     }
     if (t->status == CLEANER_ERROR) {
         swprintf(buf, len, L"%ls (0x%08X)", cleaner_status_text(t->status), (unsigned)t->code);
+    } else if (t->kind == CLEANER_DEV_CACHE && t->dev_status != DEV_CACHE_FOUND) {
+        swprintf(buf, len, L"%ls", dev_cache_status_text(t->dev_status));
     } else if (t->status == CLEANER_READY && kind_of(t)->permanent) {
         swprintf(buf, len, L"정리 가능 · 영구 삭제");
     } else if (t->status == CLEANER_READY && cleaner_target_caution(t)) {
@@ -195,6 +209,7 @@ static void recount(CleanerPanel *p)
 
     p->checked_count = 0;
     p->checked_bytes = 0;
+    p->checked_reclaim = 0;
     p->recycle_checked = 0;
     p->caution_checked = 0;
     p->dev_checked = 0;
@@ -207,6 +222,7 @@ static void recount(CleanerPanel *p)
                 p->recycle_checked = 1;
             } else {
                 p->checked_bytes += p->targets.items[i].bytes;
+                p->checked_reclaim += p->targets.items[i].reclaim_bytes;
             }
         }
     }
@@ -214,13 +230,14 @@ static void recount(CleanerPanel *p)
 
 static void update_selection(CleanerPanel *p)
 {
-    wchar_t text[256], size[32];
+    wchar_t text[256], size[32], reclaim[32];
     int busy = p->scan != NULL || p->run != NULL;
     size_t n;
 
     format_size(p->checked_bytes, size, 32);
-    swprintf(text, sizeof(text) / sizeof(text[0]), L"선택 %u개 · 예상 확보 %ls%ls",
-             (unsigned)p->checked_count, size,
+    format_size(p->checked_reclaim, reclaim, 32);
+    swprintf(text, sizeof(text) / sizeof(text[0]), L"선택 %u개 · 실제 확보 %ls (파일 크기 %ls)%ls",
+             (unsigned)p->checked_count, reclaim, size,
              p->recycle_checked ? L" + 휴지통 비우기(영구 삭제)" : L"");
     if (p->caution_checked > 0) {
         n = wcslen(text);
@@ -252,7 +269,7 @@ static void update_detail(CleanerPanel *p)
     int row = ListView_GetNextItem(p->list, -1, LVNI_SELECTED);
     const CleanerTarget *t;
     const wchar_t *note;
-    wchar_t text[1600], excl[256], state[256];
+    wchar_t text[1600], excl[256], state[256], source[MAX_PATH + 40], shared[200], size[32];
     size_t used, k;
 
     if (row < 0 || p->rows == NULL || (size_t)row >= p->targets.len) {
@@ -265,10 +282,23 @@ static void update_detail(CleanerPanel *p)
     note = t->kind == CLEANER_DEV_CACHE ? dev_cache_kind_info(t->dev_kind)->note : kind_of(t)->note;
     excluded_text(t, excl, 256);
     state_text(p, (size_t)row, state, 256);
-    swprintf(text, sizeof(text) / sizeof(text[0]), L"%ls%ls\r\n위치: %ls · %ls%ls%ls",
+    source[0] = L'\0';
+    if (t->kind == CLEANER_DEV_CACHE) {
+        wcscpy_s(source, sizeof(source) / sizeof(source[0]), L" · 위치 근거: ");
+        dev_cache_source_text(t->dev_source, t->dev_origin, source + wcslen(source),
+                              sizeof(source) / sizeof(source[0]) - wcslen(source));
+    }
+    shared[0] = L'\0';
+    if (t->shared_bytes > 0) {
+        format_size(t->shared_bytes, size, 32);
+        swprintf(shared, sizeof(shared) / sizeof(shared[0]),
+                 L"\r\n하드 링크로 다른 곳과 나누는 %ls는 지워도 비지 않아 실제 확보에서 뺐습니다.",
+                 size);
+    }
+    swprintf(text, sizeof(text) / sizeof(text[0]), L"%ls%ls\r\n위치: %ls%ls · %ls%ls%ls%ls",
              cleaner_target_caution(t) ? L"[주의] " : L"", note,
-             t->location != NULL ? t->location : L"(모름)", state, excl[0] ? L" · 제외: " : L"",
-             excl);
+             t->location != NULL ? t->location : L"(모름)", source, state,
+             excl[0] ? L" · 제외: " : L"", excl, shared);
     /* 실행 뒤: 이 대상에서 옮기지 못한 항목 몇 개 */
     used = wcslen(text);
     for (k = 0; p->has_run && k < p->result.entry_count && used + MAX_PATH + 80 < 1600; k++) {
@@ -349,13 +379,13 @@ static void finish_scan(CleanerPanel *p)
         if (cleaner_target_runnable(t)) {
             ready++;
             if (!kind_of(t)->permanent) {
-                total += t->bytes;
+                total += t->reclaim_bytes;
             }
         }
     }
     format_size(total, size, 32);
     swprintf(text, sizeof(text) / sizeof(text[0]),
-             L"%ls: 정리할 수 있는 대상 %u개 · 예상 확보 %ls(휴지통 제외) · %.1f초",
+             L"%ls: 정리할 수 있는 대상 %u개 · 실제 확보 %ls(휴지통 제외) · %.1f초",
              p->targets.cancelled ? L"분석 취소됨(다 세지 못한 대상은 정리할 수 없음)" : L"분석 완료",
              (unsigned)ready, size, (double)(GetTickCount64() - p->started) / 1000.0);
     SetWindowTextW(p->status, text);
@@ -401,7 +431,7 @@ static void update_run_progress(CleanerPanel *p)
     SetWindowTextW(p->status, text);
 }
 
-/* 확인 창 1: 고른 대상·예상 확보 용량·되돌리는 방법. 기본 [아니요]. */
+/* 확인 창 1: 고른 대상·실제 확보 용량·되돌리는 방법. 기본 [아니요]. */
 static int confirm_run(CleanerPanel *p)
 {
     size_t i, cap = 2048 + p->targets.len * 320, used = 0;
@@ -418,8 +448,8 @@ static int confirm_run(CleanerPanel *p)
             used += (size_t)n_;                                                       \
         }                                                                             \
     } while (0)
-    format_size(p->checked_bytes, size, 32);
-    APPEND(L"선택한 %u개 대상을 정리합니다. 예상 확보 용량: %ls%ls\n\n",
+    format_size(p->checked_reclaim, size, 32);
+    APPEND(L"선택한 %u개 대상을 정리합니다. 실제 확보 용량: %ls%ls\n\n",
            (unsigned)p->checked_count, size,
            p->recycle_checked ? L" + 휴지통 비우기" : L"");
     for (i = 0; i < p->targets.len; i++) {
@@ -428,7 +458,7 @@ static int confirm_run(CleanerPanel *p)
             continue;
         }
         target_text(t, name, 160);
-        format_size(t->bytes, size, 32);
+        format_size(kind_of(t)->permanent ? t->bytes : t->reclaim_bytes, size, 32);
         APPEND(L"■ %ls — %ls%ls\n", name, size,
                kind_of(t)->permanent      ? L" [영구 삭제]"
                : cleaner_target_caution(t) ? L" [주의]"
@@ -445,8 +475,8 @@ static int confirm_run(CleanerPanel *p)
         APPEND(L"\n");
     }
     APPEND(L"\n휴지통 비우기를 뺀 항목은 Windows 휴지통(휴지통이 없는 드라이브는 격리 폴더)으로 "
-           L"옮기며 영구 삭제하지 않습니다. 사용 중인 파일과 분석 뒤 바뀐 임시 파일은 건너뛰고 "
-           L"항목별로 알려 드립니다. 브라우저 캐시는 그 브라우저가 실행 중이면 정리하지 않습니다.\n"
+           L"옮기며 영구 삭제하지 않습니다. 공간은 그곳을 비울 때 확보됩니다. 사용 중인 파일과 "
+           L"분석 뒤 바뀐 임시 파일은 건너뛰고 항목별로 알려 드립니다. 브라우저 캐시는 그 브라우저가 실행 중이면 정리하지 않습니다.\n"
            L"\n계속할까요?");
 #undef APPEND
     answer = MessageBoxW(GetAncestor(p->hwnd, GA_ROOT), text, L"Cleaner",
@@ -557,7 +587,7 @@ static void finish_run(CleanerPanel *p)
     }
     format_size(bytes, size, 32);
     swprintf(text, sizeof(text) / sizeof(text[0]),
-             L"정리 완료: %u개 옮김(%ls 확보)%ls · 건너뜀 %u개 · 실패 %u개%ls · %.1f초",
+             L"정리 완료: %u개 옮김(%ls, 휴지통·격리 폴더를 비우면 확보)%ls · 건너뜀 %u개 · 실패 %u개%ls · %.1f초",
              (unsigned)moved, size, recycle, (unsigned)skipped, (unsigned)failed,
              p->result.cancelled ? L" · 취소됨" : L"",
              (double)(GetTickCount64() - p->run_started) / 1000.0);
@@ -630,8 +660,17 @@ static void on_get_dispinfo(CleanerPanel *p, NMLVDISPINFOW *di)
     case COL_GROUP:
         di->item.pszText = (wchar_t *)cleaner_group_text(kind_of(t)->group);
         break;
+    case COL_RECLAIM:
+        if (t->status == CLEANER_NOT_FOUND || t->status == CLEANER_ERROR ||
+            (t->kind == CLEANER_DEV_CACHE && t->dev_status != DEV_CACHE_FOUND)) {
+            swprintf(p->cell, 64, L"-");
+        } else {
+            format_size(t->reclaim_bytes, p->cell, 64);
+        }
+        break;
     case COL_SIZE:
-        if (t->status == CLEANER_NOT_FOUND || t->status == CLEANER_ERROR) {
+        if (t->status == CLEANER_NOT_FOUND || t->status == CLEANER_ERROR ||
+            (t->kind == CLEANER_DEV_CACHE && t->dev_status != DEV_CACHE_FOUND)) {
             swprintf(p->cell, 64, L"-");
         } else {
             format_size(t->bytes, p->cell, 64);
@@ -652,6 +691,11 @@ static void on_get_dispinfo(CleanerPanel *p, NMLVDISPINFOW *di)
         break;
     case COL_LOCATION:
         di->item.pszText = t->location != NULL ? t->location : (wchar_t *)L"";
+        break;
+    case COL_SOURCE:
+        if (t->kind == CLEANER_DEV_CACHE) {
+            dev_cache_source_text(t->dev_source, t->dev_origin, p->cell, 512);
+        }
         break;
     }
 }
@@ -704,9 +748,10 @@ static void panel_create_controls(CleanerPanel *p)
         int fmt;
     } cols[COL_COUNT] = {
         {L"대상", 200, LVCFMT_LEFT},     {L"분류", 110, LVCFMT_LEFT},
-        {L"예상 확보", 90, LVCFMT_RIGHT}, {L"파일 수", 70, LVCFMT_RIGHT},
-        {L"상태", 220, LVCFMT_LEFT},     {L"제외", 220, LVCFMT_LEFT},
-        {L"위치", 320, LVCFMT_LEFT},
+        {L"실제 확보", 90, LVCFMT_RIGHT}, {L"파일 크기", 90, LVCFMT_RIGHT},
+        {L"파일 수", 70, LVCFMT_RIGHT},   {L"상태", 220, LVCFMT_LEFT},
+        {L"제외", 220, LVCFMT_LEFT},     {L"위치", 320, LVCFMT_LEFT},
+        {L"위치 근거", 200, LVCFMT_LEFT},
     };
     size_t i;
 
@@ -717,11 +762,11 @@ static void panel_create_controls(CleanerPanel *p)
                             IDC_C_STATUS);
     p->progress = panel_child(p, PROGRESS_CLASSW, L"", PBS_SMOOTH, 0, IDC_C_PROGRESS);
     p->info = panel_child(p, L"STATIC",
-                          L"Windows 임시 파일·오류 보고서·휴지통·브라우저 캐시·개발 도구 캐시를 "
-                          L"분석해 예상 확보 용량을 보여 줍니다. 체크하고 확인한 대상만 정리하며, "
-                          L"휴지통 비우기를 뺀 항목은 휴지통(없는 드라이브는 격리 폴더)으로 옮깁니다. "
-                          L"휴지통 비우기(영구 삭제)와 여러 프로젝트가 함께 쓰는 개발 도구 캐시는 "
-                          L"[모두 선택]에 들어가지 않으니 필요하면 직접 체크하세요.",
+                          L"Windows 임시 파일·오류 보고서·휴지통·브라우저 캐시와 npm·pip·Gradle·"
+                          L"Cargo·NuGet 공용 캐시를 분석합니다. [실제 확보]는 디스크 할당 크기 기준이며 "
+                          L"하드 링크로 다른 곳과 나누는 파일은 뺍니다. 휴지통 비우기를 뺀 항목은 "
+                          L"휴지통(없는 드라이브는 격리 폴더)으로 옮기므로 그곳을 비워야 공간이 확보됩니다. "
+                          L"휴지통 비우기(영구 삭제)와 개발 도구 캐시는 [모두 선택]에 들어가지 않습니다.",
                           SS_LEFT, 0, IDC_C_INFO);
     p->check_all = panel_child(p, L"BUTTON", L"모두 선택", BS_PUSHBUTTON | WS_TABSTOP, 0,
                                IDC_C_CHECK_ALL);
@@ -1056,6 +1101,15 @@ int cleaner_panel_run(HWND panel, int confirm)
         }                                                                         \
     } while (0)
 
+/* 자체 검사 출력용 영문 식별자: 개발 캐시는 캐시 종류("npm", "gradle_wrapper"), 그 밖은 대상 종류. */
+static const wchar_t *target_id(const CleanerTarget *t)
+{
+    if (t->kind == CLEANER_DEV_CACHE && dev_cache_kind_info(t->dev_kind) != NULL) {
+        return dev_cache_kind_info(t->dev_kind)->id;
+    }
+    return kind_of(t)->id;
+}
+
 static int is_under(const wchar_t *path, const wchar_t *root)
 {
     size_t n = wcslen(root);
@@ -1098,17 +1152,55 @@ int cleaner_panel_verify(HWND panel, const wchar_t *expect_root)
             PANEL_CHECK(is_under(t->entries[j].item.path, expect_root));
         }
         ready += cleaner_target_runnable(t);
-        /* 칸 내용 */
-        ListView_GetItemText(p->list, (int)i, COL_SIZE, buf, 512);
+        /* 개발 도구 캐시: 위치 근거 칸, 위치에 문제가 있는 캐시는 이유와 함께 정리할 수 없음 */
+        if (t->kind == CLEANER_DEV_CACHE) {
+            ListView_GetItemText(p->list, (int)i, COL_SOURCE, buf, 512);
+            dev_cache_source_text(t->dev_source, t->dev_origin, want, 512);
+            PANEL_CHECK(wcscmp(buf, want) == 0);
+            wprintf(L"dev: %ls = %ls (%ls%ls%ls)\n", target_id(t),
+                    dev_cache_status_name(t->dev_status),
+                    t->dev_source == DEV_CACHE_SRC_ENV      ? L"env"
+                    : t->dev_source == DEV_CACHE_SRC_CONFIG ? L"config"
+                                                            : L"default",
+                    t->dev_origin != NULL && t->dev_source == DEV_CACHE_SRC_ENV ? L" " : L"",
+                    t->dev_origin != NULL && t->dev_source == DEV_CACHE_SRC_ENV ? t->dev_origin
+                                                                                : L"");
+        }
+        if (t->kind == CLEANER_DEV_CACHE && t->dev_status != DEV_CACHE_FOUND) {
+            PANEL_CHECK(t->status == CLEANER_DENIED && !can_check(p, i) && t->entry_count == 0);
+            ListView_GetItemText(p->list, (int)i, COL_STATE, buf, 512);
+            PANEL_CHECK(wcscmp(buf, dev_cache_status_text(t->dev_status)) == 0);
+            ListView_GetItemText(p->list, (int)i, COL_RECLAIM, buf, 512);
+            PANEL_CHECK(wcscmp(buf, L"-") == 0);
+            continue;
+        }
+        /* 칸 내용: 실제 확보(할당 크기·하드 링크)와 파일 크기 */
         if (t->status != CLEANER_NOT_FOUND && t->status != CLEANER_ERROR) {
+            ListView_GetItemText(p->list, (int)i, COL_SIZE, buf, 512);
             format_size(t->bytes, want, 512);
             PANEL_CHECK(wcscmp(buf, want) == 0);
+            ListView_GetItemText(p->list, (int)i, COL_RECLAIM, buf, 512);
+            format_size(t->reclaim_bytes, want, 512);
+            PANEL_CHECK(wcscmp(buf, want) == 0);
+            /* 항목마다 센 값의 합이어야 한다 */
+            {
+                uint64_t sum = 0;
+                for (j = 0; j < t->entry_count; j++) {
+                    PANEL_CHECK(t->entries[j].item.flags & CLEANUP_ITEM_MEASURED);
+                    sum += cleanup_item_reclaim(&t->entries[j].item);
+                }
+                PANEL_CHECK(sum == t->reclaim_bytes);
+            }
+            if (t->entry_count > 0) {
+                wprintf(L"reclaim: %ls = %llu/%llu shared %llu\n", target_id(t),
+                        (unsigned long long)t->reclaim_bytes, (unsigned long long)t->bytes,
+                        (unsigned long long)t->shared_bytes);
+            }
         }
         ListView_GetItemText(p->list, (int)i, COL_STATE, buf, 512);
         if (t->status == CLEANER_READY && cleaner_target_caution(t)) {
             PANEL_CHECK(wcscmp(buf, L"정리 가능 · 주의") == 0);
-            target_text(t, want, 512);
-            wprintf(L"caution: %ls\n", want);
+            wprintf(L"caution: %ls\n", target_id(t));
         } else {
             PANEL_CHECK(wcscmp(buf, cleaner_status_text(t->status)) == 0 ||
                         t->status == CLEANER_ERROR);
@@ -1133,6 +1225,19 @@ int cleaner_panel_verify(HWND panel, const wchar_t *expect_root)
     /* 개발 도구 캐시를 직접 고르면 주의 개수가 요약에 나온다 */
     PANEL_CHECK(cleaner_panel_check_kind(panel, CLEANER_DEV_CACHE, 1) == ready);
     PANEL_CHECK(p->dev_checked == dev_ready && !p->recycle_checked);
+    /* 선택 요약은 실제 확보 합을 보인다 */
+    {
+        uint64_t sum = 0;
+        for (i = 0; i < p->targets.len; i++) {
+            if (p->rows[i].checked) {
+                sum += p->targets.items[i].reclaim_bytes;
+            }
+        }
+        PANEL_CHECK(sum == p->checked_reclaim);
+        format_size(sum, want, 512);
+        GetWindowTextW(p->selection, buf, 512);
+        PANEL_CHECK(wcsstr(buf, L"실제 확보 ") != NULL && wcsstr(buf, want) != NULL);
+    }
     if (p->caution_checked > 0) {
         GetWindowTextW(p->selection, buf, 512);
         PANEL_CHECK(wcsstr(buf, L"주의") != NULL);

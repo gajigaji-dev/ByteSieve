@@ -378,6 +378,29 @@ static void test_analyze(CleanerList *l, Fake *f)
     t = find(l, CLEANER_DEV_CACHE);
     CHECK(t != NULL && t->status == CLEANER_READY && t->entry_count == 1 && t->bytes == 20);
     CHECK(t != NULL && t->dev_kind == DEV_CACHE_NPM);
+    /* 위치 근거·상태: 환경 변수를 지웠으므로 기본 위치에서 찾음 */
+    CHECK(t != NULL && t->dev_status == DEV_CACHE_FOUND && t->dev_source == DEV_CACHE_SRC_DEFAULT &&
+          t->dev_origin == NULL);
+
+    /* 실제 확보 가능 용량: 항목마다 셌고(MEASURED), 대상 합계는 항목 합. 하드 링크가 없으니 공유 0.
+     * 휴지통은 조회한 용량 그대로. 작은 픽스처 파일은 MFT 상주라 0 일 수 있으므로 논리 크기 이하인지만 본다. */
+    {
+        size_t i, j;
+        for (i = 0; i < l->len; i++) {
+            const CleanerTarget *x = &l->items[i];
+            uint64_t sum = 0;
+            for (j = 0; j < x->entry_count; j++) {
+                CHECK(x->entries[j].item.flags & CLEANUP_ITEM_MEASURED);
+                sum += cleanup_item_reclaim(&x->entries[j].item);
+            }
+            if (x->kind == CLEANER_RECYCLE_BIN) {
+                CHECK(x->reclaim_bytes == x->bytes);
+            } else {
+                CHECK(x->reclaim_bytes == sum);
+                CHECK(x->shared_bytes == 0);
+            }
+        }
+    }
 }
 
 /* 모두 골라 실행: 휴지통을 먼저 비우고, 최근에 바뀐 항목·사용 중 파일·실행 중 브라우저는 남는다. */

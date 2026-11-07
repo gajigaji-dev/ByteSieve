@@ -20,7 +20,12 @@
  *   CHROME/EDGE  %LOCALAPPDATA%\(Google\Chrome|Microsoft\Edge)\User Data 의 프로필(Preferences 가 있는
  *                폴더)마다 Cache·Code Cache·GPUCache 폴더
  *   FIREFOX      %LOCALAPPDATA%\Mozilla\Firefox\Profiles\<프로필>\cache2
- *   DEV_CACHE    공용 개발 캐시(dev_cache: npm·pip·Gradle·Cargo·NuGet)에서 찾은 것마다 한 대상
+ *   DEV_CACHE    공용 개발 캐시(dev_cache: npm·pip·Gradle·Cargo·NuGet)에서 찾은 것마다 한 대상.
+ *                설정한 위치가 링크·폴더가 아님·캐시 구조가 아님이면 그 이유(dev_status)와 함께 정리할 수
+ *                없는 대상으로 남긴다(설치하지 않아 없는 캐시는 넣지 않음). 위치 근거(dev_source·dev_origin)도 둔다.
+ *
+ * 실제 확보 가능 용량(reclaim_bytes): 항목마다 reclaim 으로 할당 크기와 하드 링크를 확인해 지웠을 때
+ * 실제로 비는 용량을 센다(휴지통·격리 폴더로 옮긴 뒤에는 그곳을 비워야 빈다). 휴지통은 조회한 용량.
  *
  * 안전 규칙:
  *   - 휴지통을 뺀 모든 대상은 항목(entry)마다 cleanup_trash 의 안전 장치(경로 판정 → 옮기기 직전 확인 →
@@ -110,13 +115,18 @@ typedef struct {
     CleanerEntry *entries;
     size_t entry_count;
     size_t entry_cap;
-    uint64_t bytes;       /* 정리 대상 항목 용량 합(= 예상 확보 용량, 휴지통은 휴지통 용량) */
+    uint64_t bytes;       /* 정리 대상 항목의 논리 크기 합(휴지통은 휴지통 용량) */
+    uint64_t reclaim_bytes; /* 실제 확보 가능 용량 합(cleanup_item_reclaim, 휴지통은 bytes) */
+    uint64_t shared_bytes;  /* 하드 링크로 대상 밖과 나눠 지워도 비지 않는 점유 합 */
     uint64_t files;       /* 정리 대상 파일 수(휴지통은 항목 수) */
     size_t recent_count;  /* 최근 24시간 안에 바뀌어 뺀 항목 */
     uint64_t recent_bytes;
     size_t denied_count;  /* 보호 경로·링크·읽기 오류로 뺀 항목 */
     uint64_t denied_bytes;
     DevCacheKind dev_kind; /* DEV_CACHE 일 때 */
+    DevCacheStatus dev_status; /* DEV_CACHE 일 때 위치 상태(FOUND 가 아니면 정리할 수 없는 이유) */
+    DevCacheSource dev_source; /* DEV_CACHE 일 때 위치 근거 */
+    wchar_t *dev_origin;       /* 환경 변수 이름 또는 설정 파일 경로(소유, NULL 가능) */
 } CleanerTarget;
 
 typedef struct {

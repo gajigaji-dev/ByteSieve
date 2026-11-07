@@ -44,7 +44,7 @@ size_t cleanup_panel_check_all(HWND panel, int check);
 
 /*
  * 선택한 항목을 휴지통으로 옮기기 시작한다. confirm 이 1 이면 항목의 경로·유형·용량과
- * 예상 확보 용량을 보여 주는 확인 창을 띄우고 [예]일 때만 시작한다(기본 버튼은 [아니요]).
+ * 실제 확보 용량을 보여 주는 확인 창을 띄우고 [예]일 때만 시작한다(기본 버튼은 [아니요]).
  * 시작했으면 1, 선택이 없거나 사용자가 거절했거나 바쁘거나 시작하지 못했으면 0.
  */
 int cleanup_panel_trash(HWND panel, int confirm);

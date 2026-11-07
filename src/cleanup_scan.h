@@ -6,6 +6,7 @@
 #include <wchar.h>
 
 #include "cleanup_rules.h"
+#include "reclaim.h"
 #include "scanner.h"
 
 /*
@@ -16,7 +17,7 @@
  * 정책:
  *   - 루트에서 가장 먼저 맞은 폴더가 그 아래 전체를 차지한다. 그 안의 다른 후보
  *     (node_modules\x\dist, build\a.log 등)는 따로 만들지 않고 용량에 포함한다.
- *     따라서 항목 용량의 합이 곧 예상 확보 용량이며 중복이 없다.
+ *     따라서 항목 용량을 더해도 중복이 없다.
  *   - 재분석 지점(정션·심볼릭 링크)은 폴더든 파일이든 따라가지도, 항목으로 만들지도,
  *     용량에 더하지도 않는다.
  *   - 보호 경로(CleanupProtect)와 같은 폴더는 들어가지 않는다(excluded_dir_count).
@@ -27,6 +28,8 @@
  *     있어야만 후보인 폴더는 같은 폴더에 해당 표시 파일이 없으면 항목에서 빠지고, 그 안은
  *     일반 폴더처럼 계속 탐지한다.
  *   - 오류 처리는 scanner 와 같다(접근 거부 등은 기록하고 계속, root 를 못 열면 SCAN_FATAL).
+ *   - 항목 안의 파일은 reclaim 으로 조회해 실제 확보 가능 용량(할당 크기, 하드 링크로 항목 밖과 나누는
+ *     파일 제외)을 함께 센다(CLEANUP_ITEM_MEASURED). 항목 밖의 파일은 조회하지 않는다.
  */
 
 /* CleanupItem.flags */
@@ -34,7 +37,8 @@ enum {
     CLEANUP_ITEM_DIR = 1u << 0,        /* 폴더 항목(아니면 파일) */
     CLEANUP_ITEM_CONFIRMED = 1u << 1,  /* 같은 폴더에 프로젝트 표시 파일이 있음 */
     CLEANUP_ITEM_INCOMPLETE = 1u << 2, /* 하위를 다 읽지 못함(오류·취소) — 용량이 더 클 수 있음 */
-    CLEANUP_ITEM_PROTECTED = 1u << 3   /* 시스템 보호 경로 안(root_protected 일 때 모든 항목) */
+    CLEANUP_ITEM_PROTECTED = 1u << 3,  /* 시스템 보호 경로 안(root_protected 일 때 모든 항목) */
+    CLEANUP_ITEM_MEASURED = 1u << 4    /* reclaim_bytes·shared_bytes 를 셌음 */
 };
 
 typedef struct {
@@ -45,14 +49,22 @@ typedef struct {
     uint64_t bytes; /* 폴더는 하위 전체 파일의 논리 크기 합 */
     uint64_t files; /* 폴더는 하위 파일 수, 파일은 1 */
     uint64_t dirs;  /* 폴더의 하위 폴더 수 */
+    /* 실제 확보 가능(reclaim.h, CLEANUP_ITEM_MEASURED 일 때만 의미가 있다). 휴지통·격리 폴더로 옮긴
+     * 뒤에는 그곳을 비워야 이만큼 빈다. */
+    uint64_t reclaim_bytes;
+    uint64_t shared_bytes; /* 하드 링크로 항목 밖과 나눠 지워도 비지 않는 점유 */
     size_t pending; /* 내부용: 아직 열거를 마치지 않은 하위 폴더 수 */
 } CleanupItem;
+
+/* 항목의 실제 확보 가능 용량. 세지 않은 항목(MEASURED 아님)은 논리 크기로 대신한다. */
+uint64_t cleanup_item_reclaim(const CleanupItem *item);
 
 typedef struct {
     CleanupItem *items; /* 발견 순서 */
     size_t len;
     size_t cap;
-    uint64_t total_bytes; /* 예상 확보 용량(모든 항목 용량 합) */
+    uint64_t total_bytes; /* 모든 항목의 논리 크기 합 */
+    uint64_t total_reclaim; /* 실제 확보 가능 용량 합(cleanup_item_reclaim) */
     uint64_t category_bytes[CLEANUP_CATEGORY_COUNT];
     size_t category_count[CLEANUP_CATEGORY_COUNT];
     uint64_t eco_bytes[CLEANUP_ECO_COUNT];

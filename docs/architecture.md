@@ -6,16 +6,17 @@
 - **Windows API**: 폴더 열거 `GetFileInformationByHandleEx(FileFullDirectoryInfo)`(미지원 파일 시스템은 `FindFirstFileExW`),
   긴 경로 `\\?\`, 휴지통 이동 `IFileOperation`, 격리 폴더 이동·복원 `MoveFileExW`(같은 볼륨, 덮어쓰기 없음), 드라이브 `GetLogicalDrives`·`GetDiskFreeSpaceExW`,
   암호화 상태 셸 속성(`SHCreateItemFromParsingName`·`IShellItem2::GetProperty`, `System.Volume.BitLockerProtection`),
-  설치 경로 보호 `RegGetValueW`(프로그램 제거 정보), 메모리·CPU `GlobalMemoryStatusEx`·`GetSystemTimes`, GUI는 Win32 + Common Controls v6(창 외곽은 DWM `DwmSetWindowAttribute`)
+  설치 경로 보호 `RegGetValueW`(프로그램 제거 정보), 실제 확보 용량 `GetFileInformationByName`(Windows 11 24H2+, 없으면
+  `GetFileInformationByHandleEx(FileStandardInfo)`), 메모리·CPU `GlobalMemoryStatusEx`·`GetSystemTimes`, GUI는 Win32 + Common Controls v6(창 외곽은 DWM `DwmSetWindowAttribute`)
 - **구조**: UI와 무관한 정적 라이브러리 위에 CLI·GUI를 얹었습니다. 무거운 작업(스캔·탐지·휴지통 이동·격리 폴더 영구 삭제·드라이브 조회·측정)은
   모두 작업 스레드에서 실행하고, GUI 스레드는 `PostMessage`로 결과만 받아 화면을 갱신합니다.
 
 ```
                     disk-scanner (CLI)                bytesieve-gui (GUI)
-                     │  cli · jsonl                     │  폴더 스캔(+트리맵) │ 드라이브 │ 클리너 │ 부스터 │ 정리 후보 │ 공용 캐시 │ 격리 폴더 │ 시스템
+                     │  cli · jsonl                     │  폴더 스캔(+트리맵) │ 드라이브 │ 시스템 정리 │ 프로젝트 정리 │ 부스터 │ 격리 폴더 │ 시스템
                      │                                  │
    scan_history ── scan_model ── scan_job        cleanup_job ── cleanup_trash ── dev_cache   drive   sysmon   treemap
-   (변화 추적)     (폴더 트리)   (스캔 스레드)   (탐지 스레드)   (휴지통 이동)    (공용 캐시)  (드라이브· (RAM·CPU) (트리맵 배치)
+   (변화 추적)     (폴더 트리)   (스캔 스레드)   (탐지 스레드)   (휴지통 이동)  (공용 개발 캐시)(드라이브· (RAM·CPU) (트리맵 배치)
                                                                                              암호화)
                                                                         │
                                                                     quarantine
@@ -23,7 +24,8 @@
                         │                             │
                         └────────── scanner ──────────┘   cleanup_scan ── cleanup_rules
                          (DFS 열거·병렬 미리 열거·      (탐지 엔진)     (이름 규칙·개발 환경·보호 경로)
-                          할당 크기 분석·오류 분류)
+                          할당 크기 분석·오류 분류)          │
+                                                          reclaim (실제 확보 용량: 할당 크기·하드 링크)
                                      │
                                     path (경로 결합·\\?\ 변환)
 ```
@@ -40,12 +42,13 @@
 | `bytesieve_export` | 스캔 결과 CSV·HTML 보고서 내보내기(임시 파일 → 바꿔치기, 64 KiB 버퍼로 나눠 쓰기) |
 | `bytesieve_cleanup_rules` / `bytesieve_cleanup` / `bytesieve_cleanup_job` | 정리 후보 규칙(이름·표시 파일)과 시스템·개발 도구 설치 보호 경로(환경 변수·프로그램 제거 정보 레지스트리), 탐지 엔진, 탐지 스레드 |
 | `bytesieve_cleanup_trash` | 삭제 보호 판정, 직전 확인, 휴지통 이동(쓸 수 없으면 격리 폴더로). 항목마다 탐지 경로를 따로 받는 작업도 지원 |
-| `bytesieve_dev_cache` | 공용 개발 캐시(npm·pip·Gradle·Cargo·NuGet) 위치 탐지(환경 변수·설정 파일·기본 위치, 캐시 구조 확인), 용량 세기, 작업 스레드 |
+| `bytesieve_reclaim` | 실제 확보 가능 용량: 파일마다 할당 크기·링크 수·파일 ID 조회(파일 내용은 읽지 않음), MFT 상주 파일 0, (항목, 파일 ID) 표로 항목 밖과 나누는 하드 링크 판정 |
+| `bytesieve_dev_cache` | 공용 개발 캐시(npm·pip·Gradle·Cargo·NuGet) 위치 탐지(환경 변수·설정 파일·기본 위치, 캐시 구조 확인), 용량·실제 확보 용량 세기, 작업 스레드 |
 | `bytesieve_quarantine` | 드라이브별 격리 폴더: 같은 볼륨 안 이동, 기록(원자적 쓰기), 목록·불일치 판정, 복원, 영구 삭제 |
 | `bytesieve_drive` / `bytesieve_sysmon` / `bytesieve_format` | 드라이브 조회(용량, BitLocker 상태: 셸 속성 `System.Volume.BitLockerProtection`), RAM·CPU 측정, 용량 표시 문자열 |
 | `bytesieve_treemap` | 스퀘어리파이드 트리맵 배치(순수 계산, GUI 트리맵 보기 `gui_treemap`이 사용) |
 | `bytesieve_cli` / `bytesieve_jsonl` | CLI 인자 해석·출력, JSON Lines 직렬화 |
-| `bytesieve_cleaner` | Cleaner: 사용자 임시 파일·오류 보고서·휴지통·브라우저 캐시·공용 개발 캐시 분석(읽기 전용), 고른 대상 정리(휴지통 비우기 → 항목마다 `cleanup_trash_one`), 분석·정리 작업 스레드 |
+| `bytesieve_cleaner` | 시스템 정리(Cleaner): 사용자 임시 파일·오류 보고서·휴지통·브라우저 캐시·공용 개발 캐시 분석(읽기 전용, 위치 근거·캐시 위치 문제 포함, 항목마다 실제 확보 용량), 고른 대상 정리(휴지통 비우기 → 항목마다 `cleanup_trash_one`), 분석·정리 작업 스레드 |
 | `bytesieve_booster` | Booster: 시작 프로그램 목록·켜기/끄기(StartupApproved), 프로세스 목록·CPU 계산·보호 판정·끝내기(PID 재사용 확인) |
 | `bytesieve_ui_lang` | GUI 표시 언어(한국어·영어·일본어·중국어 간체) 번역 문자열 표와 언어 결정(환경 변수 → 레지스트리 → Windows 표시 언어). 창과 무관 |
 

@@ -10,6 +10,7 @@
 
 #include "dev_cache.h"
 #include "path.h"
+#include "reclaim.h"
 
 /* 설정 파일을 읽을 최대 크기(손상된 큰 파일로 메모리를 쓰지 않도록). */
 #define CONFIG_MAX_BYTES ((DWORD)1024 * 1024)
@@ -51,6 +52,24 @@ static const DevCacheKindInfo g_kinds[DEV_CACHE_KIND_COUNT] = {
 const DevCacheKindInfo *dev_cache_kind_info(DevCacheKind kind)
 {
     return (unsigned)kind < DEV_CACHE_KIND_COUNT ? &g_kinds[kind] : NULL;
+}
+
+void dev_cache_source_text(DevCacheSource source, const wchar_t *origin, wchar_t *buf, size_t len)
+{
+    if (buf == NULL || len == 0) {
+        return;
+    }
+    switch (source) {
+    case DEV_CACHE_SRC_ENV:
+        swprintf(buf, len, L"환경 변수 %ls", origin != NULL ? origin : L"");
+        break;
+    case DEV_CACHE_SRC_CONFIG:
+        swprintf(buf, len, L"설정 파일 %ls", origin != NULL ? origin : L"");
+        break;
+    default:
+        swprintf(buf, len, L"기본 위치");
+        break;
+    }
 }
 
 const wchar_t *dev_cache_status_text(DevCacheStatus status)
@@ -817,21 +836,22 @@ static int measure_cancel(void *ctx)
 void dev_cache_measure(DevCache *cache, dev_cache_cancel_fn cancel, void *ctx)
 {
     ScanReport report;
-    ScanHooks hooks;
     CancelHook hook;
     ScanStatus status;
+    ReclaimSum sum;
 
     if (cache == NULL || cache->status != DEV_CACHE_FOUND) {
         return;
     }
-    memset(&hooks, 0, sizeof(hooks));
-    hooks.should_cancel = measure_cancel;
     hook.cancel = cancel;
     hook.ctx = ctx;
     scan_report_init(&report);
-    status = scan_tree_ex(cache->path, SCAN_DEPTH_UNLIMITED, 0, &report, &hooks, &hook);
+    memset(&sum, 0, sizeof(sum));
+    status = reclaim_scan_tree(cache->path, &report, &sum, measure_cancel, &hook);
     cache->measured = 1;
     cache->bytes = report.total_bytes;
+    cache->reclaim_bytes = sum.bytes;
+    cache->shared_bytes = sum.shared_bytes;
     cache->files = report.file_count;
     cache->dirs = report.dir_count;
     cache->errors = report.error_count;
@@ -847,8 +867,11 @@ void dev_cache_to_item(const DevCache *cache, CleanupItem *item)
     item->eco = g_kinds[cache->kind].eco;
     item->flags = CLEANUP_ITEM_DIR | (cache->incomplete || !cache->measured
                                           ? CLEANUP_ITEM_INCOMPLETE
-                                          : 0u);
+                                          : 0u) |
+                  (cache->measured ? CLEANUP_ITEM_MEASURED : 0u);
     item->bytes = cache->bytes;
+    item->reclaim_bytes = cache->reclaim_bytes;
+    item->shared_bytes = cache->shared_bytes;
     item->files = cache->files;
     item->dirs = cache->dirs;
 }
