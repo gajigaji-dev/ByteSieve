@@ -87,7 +87,8 @@ History:        saved to C:\Users\me\AppData\Local\ByteSieve\history\6f56c5d88fb
 프로젝트 정리 후보를 찾아 보여 주기만 합니다(읽기 전용, 아무것도 바꾸지 않음). GUI [프로젝트 정리]와 같은 탐지·판정(보호 경로·앱 데이터 폴더 제외, 실제 확보 용량)을 씁니다.
 
 ```
-disk-scanner find <directory> [--category LIST] [--eco LIST] [--json | --jsonl]
+disk-scanner find <directory> [--category LIST] [--eco LIST] [--dormant-days N] [--no-git]
+                  [--json | --jsonl]
 disk-scanner find -h | --help
 ```
 
@@ -127,7 +128,8 @@ Nothing was changed. Use 'disk-scanner clean project' to see the cleanup plan an
 GUI의 [프로젝트 정리]·[시스템 정리] 탭과 **같은 탐지·계획·실행 코드**(`clean_plan`)를 씁니다. 기본은 `--dry-run`(계획과 예상 결과만 출력)이며, `--execute`를 줘야만 옮깁니다.
 
 ```
-disk-scanner clean project <directory> [--category LIST] [--eco LIST]
+disk-scanner clean project <directory> [--category LIST] [--eco LIST] [--include-dirty]
+                           [--dormant-days N] [--no-git]
                            [--dry-run | --execute [--yes]] [--json | --jsonl]
 disk-scanner clean system [--include LIST] [--exclude LIST]
                           [--dry-run | --execute [--yes]] [--json | --jsonl]
@@ -205,6 +207,40 @@ Add --execute to move them.
 
 **JSON Lines(`--jsonl`)** 이벤트 순서는 `clean_plan` → 대상마다 `clean_target` → `clean_summary`(`mode` 포함, 예전 이름 `apply`도 남김) → (`--execute`면 실행한 대상마다 `clean_result`) → `complete`입니다.
 `clean_target`·`clean_result`의 필드는 위 JSON 문서의 `targets` 항목·`result`와 같습니다.
+
+### 프로젝트(Git) 정보
+
+`find`와 `clean project`는 후보를 **프로젝트**별로 묶어 보입니다. 프로젝트는 후보 위쪽에서 가장 가까운 Git 저장소(`.git` 폴더나 워크트리의
+`gitdir:` 파일이 있는 폴더)이고, 저장소가 아니면 후보가 들어 있는 폴더입니다.
+
+| 옵션 | 설명 |
+|---|---|
+| `--dormant-days N` | 마지막 활동(마지막 커밋과 파일 마지막 수정 중 늦은 쪽)이 N일보다 오래되면 휴면(기본 90, 1~36500) |
+| `--no-git` | git.exe를 실행하지 않고 `.git`을 직접 읽는다(브랜치·HEAD가 마지막으로 움직인 시각·원격 ref 비교만, 미커밋 변경은 모름) |
+| `--include-dirty` | clean project: 커밋하지 않은 변경이 있는 프로젝트의 후보도 고른다(기본으로는 고르지 않음) |
+
+```
+Projects: 2 (1 dormant after 90 days, 1 with uncommitted changes, 1 with unpushed commits)
+  P1   D:\work\web
+       git main | last activity 2020-01-15 (2487 days ago) | DORMANT | NO REMOTE: 1 commit(s) only on this PC
+  P2   D:\work\api
+       git main | last activity 2026-11-07 (0 days ago) | UNCOMMITTED CHANGES: 3
+```
+
+- Git 상태는 PATH의 git.exe(환경 변수 `BYTESIEVE_GIT`로 경로 지정, `none`이면 쓰지 않음)를 **읽기 전용**으로 실행해 얻습니다:
+  `rev-parse`, `log -1`, `status --porcelain`, `for-each-ref refs/remotes`, `rev-list --count HEAD --not --remotes`.
+  `--no-optional-locks`로 index를 다시 쓰지 않고, `-c core.fsmonitor=false`로 저장소 설정의 외부 프로그램이 실행되지 않게 합니다.
+  git.exe가 없거나 실패하면(다른 사용자 소유라 거부 등) `.git`을 직접 읽습니다.
+- **미커밋 변경**: 추적하지 않는 새 파일을 포함한 변경 수(`.gitignore`로 무시한 `node_modules` 등은 세지 않음).
+  미커밋 변경이 있는 프로젝트의 후보는 `uncommitted`로 표시하고 기본으로 고르지 않습니다.
+- **미푸시 커밋**: 어느 원격에도 없는 커밋 수. 원격이 없으면 모든 커밋이 이 PC에만 있다고 알립니다(`NO REMOTE`).
+- **마지막 수정**: 프로젝트 안 파일의 가장 늦은 수정 시각(`.git`·정리 후보 이름의 폴더·링크·다른 프로젝트 제외, 20만 항목까지).
+- 후보마다 **복구 가능성**(`Recovery`): `locked`(lockfile이 있어 같은 버전으로 재설치: `package-lock.json`·`yarn.lock`·`pnpm-lock.yaml`·`bun.lock(b)`·
+  `npm-shrinkwrap.json`), `unlocked`(재설치는 되지만 버전이 바뀔 수 있음), `rebuild`(빌드하면 다시 생김), `none`(다시 생기지 않음: 임시 파일·로그).
+
+JSON 문서에는 `projects` 배열(`index`, `root`, `git`, `git_source`(`git`·`direct`·`none`), `branch`, `last_commit`·`last_modified`·`last_activity`(유닉스 초, 모르면
+`null`), `age_days`, `dormant`, `changes`·`unpushed`(모르면 `null`), `has_remote`, `remote_differs`, `modified_incomplete`, `candidates`)과 `dormant_days`·`git_available`이,
+후보·대상마다 `project`(1부터, `projects`의 `index`), `recovery`, `dirty`, `unpushed`, `dormant`가 붙습니다. `--jsonl`은 프로젝트마다 `project` 이벤트를 냅니다.
 
 ## 종료 코드(`find`·`clean`)
 

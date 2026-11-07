@@ -115,6 +115,8 @@ CleanPlanTarget *clean_plan_add(CleanPlan *plan, CleanSource source, const wchar
     memset(t, 0, sizeof(*t));
     t->source = source;
     t->origin = plan->len;
+    t->project = (size_t)-1;
+    t->recovery = -1;
     t->deny = CLEANUP_TRASH_PENDING;
     t->state = L"";
     t->id = dup_or_null(id, &oom);
@@ -203,6 +205,38 @@ int clean_plan_from_project(CleanPlan *plan, const CleanupResult *r, const Clean
     return rc;
 }
 
+void clean_plan_apply_projects(CleanPlan *plan, const ProjectList *projects)
+{
+    size_t i;
+
+    if (plan == NULL || projects == NULL) {
+        return;
+    }
+    for (i = 0; i < plan->len; i++) {
+        CleanPlanTarget *t = &plan->items[i];
+        const ProjectInfo *p;
+        if (t->source != CLEAN_SOURCE_PROJECT || t->origin >= projects->item_count ||
+            projects->item_project[t->origin] >= projects->len) {
+            continue;
+        }
+        t->project = projects->item_project[t->origin];
+        t->recovery = (int)projects->item_recovery[t->origin];
+        p = &projects->items[t->project];
+        t->flags &= ~(unsigned)(CLEAN_PLAN_DIRTY | CLEAN_PLAN_UNPUSHED | CLEAN_PLAN_DORMANT);
+        if (p->changes > 0) {
+            /* 작업 중인 프로젝트: [모두 선택]에서 빼고 직접 고르게 한다. */
+            t->flags |= CLEAN_PLAN_DIRTY | CLEAN_PLAN_MANUAL;
+            t->selected = 0;
+        }
+        if (p->unpushed > 0 || p->remote_differs) {
+            t->flags |= CLEAN_PLAN_UNPUSHED;
+        }
+        if (p->dormant) {
+            t->flags |= CLEAN_PLAN_DORMANT;
+        }
+    }
+}
+
 /* 다시 해 볼 만한 항목: 아직 시도 안 했거나 실패·취소. 건너뜀(최근·실행 중)은 다시 분석해야 한다. */
 static int entry_pending(const CleanPlanEntry *e)
 {
@@ -287,12 +321,14 @@ void clean_plan_summarize(const CleanPlan *plan, CleanPlanSummary *out)
         out->targets++;
         out->caution += (t->flags & CLEAN_PLAN_CAUTION) != 0;
         out->guessed += (t->flags & CLEAN_PLAN_GUESSED) != 0;
+        out->dirty += (t->flags & CLEAN_PLAN_DIRTY) != 0;
+        out->unpushed += (t->flags & CLEAN_PLAN_UNPUSHED) != 0;
         if (t->flags & CLEAN_PLAN_PERMANENT) {
             out->permanent++;
             out->permanent_bytes += t->bytes;
             continue;
         }
-        out->manual += (t->flags & CLEAN_PLAN_MANUAL) != 0;
+        out->manual += (t->flags & CLEAN_PLAN_MANUAL) && !(t->flags & CLEAN_PLAN_DIRTY);
         out->bytes += t->bytes;
         out->reclaim += t->reclaim;
         for (j = 0; j < t->entry_count; j++) {

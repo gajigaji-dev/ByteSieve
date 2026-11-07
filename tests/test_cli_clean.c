@@ -258,11 +258,51 @@ static void test_select_project(void)
     }
 }
 
+/* 프로젝트 분석 옵션: --include-dirty(clean project 만), --dormant-days N(find·clean project),
+ * --no-git(find·clean project). --include-dirty 는 거르기에 맞는 미커밋 프로젝트 후보를 고른다. */
+static void test_project_options(void)
+{
+    CliCleanOptions o;
+    wchar_t err[256];
+    CleanPlan plan;
+    CleanPlanTarget *t;
+
+    CHECK(parse(&o, err, 6, L"clean", L"project", L"D:\\w", L"--include-dirty", L"--dormant-days",
+                L"30") == CLI_PARSE_OK);
+    CHECK(o.include_dirty && o.dormant_days == 30 && !o.no_git);
+    CHECK(parse(&o, err, 4, L"find", L"--dormant-days=7", L"--no-git", L"D:\\w") == CLI_PARSE_OK);
+    CHECK(o.dormant_days == 7 && o.no_git && !o.include_dirty);
+    CHECK(parse(&o, err, 3, L"find", L"D:\\w", L"--include-dirty") == CLI_PARSE_ERROR);
+    CHECK(parse(&o, err, 3, L"clean", L"system", L"--no-git") == CLI_PARSE_ERROR);
+    CHECK(parse(&o, err, 4, L"clean", L"system", L"--dormant-days", L"5") == CLI_PARSE_ERROR);
+    CHECK(parse(&o, err, 4, L"find", L"D:\\w", L"--dormant-days=0") == CLI_PARSE_ERROR);
+    CHECK(parse(&o, err, 4, L"find", L"D:\\w", L"--dormant-days=-3") == CLI_PARSE_ERROR);
+    CHECK(parse(&o, err, 4, L"find", L"D:\\w", L"--dormant-days=9x") == CLI_PARSE_ERROR);
+    CHECK(parse(&o, err, 3, L"find", L"D:\\w", L"--dormant-days") == CLI_PARSE_ERROR);
+
+    clean_plan_init(&plan);
+    add(&plan, CLEAN_SOURCE_PROJECT, L"node_modules", 0, CLEANUP_NODE_MODULES, CLEANUP_ECO_NODE);
+    t = add(&plan, CLEAN_SOURCE_PROJECT, L"node_modules", CLEAN_PLAN_DIRTY | CLEAN_PLAN_MANUAL,
+            CLEANUP_NODE_MODULES, CLEANUP_ECO_NODE);
+    (void)t;
+    add(&plan, CLEAN_SOURCE_PROJECT, L"build", CLEAN_PLAN_DIRTY | CLEAN_PLAN_MANUAL, CLEANUP_BUILD,
+        CLEANUP_ECO_GENERIC);
+    CHECK(parse(&o, err, 3, L"clean", L"project", L"D:\\w") == CLI_PARSE_OK);
+    CHECK(cli_clean_select(&plan, &o) == 1 && !plan.items[1].selected);
+    CHECK(parse(&o, err, 4, L"clean", L"project", L"D:\\w", L"--include-dirty") == CLI_PARSE_OK);
+    CHECK(cli_clean_select(&plan, &o) == 3);
+    CHECK(parse(&o, err, 6, L"clean", L"project", L"D:\\w", L"--include-dirty", L"--category",
+                L"node_modules") == CLI_PARSE_OK);
+    CHECK(cli_clean_select(&plan, &o) == 2 && !plan.items[2].selected);
+    clean_plan_free(&plan);
+}
+
 int main(void)
 {
     test_parse();
     test_parse_modes();
     test_parse_find();
+    test_project_options();
     test_select_system();
     test_select_project();
     if (g_failures != 0) {

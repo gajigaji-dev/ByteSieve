@@ -11,8 +11,10 @@
 /*
  * 정리 CLI: GUI 의 [프로젝트 정리]·[시스템 정리]와 같은 탐지·계획·실행(clean_plan.h)을 쓴다.
  *
- *   disk-scanner find <dir> [--category LIST] [--eco LIST] [--json | --jsonl]
- *   disk-scanner clean project <dir> [--category LIST] [--eco LIST]
+ *   disk-scanner find <dir> [--category LIST] [--eco LIST] [--dormant-days N] [--no-git]
+ *                     [--json | --jsonl]
+ *   disk-scanner clean project <dir> [--category LIST] [--eco LIST] [--include-dirty]
+ *                              [--dormant-days N] [--no-git]
  *                              [--dry-run | --execute [--yes]] [--json | --jsonl]
  *   disk-scanner clean system [--include LIST] [--exclude LIST]
  *                             [--dry-run | --execute [--yes]] [--json | --jsonl]
@@ -20,6 +22,11 @@
  *
  * find 는 프로젝트 정리 후보를 찾아 보여 주기만 한다(읽기 전용, 선택 없음). 보호 경로 안의 후보도 이유와
  * 함께 보이며, 순서는 파일 크기 내림차순(GUI 목록과 같다).
+ *
+ * find·clean project 는 후보를 프로젝트(Git 저장소 등)별로 묶어 보인다(project_info.h): 브랜치·마지막 커밋·
+ * 마지막 수정·휴면(--dormant-days, 기본 90일), 미커밋 변경·미푸시 커밋 경고, 후보마다 복구 가능성.
+ * --no-git 이면 git.exe 를 실행하지 않고 .git 을 직접 읽는다. 미커밋 변경이 있는 프로젝트의 후보는 기본으로
+ * 고르지 않으며 --include-dirty 로만 고른다.
  *
  * clean 안전 규칙:
  *   - 기본은 --dry-run(계획과 예상 결과만 출력, 아무것도 옮기지 않음). --execute 일 때만 옮긴다.
@@ -63,6 +70,9 @@ typedef struct {
     int yes;
     int json;    /* --json: JSON 문서 하나 */
     int jsonl;   /* --jsonl: JSON Lines 이벤트 */
+    int include_dirty;     /* --include-dirty: 미커밋 변경이 있는 프로젝트의 후보도 고른다 */
+    unsigned dormant_days; /* --dormant-days N(0 이면 기본 90) */
+    int no_git;            /* --no-git: git.exe 를 쓰지 않는다 */
     /* include·exclude 의 쉼표 목록을 잘라 담는 버퍼(argv 를 바꾸지 않으려고 복사) */
     wchar_t ids[1024];
 } CliCleanOptions;

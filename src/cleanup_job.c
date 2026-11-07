@@ -24,6 +24,10 @@ struct CleanupJob {
     CleanupJobSnapshot snapshot;
 
     CleanupResult result; /* 스레드가 끝난 뒤에만 읽는다 */
+
+    int analyze;          /* 탐지 뒤 프로젝트 분석 */
+    ProjectOptions project_opts;
+    ProjectList projects; /* 스레드가 끝난 뒤에만 읽는다 */
 };
 
 /* 긴 경로는 끝부분(현재 폴더 이름 쪽)을 남기고 앞을 "..." 으로 줄인다. */
@@ -73,11 +77,38 @@ static int on_cancel(void *ctx)
     return InterlockedCompareExchange(&job->cancel, 0, 0) != 0;
 }
 
+static void on_project_progress(size_t done, size_t total, void *ctx)
+{
+    CleanupJob *job = ctx;
+    ULONGLONG now = GetTickCount64();
+
+    EnterCriticalSection(&job->lock);
+    job->snapshot.projects_done = done;
+    job->snapshot.projects_total = total;
+    job->snapshot.elapsed_ms = now - job->started;
+    LeaveCriticalSection(&job->lock);
+    if (job->notify != NULL && now - job->last_notify >= job->interval_ms) {
+        job->last_notify = now;
+        job->notify(0, job->ctx);
+    }
+}
+
 static unsigned __stdcall job_thread(void *arg)
 {
     CleanupJob *job = arg;
 
     cleanup_scan(&job->result, job->root, &job->protect, on_progress, on_cancel, job);
+    /* 프로젝트 분석: 탐지를 마쳤을 때만(취소·열지 못함이면 하지 않는다). */
+    if (job->analyze && job->result.status != SCAN_FATAL && !job->result.report.cancelled) {
+        EnterCriticalSection(&job->lock);
+        job->snapshot.analyzing_projects = 1;
+        LeaveCriticalSection(&job->lock);
+        if (job->notify != NULL) {
+            job->notify(0, job->ctx);
+        }
+        project_analyze(&job->result, &job->project_opts, &job->projects, on_cancel,
+                        on_project_progress, job);
+    }
     if (job->notify != NULL) {
         job->notify(1, job->ctx);
     }
@@ -88,6 +119,7 @@ static void job_free(CleanupJob *job)
 {
     DeleteCriticalSection(&job->lock);
     cleanup_result_free(&job->result);
+    project_list_free(&job->projects);
     cleanup_protect_free(&job->protect);
     free(job->root);
     free(job);
@@ -96,6 +128,13 @@ static void job_free(CleanupJob *job)
 CleanupJob *cleanup_job_start(const wchar_t *root, uint32_t interval_ms,
                               cleanup_job_notify_fn notify, void *ctx)
 {
+    return cleanup_job_start_ex(root, interval_ms, NULL, notify, ctx);
+}
+
+CleanupJob *cleanup_job_start_ex(const wchar_t *root, uint32_t interval_ms,
+                                 const ProjectOptions *projects, cleanup_job_notify_fn notify,
+                                 void *ctx)
+{
     CleanupJob *job = calloc(1, sizeof(*job));
 
     if (job == NULL) {
@@ -103,6 +142,11 @@ CleanupJob *cleanup_job_start(const wchar_t *root, uint32_t interval_ms,
     }
     InitializeCriticalSection(&job->lock);
     cleanup_result_init(&job->result);
+    project_list_init(&job->projects);
+    if (projects != NULL) {
+        job->analyze = 1;
+        job->project_opts = *projects;
+    }
     cleanup_protect_init(&job->protect);
     cleanup_protect_add_system(&job->protect);
     /* 앱 데이터 폴더(브라우저·편집기의 데이터베이스)는 정리 후보 탐지에서만 들어가지 않는다. */
@@ -150,6 +194,11 @@ int cleanup_job_wait(CleanupJob *job, uint32_t timeout_ms)
 
 ScanStatus cleanup_job_finish(CleanupJob *job, CleanupResult *out)
 {
+    return cleanup_job_finish_ex(job, out, NULL);
+}
+
+ScanStatus cleanup_job_finish_ex(CleanupJob *job, CleanupResult *out, ProjectList *projects)
+{
     ScanStatus status;
 
     if (job == NULL) {
@@ -163,6 +212,11 @@ ScanStatus cleanup_job_finish(CleanupJob *job, CleanupResult *out)
         cleanup_result_free(out);
         *out = job->result;
         cleanup_result_init(&job->result);
+    }
+    if (projects != NULL) {
+        project_list_free(projects);
+        *projects = job->projects;
+        project_list_init(&job->projects);
     }
     job_free(job);
     return status;

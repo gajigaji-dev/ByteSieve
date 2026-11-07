@@ -386,6 +386,67 @@ static void test_run(void)
     clean_plan_free(&plan);
 }
 
+/* 프로젝트 분석 결과 붙이기: 미커밋 변경 → DIRTY|MANUAL(선택 해제, [모두 선택] 제외), 미푸시·휴면 표시,
+ * 복구 가능성·프로젝트 번호, 요약의 dirty·unpushed. 시스템 대상·범위 밖 번호는 건드리지 않는다. */
+static void test_apply_projects(void)
+{
+    CleanPlan plan;
+    ProjectList pl;
+    ProjectInfo items[2];
+    size_t map[3] = {0, 1, 1};
+    ProjectRecovery rec[3] = {PROJECT_RECOVER_UNLOCKED, PROJECT_RECOVER_LOCKED,
+                              PROJECT_RECOVER_REBUILD};
+    CleanPlanSummary s;
+    CleanPlanTarget *t;
+    size_t i;
+
+    clean_plan_init(&plan);
+    make_dirs(L"apply");
+    write_file(L"apply\\a", 10);
+    for (i = 0; i < 3; i++) {
+        t = add_target(&plan, L"node_modules", 0);
+        t->source = CLEAN_SOURCE_PROJECT;
+        t->origin = i;
+        add_entry(t, L"apply\\a", 0, 10);
+    }
+    t = add_target(&plan, L"user_temp", 0); /* 시스템 대상: 건드리지 않음 */
+    add_entry(t, L"apply\\a", 0, 10);
+    memset(items, 0, sizeof(items));
+    items[0].changes = 2;      /* 작업 중 */
+    items[0].unpushed = 0;
+    items[1].changes = 0;
+    items[1].unpushed = 3;     /* 미푸시 */
+    items[1].dormant = 1;
+    project_list_init(&pl);
+    pl.items = items;
+    pl.len = 2;
+    pl.item_project = map;
+    pl.item_recovery = rec;
+    pl.item_count = 3;
+
+    clean_plan_set_selected(&plan, 0, 1); /* 미리 골라 둔 것도 풀려야 한다 */
+    clean_plan_apply_projects(&plan, &pl);
+    CHECK((plan.items[0].flags & (CLEAN_PLAN_DIRTY | CLEAN_PLAN_MANUAL)) ==
+          (CLEAN_PLAN_DIRTY | CLEAN_PLAN_MANUAL));
+    CHECK(!plan.items[0].selected && !(plan.items[0].flags & CLEAN_PLAN_UNPUSHED));
+    CHECK(plan.items[1].flags == (CLEAN_PLAN_UNPUSHED | CLEAN_PLAN_DORMANT));
+    CHECK(plan.items[0].project == 0 && plan.items[2].project == 1);
+    CHECK(plan.items[0].recovery == PROJECT_RECOVER_UNLOCKED &&
+          plan.items[1].recovery == PROJECT_RECOVER_LOCKED);
+    CHECK(plan.items[3].project == (size_t)-1 && plan.items[3].recovery == -1 &&
+          plan.items[3].flags == 0);
+    /* [모두 선택]은 작업 중인 프로젝트의 후보를 고르지 않고, 직접 고르면 요약에 나온다 */
+    CHECK(clean_plan_select_all(&plan, 1) == 3 && !plan.items[0].selected);
+    clean_plan_set_selected(&plan, 0, 1);
+    clean_plan_summarize(&plan, &s);
+    CHECK(s.targets == 4 && s.dirty == 1 && s.unpushed == 2 && s.manual == 0);
+    /* 다시 붙여도 표시가 쌓이지 않고 같은 결과 */
+    clean_plan_apply_projects(&plan, &pl);
+    CHECK(plan.items[1].flags == (CLEAN_PLAN_UNPUSHED | CLEAN_PLAN_DORMANT));
+    clean_plan_apply_projects(&plan, NULL);
+    clean_plan_free(&plan);
+}
+
 int main(void)
 {
     wchar_t tmp[MAX_PATH];
@@ -402,6 +463,7 @@ int main(void)
     test_from_project();
     test_selection();
     test_run();
+    test_apply_projects();
 
     remove_tree(g_root);
     CoUninitialize();

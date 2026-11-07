@@ -7,6 +7,7 @@
 
 #include "cleanup_scan.h"
 #include "cleanup_trash.h"
+#include "project_info.h"
 
 /*
  * 정리 계획: 탐지 → 계획 → 실행을 GUI([프로젝트 정리]·[시스템 정리])와 CLI(disk-scanner clean)가
@@ -43,7 +44,10 @@ enum {
     CLEAN_PLAN_CAUTION = 1u << 1,      /* 정리 뒤 오프라인 빌드가 안 되는 등 더 주의할 것 */
     CLEAN_PLAN_PERMANENT = 1u << 2,    /* 영구 삭제(휴지통 비우기). 항목이 없다 */
     CLEAN_PLAN_GUESSED = 1u << 3,      /* 프로젝트 표시 파일 없이 이름으로만 추정한 후보 */
-    CLEAN_PLAN_CHECK_RECENT = 1u << 4  /* 실행 직전 최근에 바뀐 항목은 건너뜀(임시 파일·오류 보고서) */
+    CLEAN_PLAN_CHECK_RECENT = 1u << 4, /* 실행 직전 최근에 바뀐 항목은 건너뜀(임시 파일·오류 보고서) */
+    CLEAN_PLAN_DIRTY = 1u << 5,        /* 프로젝트에 커밋하지 않은 변경이 있음(MANUAL 도 붙는다) */
+    CLEAN_PLAN_UNPUSHED = 1u << 6,     /* 프로젝트에 원격에 없는 커밋이 있음(또는 원격과 다름) */
+    CLEAN_PLAN_DORMANT = 1u << 7       /* 휴면 프로젝트(마지막 활동이 기준 일수보다 오래됨) */
 };
 
 /* 실행할 때 항목을 옮기지 않고 건너뛴 이유. */
@@ -77,6 +81,8 @@ typedef struct {
     CleanupCategory category; /* 프로젝트 후보의 유형 */
     CleanupEco eco;           /* 프로젝트 후보의 개발 환경 */
     size_t origin;     /* 원래 탐지 결과의 번호(CleanupResult.items / CleanerList.items) */
+    size_t project;    /* 프로젝트 정리: ProjectList 의 프로젝트 번호(모르면 (size_t)-1) */
+    int recovery;      /* 프로젝트 정리: ProjectRecovery(모르면 -1) */
     unsigned flags;    /* CLEAN_PLAN_* */
     int ready;         /* 탐지 결과상 정리할 수 있음(시스템: READY, 프로젝트: 경로 판정 통과) */
     CleanupTrashStatus deny; /* 경로 판정에서 거부된 이유(PENDING 이면 통과) */
@@ -120,6 +126,14 @@ int clean_plan_add_entry(CleanPlanTarget *t, const CleanupItem *item, const wcha
  */
 int clean_plan_from_project(CleanPlan *plan, const CleanupResult *r, const CleanupGuard *guard);
 
+/*
+ * 프로젝트 분석(project_info.h) 결과를 프로젝트 정리 계획에 붙인다. plan 은 clean_plan_from_project 로
+ * 만든 같은 탐지 결과의 계획이어야 한다(origin 이 후보 번호). 대상마다 project·recovery 를 두고,
+ * 미커밋 변경이 있는 프로젝트의 후보는 DIRTY|MANUAL([모두 선택]에서 빠짐, 이미 골랐으면 선택을 푼다),
+ * 미푸시 커밋이 있으면 UNPUSHED, 휴면이면 DORMANT 를 붙인다.
+ */
+void clean_plan_apply_projects(CleanPlan *plan, const ProjectList *projects);
+
 /* 고를 수 있는지: 정리할 수 있고, 옮길 항목이 남아 있음(아직 시도 안 했거나 다시 해 볼 만한 실패·취소). */
 int clean_plan_selectable(const CleanPlanTarget *t);
 
@@ -145,6 +159,8 @@ typedef struct {
     size_t manual;     /* 고른 대상 중 MANUAL(영구 삭제 제외) */
     size_t guessed;    /* 고른 대상 중 GUESSED */
     size_t permanent;  /* 고른 대상 중 PERMANENT */
+    size_t dirty;      /* 고른 대상 중 DIRTY(커밋하지 않은 변경이 있는 프로젝트) */
+    size_t unpushed;   /* 고른 대상 중 UNPUSHED */
     uint64_t permanent_bytes;
     size_t selectable; /* 고를 수 있는 대상 수 */
 } CleanPlanSummary;
