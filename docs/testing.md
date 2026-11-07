@@ -4,13 +4,16 @@
 ctest --test-dir build -C Debug --output-on-failure
 ```
 
-CTest에 등록된 테스트는 73개입니다.
+CTest에 등록된 테스트는 75개입니다.
 
 | 분류 | 테스트 | 확인 내용 |
 |---|---|---|
-| 단위 테스트(26개) | `path`, `scanner`, `scan_alloc`, `scan_parallel`, `hardlink`, `scan_model`, `scan_history`, `export`, `scan_job`, `jsonl`, `cli`, `cli_clean`, `drive`, `sysmon`, `size_format`, `treemap`, `ui_lang`, `cleanup_rules`, `clean_plan`, `reclaim`, `cleanup_scan`, `cleanup_trash`, `dev_cache`, `quarantine`, `cleaner`, `booster` | 아래 참고 |
-| CLI·도구 검사(30개) | `no_args`, `help`, `scan_*`, `cli_*`, `bench_smoke` | 종료 코드, 텍스트·JSONL 출력, 인자 오류, 접근 거부 픽스처, 격리 폴더 제외(`cli_skip_quarantine`·`cli_jsonl_skip_quarantine`), `--track` 기준 → 변경 → 비교(`cli_track`), 정리 후보 찾기(`cli_find`: 크기순 목록·확인됨/추정 표시, 아무것도 옮기지 않음, `--json` 문서를 해석해 필드 확인, `--category`·`--jsonl`, 실행 옵션 거부, 없는 폴더는 2와 실패 문서), 정리 명령(`cli_clean_project`·`cli_clean_system`: 기본·`--dry-run`은 아무것도 옮기지 않고 예상 결과를 보임, `--json` dry-run·실행 문서를 해석해 `mode`·`executed`·`summary`·`totals`·대상별 `result`·`exit_code` 확인, 대화형이 아닌 입력에서 `--yes` 없는 `--execute` 거부, 예전 이름 `--apply`도 실행, 유형 거르기·JSON Lines 실행, 공용 개발 캐시는 `--include`로만, `recycle_bin` 거부, 옮긴 항목은 픽스처의 격리 폴더로), 성능 측정 도구의 스캐너 진단 출력(`bench_smoke`) |
+| 단위 테스트(27개) | `path`, `scanner`, `scan_alloc`, `scan_parallel`, `hardlink`, `scan_model`, `scan_history`, `export`, `scan_job`, `jsonl`, `cli`, `cli_clean`, `drive`, `sysmon`, `size_format`, `treemap`, `ui_lang`, `cleanup_rules`, `project`, `clean_plan`, `reclaim`, `cleanup_scan`, `cleanup_trash`, `dev_cache`, `quarantine`, `cleaner`, `booster` | 아래 참고 |
+| CLI·도구 검사(30개) | `no_args`, `help`, `scan_*`, `cli_*`, `bench_smoke` | 종료 코드, 텍스트·JSONL 출력, 인자 오류, 접근 거부 픽스처, 격리 폴더 제외(`cli_skip_quarantine`·`cli_jsonl_skip_quarantine`), `--track` 기준 → 변경 → 비교(`cli_track`), 정리 후보 찾기(`cli_find`: 프로젝트마다 자기 Git 저장소를 만들어 휴면(2020년 커밋)·미커밋 변경·원격 없는 커밋·lockfile 복구 가능성·`--dormant-days`·`--no-git`(직접 읽기)·`project` 이벤트를 확인, git 이 없으면 Git 확인은 건너뜀, 크기순 목록·확인됨/추정 표시, 아무것도 옮기지 않음, `--json` 문서를 해석해 필드 확인, `--category`·`--jsonl`, 실행 옵션 거부, 없는 폴더는 2와 실패 문서), 정리 명령(`cli_clean_project`·`cli_clean_system`: 기본·`--dry-run`은 아무것도 옮기지 않고 예상 결과를 보임, `--json` dry-run·실행 문서를 해석해 `mode`·`executed`·`summary`·`totals`·대상별 `result`·`exit_code` 확인, 대화형이 아닌 입력에서 `--yes` 없는 `--execute` 거부, 예전 이름 `--apply`도 실행, 유형 거르기·JSON Lines 실행, 공용 개발 캐시는 `--include`로만, `recycle_bin` 거부, 옮긴 항목은 픽스처의 격리 폴더로), 성능 측정 도구의 스캐너 진단 출력(`bench_smoke`) |
 | GUI 자체 검사(18개) | `gui_scan`, `gui_cancel`, `gui_missing_dir`, `gui_drives`, `gui_cleanup`, `gui_cleanup_cancel`, `gui_trash`, `gui_quarantine`, `gui_history`, `gui_precise`, `gui_export`, `gui_monitor`, `gui_cleaner`, `gui_booster`, `gui_lang_ko`, `gui_lang_en`, `gui_lang_ja`, `gui_lang_zh-Hans` | 숨긴 창에서 실제 작업을 실행하고 화면 상태를 검증(`gui_scan`은 트리맵, `gui_drives`는 암호화 열, `gui_cleanup`은 프로젝트 정리 탭의 실제 확보 열 포함). `gui_cleaner`(시스템 정리 탭)는 사용자 폴더·TEMP 를 픽스처로 돌리고 [모두 선택]이 휴지통·개발 도구 캐시를 고르지 않는지, Gradle 래퍼 캐시가 "정리 가능 · 주의"로 표시되는지, 예전 `gui_cache`가 보던 공용 캐시(npm·pip·Gradle·Cargo·NuGet)의 위치 근거와 캐시 구조가 아닌 위치(`NUGET_HTTP_CACHE_PATH` → 문서 폴더)가 이유와 함께 정리되지 않는지, 하드 링크로 캐시 밖과 나누는 파일이 실제 확보에서 빠지는지 확인한 뒤 개발 도구 캐시를 직접 체크해 정리한 항목을 픽스처의 격리 폴더로 보내며(실제 휴지통은 조회만 하고 비우지 않음, 도구 설정·설치한 도구는 남음), `gui_booster`는 목록·CPU 측정·보호 판정만 확인하고 아무것도 바꾸지 않음. `gui_lang_*`는 언어마다 번역 문구·언어별 글꼴과, 최소 창 크기에서 폴더 스캔 탭 단추 문구가 잘리지 않고 탭 영역 안에 있는지 확인 |
+
+예제 폴더가 빌드 폴더(이 저장소) 안에 있는 검사(`gui_trash`, `gui_quarantine`, `cli_clean_project`, `cli_clean_system`)는 `BYTESIEVE_GIT=none`으로 실행해
+작업 트리의 Git 상태(미커밋 변경)에 결과가 좌우되지 않게 합니다. Git 동작은 자기 저장소를 만드는 `project`·`cli_find`가 확인합니다.
 
 ## 주요 단위 테스트 범위
 
@@ -46,10 +49,15 @@ CTest에 등록된 테스트는 73개입니다.
 - `drive`·`sysmon`: 가짜 조회 함수로 이동식 드라이브 오류·API 실패·이상값 재현. 암호화: 셸 속성 값 → 상태 변환(알려진 값·모르는 값·값 없음),
   상태마다 식별자·화면 문구, 목록을 만들 때 실패 항목의 용량은 지우고 암호화 상태(잠김)는 남기는지, 실제 시스템 드라이브는 관리자 권한 없이
   상태를 읽고 네트워크·광학·없는 드라이브는 조회하지 않는지(`gui_drives`도 암호화 열 문구를 확인)
-- `clean_plan`: 프로젝트 후보 → 계획(순서·경로 판정·보호 경로 거부·추정 표시·용량), 선택 정책([모두 선택]은 MANUAL 제외, id 로 직접 고르기,
+- `project`: git.exe 로 임시 폴더에 저장소를 만들어(2020년 커밋을 bare 원격에 push 한 저장소, 원격 없이 추적 안 하는 파일이 있는 저장소,
+  Git 이 아닌 폴더) 프로젝트별 묶기·루트·브랜치·마지막 커밋·마지막 수정·미커밋 변경·미푸시·원격·휴면(기준 일수 포함)·복구 가능성을 확인하고,
+  git.exe 를 쓰지 않을 때(.git 직접 읽기: 브랜치·reflog 시각·원격 ref 비교, 미커밋은 모름)도 같은 픽스처로 확인한다. git 이 없으면 Git 부분은 건너뛴다.
+- `clean_plan`: 프로젝트 분석 결과 붙이기(미커밋 → DIRTY·MANUAL·선택 해제, 미푸시·휴면 표시, 복구 가능성, 요약의 dirty·unpushed),
+  프로젝트 후보 → 계획(순서·경로 판정·보호 경로 거부·추정 표시·용량), 선택 정책([모두 선택]은 MANUAL 제외, id 로 직접 고르기,
   고를 수 없는 대상, 요약), 실행(영구 삭제는 `allow_permanent`일 때만 그리고 다른 항목보다 먼저, 실행 중 프로그램·최근 변경은 건너뜀, 사용 중 파일은
   실패로 남기고 선택을 유지해 다시 실행하면 옮김, 다 옮긴 대상은 다시 실행하지 않음, 할 것이 없으면 실행하지 않음). 옮긴 항목은 픽스처의 격리 폴더로 간다.
-- `cli_clean`: `disk-scanner clean`·`find` 인자 해석(목록·`=` 형식·`--`, 알 수 없는 이름·옵션·명령, `--yes`는 `--execute`와 함께만, `--dry-run`·`--execute`와
+- `cli_clean`: 프로젝트 분석 옵션(`--include-dirty`는 clean project 만, `--dormant-days` 범위, `--no-git`)과 `--include-dirty` 선택,
+  `disk-scanner clean`·`find` 인자 해석(목록·`=` 형식·`--`, 알 수 없는 이름·옵션·명령, `--yes`는 `--execute`와 함께만, `--dry-run`·`--execute`와
   `--json`·`--jsonl`은 함께 쓸 수 없음, `--apply`는 `--execute`와 같음, `find`에는 실행·시스템 대상 옵션이 없음, 명령에 맞지 않는 옵션,
   `recycle_bin` 거부)과 선택(기본은 [모두 선택]과 같음, `--include` 이름·`dev_cache`, `--exclude`, 프로젝트 `--category`·`--eco`, 영구 삭제 항상 제외),
   `find` 거르기(보호된 후보도 보임, 시스템 대상은 아님).

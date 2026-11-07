@@ -52,6 +52,7 @@
 | `bytesieve_drive` / `bytesieve_sysmon` / `bytesieve_format` | 드라이브 조회(용량, BitLocker 상태: 셸 속성 `System.Volume.BitLockerProtection`), RAM·CPU 측정, 용량 표시 문자열 |
 | `bytesieve_treemap` | 스퀘어리파이드 트리맵 배치(순수 계산, GUI 트리맵 보기 `gui_treemap`이 사용) |
 | `bytesieve_cli` / `bytesieve_jsonl` | CLI 인자 해석·출력, JSON Lines 직렬화(정리 명령용 일반 이벤트 도우미 포함) |
+| `bytesieve_project` | Git 기반 프로젝트 분석: 후보를 프로젝트(가장 가까운 Git 저장소, 없으면 폴더)별로 묶기, git.exe 읽기 전용 실행(`--no-optional-locks`, `core.fsmonitor=false`, 시간 제한)·없으면 `.git` 직접 읽기, 파일 마지막 수정, 휴면 판정, 후보별 복구 가능성(lockfile). 탐지 작업(`cleanup_job_start_ex`)이 같은 스레드에서 부른다 |
 | `bytesieve_plan` | 정리 계획: 탐지 결과를 대상(선택 단위)·실행 항목으로 바꾸고, 선택 정책([모두 선택]은 MANUAL 제외)·요약·실행 엔진(영구 삭제는 `allow_permanent` 일 때만 먼저, 실행 직전 실행 중 프로그램·최근 변경 확인, 항목마다 `cleanup_trash_one`)을 GUI 두 정리 탭과 CLI에 똑같이 제공 |
 | `bytesieve_cli_clean` | `disk-scanner find`·`clean project|system`: 인자 해석, CLI 선택(필터·`--include`·`--exclude`, 영구 삭제 항상 제외), 후보 목록(find, 읽기 전용)·dry-run·확인·실행(`--execute`), 텍스트·JSON 문서(`--json`, `"version":1`)·JSON Lines 출력, 공통 종료 코드. 탐지는 GUI와 같은 `cleanup_job`·`cleaner_analyze` |
 | `bytesieve_cleaner` | 시스템 정리(Cleaner): 사용자 임시 파일·오류 보고서·휴지통·브라우저 캐시·공용 개발 캐시 분석(읽기 전용, 위치 근거·캐시 위치 문제 포함, 항목마다 실제 확보 용량), 분석 결과 → 정리 계획(`cleaner_build_plan`), 분석 작업 스레드. 기존 실행 API(`cleaner_run_*`)는 계획 실행 엔진을 감싼다 |
@@ -78,6 +79,8 @@ GUI 안의 `gui_theme`은 창 외곽(DWM 둥근 모서리·Mica), 언어별 UI �
 - 계획 대상의 순서는 탐지 결과와 같아(`origin`) GUI 목록의 행과 1:1로 맞습니다.
 - 한 번 실행한 뒤에도 실패·취소한 항목이 남은 대상은 다시 고를 수 있고(선택이 남음), 다 옮긴 대상·건너뛴 대상(최근 변경·실행 중)은 다시 분석해야 합니다.
 - 실행은 영구 삭제 대상을 먼저, 그다음 큰 대상부터 처리합니다.
+- 프로젝트 정리는 계획에 프로젝트 분석(`clean_plan_apply_projects`)을 붙여, 미커밋 변경이 있는 프로젝트의 후보를 MANUAL([모두 선택] 제외)로,
+  미푸시·휴면을 표시로, 후보마다 복구 가능성을 둡니다.
 - CLI는 같은 계획 위에 정책 하나를 더합니다: 영구 삭제 대상은 어떤 경우에도 고르지 않고 `allow_permanent`도 언제나 0입니다.
 
 ## 오류 처리

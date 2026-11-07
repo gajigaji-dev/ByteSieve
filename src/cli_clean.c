@@ -19,7 +19,8 @@ void cli_clean_print_usage(FILE *out)
 {
     fwprintf(out,
              L"Usage:\n"
-             L"  disk-scanner clean project <directory> [--category LIST] [--eco LIST]\n"
+             L"  disk-scanner clean project <directory> [--category LIST] [--eco LIST] [--include-dirty]\n"
+             L"                             [--dormant-days N] [--no-git]\n"
              L"                             [--dry-run | --execute [--yes]] [--json | --jsonl]\n"
              L"  disk-scanner clean system [--include LIST] [--exclude LIST]\n"
              L"                            [--dry-run | --execute [--yes]] [--json | --jsonl]\n"
@@ -39,6 +40,10 @@ void cli_clean_print_usage(FILE *out)
              L"                    selected by default: name them (npm,pip,gradle,gradle_wrapper,\n"
              L"                    cargo_registry,cargo_git,nuget_packages,nuget_http) or use dev_cache\n"
              L"  --exclude LIST    system: do not select these targets (user_temp,wer,chrome,edge,firefox,...)\n"
+             L"  --include-dirty   project: also select candidates in projects with uncommitted changes\n"
+             L"                    (they are never selected by default)\n"
+             L"  --dormant-days N  project: a project is dormant after N days without activity (default 90)\n"
+             L"  --no-git          project: do not run git.exe; read .git directly (less detail)\n"
              L"  --dry-run         show the plan and expected result only (default)\n"
              L"  --execute         move the selected targets to the Recycle Bin (quarantine folder on\n"
              L"                    drives without one) after confirmation. Never deletes permanently.\n"
@@ -55,7 +60,8 @@ void cli_find_print_usage(FILE *out)
 {
     fwprintf(out,
              L"Usage:\n"
-             L"  disk-scanner find <directory> [--category LIST] [--eco LIST] [--json | --jsonl]\n"
+             L"  disk-scanner find <directory> [--category LIST] [--eco LIST] [--dormant-days N]\n"
+             L"                    [--no-git] [--json | --jsonl]\n"
              L"  disk-scanner find -h | --help\n"
              L"\n"
              L"Lists project cleanup candidates (node_modules, build output, caches, temp files, logs)\n"
@@ -66,8 +72,14 @@ void cli_find_print_usage(FILE *out)
              L"Options:\n"
              L"  --category LIST   only these types (node_modules,build,cache,temp,log)\n"
              L"  --eco LIST        only these ecosystems (node,python,rust,java,dotnet,cpp,go,generic)\n"
+             L"  --dormant-days N  a project is dormant after N days without activity (default 90)\n"
+             L"  --no-git          do not run git.exe; read .git directly (less detail)\n"
              L"  --json            write one JSON document (UTF-8) to stdout\n"
              L"  --jsonl           write JSON Lines events (UTF-8) to stdout\n"
+             L"\n"
+             L"Candidates are grouped by project (Git repository, or the folder that holds them) with\n"
+             L"the last commit, last file change, dormancy, uncommitted changes and unpushed commits,\n"
+             L"and whether each candidate can be restored after deletion.\n"
              L"\n"
              L"Exit codes: 0 complete, 1 some folders could not be read, 2 error.\n");
 }
@@ -233,7 +245,43 @@ CliParseResult cli_clean_parse_args(int argc, wchar_t **argv, CliCleanOptions *o
                 flag = &opts->json;
             } else if (wcscmp(arg, L"--jsonl") == 0) {
                 flag = &opts->jsonl;
+            } else if (wcscmp(arg, L"--include-dirty") == 0 || wcscmp(arg, L"--no-git") == 0) {
+                /* 프로젝트 분석 옵션: find·clean project 만 */
+                if (opts->command == CLI_CLEAN_SYSTEM ||
+                    (opts->command == CLI_CLEAN_FIND && arg[2] == L'i')) {
+                    swprintf(err, err_len, L"%ls is not valid for %ls", arg, cmd);
+                    return CLI_PARSE_ERROR;
+                }
+                if (arg[2] == L'i') {
+                    opts->include_dirty = 1;
+                } else {
+                    opts->no_git = 1;
+                }
+                continue;
             }
+        }
+        if (!options_done && is_opt(arg, L"--dormant-days", &value)) {
+            wchar_t *end = NULL;
+            unsigned long days;
+            if (opts->command == CLI_CLEAN_SYSTEM) {
+                swprintf(err, err_len, L"--dormant-days is not valid for %ls", cmd);
+                return CLI_PARSE_ERROR;
+            }
+            if (value == NULL) {
+                if (i + 1 >= argc) {
+                    swprintf(err, err_len, L"--dormant-days requires a value");
+                    return CLI_PARSE_ERROR;
+                }
+                value = argv[++i];
+            }
+            days = wcstoul(value, &end, 10);
+            if (end == value || *end != L'\0' || days == 0 || days > 36500 || value[0] == L'-') {
+                swprintf(err, err_len, L"--dormant-days must be a number of days (1-36500): %ls",
+                         value);
+                return CLI_PARSE_ERROR;
+            }
+            opts->dormant_days = (unsigned)days;
+            continue;
         }
         if (flag != NULL) {
             /* find 는 읽기 전용: 실행 관련 옵션이 없다. */
@@ -311,6 +359,200 @@ CliParseResult cli_clean_parse_args(int argc, wchar_t **argv, CliCleanOptions *o
     return CLI_PARSE_OK;
 }
 
+/* ---- 프로젝트(Git) 정보 ---- */
+
+/* 지금 실행의 프로젝트 분석 결과(find·clean project). CLI 는 한 스레드에서만 실행한다. */
+static const ProjectList *g_projects;
+
+static const ProjectInfo *project_at(const CleanPlanTarget *t)
+{
+    return g_projects != NULL && t->project < g_projects->len ? &g_projects->items[t->project]
+                                                              : NULL;
+}
+
+static uint64_t ft_to_unix(uint64_t ft)
+{
+    return ft > 116444736000000000ull ? (ft - 116444736000000000ull) / 10000000ull : 0;
+}
+
+/* FILETIME(UTC) → 현지 날짜 "YYYY-MM-DD"(0 이면 "-"). */
+static void date_text(uint64_t ft, wchar_t *buf, size_t len)
+{
+    FILETIME u, l;
+    SYSTEMTIME st;
+
+    if (ft == 0) {
+        swprintf(buf, len, L"-");
+        return;
+    }
+    u.dwLowDateTime = (DWORD)ft;
+    u.dwHighDateTime = (DWORD)(ft >> 32);
+    if (!FileTimeToLocalFileTime(&u, &l) || !FileTimeToSystemTime(&l, &st)) {
+        swprintf(buf, len, L"-");
+        return;
+    }
+    swprintf(buf, len, L"%04u-%02u-%02u", st.wYear, st.wMonth, st.wDay);
+}
+
+/* 프로젝트 한 줄 설명: "git main · last activity 2020-01-15 (1757 days ago) · dormant · ..." */
+static void project_line(const ProjectInfo *p, wchar_t *buf, size_t len)
+{
+    wchar_t date[32];
+    size_t used;
+
+    date_text(p->last_activity, date, 32);
+    if (p->is_git) {
+        used = (size_t)swprintf(buf, len, L"git %ls%ls", p->branch != NULL ? p->branch : L"?",
+                                p->git_source == PROJECT_GIT_DIRECT ? L" (read .git)" : L"");
+    } else {
+        used = (size_t)swprintf(buf, len, L"not git");
+    }
+    used += (size_t)swprintf(buf + used, len - used, L" | last activity %ls", date);
+    if (p->last_activity != 0) {
+        used += (size_t)swprintf(buf + used, len - used, L" (%u days ago)", p->age_days);
+    }
+    if (p->dormant) {
+        used += (size_t)swprintf(buf + used, len - used, L" | DORMANT");
+    }
+    if (p->changes > 0) {
+        used += (size_t)swprintf(buf + used, len - used, L" | UNCOMMITTED CHANGES: %d",
+                                 p->changes);
+    } else if (p->is_git && p->changes < 0) {
+        used += (size_t)swprintf(buf + used, len - used, L" | uncommitted changes unknown");
+    }
+    if (p->is_git && p->has_remote == 0 && p->unpushed > 0) {
+        used += (size_t)swprintf(buf + used, len - used,
+                                 L" | NO REMOTE: %d commit(s) only on this PC", p->unpushed);
+    } else if (p->unpushed > 0) {
+        used += (size_t)swprintf(buf + used, len - used, L" | UNPUSHED COMMITS: %d", p->unpushed);
+    } else if (p->remote_differs) {
+        used += (size_t)swprintf(buf + used, len - used, L" | DIFFERS FROM REMOTE");
+    }
+    if (p->modified_incomplete) {
+        swprintf(buf + used, len - used, L" | partly scanned");
+    }
+}
+
+static void print_projects(FILE *out)
+{
+    size_t i, dormant = 0, dirty = 0, unpushed = 0;
+    wchar_t line[512];
+
+    if (g_projects == NULL || g_projects->len == 0) {
+        return;
+    }
+    for (i = 0; i < g_projects->len; i++) {
+        const ProjectInfo *p = &g_projects->items[i];
+        dormant += p->dormant != 0;
+        dirty += p->changes > 0;
+        unpushed += p->unpushed > 0 || p->remote_differs;
+    }
+    fwprintf(out, L"Projects: %u (%u dormant after %u days, %u with uncommitted changes, %u with "
+                  L"unpushed commits)%ls\n",
+             (unsigned)g_projects->len, (unsigned)dormant, g_projects->dormant_days,
+             (unsigned)dirty, (unsigned)unpushed,
+             g_projects->git_available ? L"" : L" - git.exe not used, .git read directly");
+    for (i = 0; i < g_projects->len; i++) {
+        const ProjectInfo *p = &g_projects->items[i];
+        project_line(p, line, 512);
+        fwprintf(out, L"  P%-3u %ls\n       %ls\n", (unsigned)(i + 1), p->root, line);
+    }
+}
+
+static void json_int_or_null(JsonBuf *b, const char *key, int v)
+{
+    if (v < 0) {
+        jsonl_field_key(b, key);
+        jsonl_raw(b, "null");
+    } else {
+        jsonl_field_u64(b, key, (uint64_t)v);
+    }
+}
+
+static void json_time(JsonBuf *b, const char *key, uint64_t ft)
+{
+    if (ft == 0) {
+        jsonl_field_key(b, key);
+        jsonl_raw(b, "null");
+    } else {
+        jsonl_field_u64(b, key, ft_to_unix(ft));
+    }
+}
+
+/* 프로젝트 하나의 필드(객체를 연 뒤). 시각은 유닉스 초(UTC), 모르면 null. */
+static void json_project_fields(JsonBuf *b, const ProjectInfo *p, size_t index)
+{
+    jsonl_field_u64(b, "index", index + 1);
+    jsonl_field_string(b, "root", p->root);
+    jsonl_field_bool(b, "git", p->is_git);
+    jsonl_field_string(b, "git_source", project_git_source_name(p->git_source));
+    jsonl_field_string(b, "branch", p->branch);
+    json_time(b, "last_commit", p->last_commit);
+    json_time(b, "last_modified", p->last_modified);
+    json_time(b, "last_activity", p->last_activity);
+    jsonl_field_u64(b, "age_days", p->age_days);
+    jsonl_field_bool(b, "dormant", p->dormant);
+    json_int_or_null(b, "changes", p->changes);
+    json_int_or_null(b, "unpushed", p->unpushed);
+    if (p->has_remote < 0) {
+        jsonl_field_key(b, "has_remote");
+        jsonl_raw(b, "null");
+    } else {
+        jsonl_field_bool(b, "has_remote", p->has_remote);
+    }
+    jsonl_field_bool(b, "remote_differs", p->remote_differs);
+    jsonl_field_bool(b, "modified_incomplete", p->modified_incomplete);
+    jsonl_field_u64(b, "candidates", p->candidates);
+}
+
+/* --json 의 "projects" 배열(키 포함). */
+static void json_projects(JsonBuf *b)
+{
+    size_t i;
+
+    jsonl_field_key(b, "projects");
+    jsonl_raw(b, "[");
+    for (i = 0; g_projects != NULL && i < g_projects->len; i++) {
+        jsonl_raw(b, i == 0 ? "{" : ",{");
+        json_project_fields(b, &g_projects->items[i], i);
+        jsonl_raw(b, "}");
+    }
+    jsonl_raw(b, "]");
+    if (g_projects != NULL) {
+        jsonl_field_u64(b, "dormant_days", g_projects->dormant_days);
+        jsonl_field_bool(b, "git_available", g_projects->git_available);
+    }
+}
+
+/* --jsonl 의 "project" 이벤트들. */
+static void jsonl_projects(JsonBuf *b)
+{
+    size_t i;
+
+    for (i = 0; g_projects != NULL && i < g_projects->len; i++) {
+        jsonl_begin_event(b, "project");
+        json_project_fields(b, &g_projects->items[i], i);
+        jsonl_end_event(b);
+    }
+}
+
+/* 대상의 프로젝트 번호(1부터)·복구 가능성·프로젝트 경고 필드. */
+static void json_project_ref(JsonBuf *b, const CleanPlanTarget *t)
+{
+    if (t->project != (size_t)-1) {
+        jsonl_field_u64(b, "project", t->project + 1);
+    } else {
+        jsonl_field_key(b, "project");
+        jsonl_raw(b, "null");
+    }
+    jsonl_field_string(b, "recovery",
+                       t->recovery >= 0 ? project_recovery_name((ProjectRecovery)t->recovery)
+                                        : NULL);
+    jsonl_field_bool(b, "dirty", (t->flags & CLEAN_PLAN_DIRTY) != 0);
+    jsonl_field_bool(b, "unpushed", (t->flags & CLEAN_PLAN_UNPUSHED) != 0);
+    jsonl_field_bool(b, "dormant", (t->flags & CLEAN_PLAN_DORMANT) != 0);
+}
+
 /* ---- 선택 ---- */
 
 /* 공용 개발 캐시: 시스템 정리에서 직접 골라야 하는 대상 중 영구 삭제가 아닌 것. */
@@ -353,6 +595,14 @@ size_t cli_clean_select(CleanPlan *plan, const CliCleanOptions *opts)
             clean_plan_set_selected(plan, i, 0);
         }
     }
+    /* 미커밋 변경이 있는 프로젝트의 후보(DIRTY, MANUAL)는 --include-dirty 일 때만 고른다. */
+    for (i = 0; opts->include_dirty && i < plan->len; i++) {
+        const CleanPlanTarget *t = &plan->items[i];
+        if (t->source == CLEAN_SOURCE_PROJECT && (t->flags & CLEAN_PLAN_DIRTY) &&
+            cli_clean_matches(t, opts)) {
+            clean_plan_set_selected(plan, i, 1);
+        }
+    }
     for (i = 0; i < opts->include_count; i++) {
         select_named(plan, opts->include[i], 1);
     }
@@ -373,11 +623,20 @@ size_t cli_clean_select(CleanPlan *plan, const CliCleanOptions *opts)
 
 static void flags_text(const CleanPlanTarget *t, wchar_t *buf, size_t len)
 {
+    size_t used;
+
     buf[0] = L'\0';
-    swprintf(buf, len, L"%ls%ls%ls%ls", (t->flags & CLEAN_PLAN_MANUAL) ? L"manual," : L"",
+    used = (size_t)swprintf(buf, len, L"%ls%ls%ls%ls%ls%ls%ls",
+             (t->flags & CLEAN_PLAN_MANUAL) && !(t->flags & CLEAN_PLAN_DIRTY) ? L"manual," : L"",
              (t->flags & CLEAN_PLAN_CAUTION) ? L"caution," : L"",
              (t->flags & CLEAN_PLAN_GUESSED) ? L"guessed," : L"",
-             (t->flags & CLEAN_PLAN_PERMANENT) ? L"permanent," : L"");
+             (t->flags & CLEAN_PLAN_PERMANENT) ? L"permanent," : L"",
+             (t->flags & CLEAN_PLAN_DIRTY) ? L"uncommitted," : L"",
+             (t->flags & CLEAN_PLAN_UNPUSHED) ? L"unpushed," : L"",
+             (t->flags & CLEAN_PLAN_DORMANT) ? L"dormant," : L"");
+    if (t->project != (size_t)-1) {
+        swprintf(buf + used, len - used, L"P%u,", (unsigned)(t->project + 1));
+    }
     if (buf[0] != L'\0') {
         buf[wcslen(buf) - 1] = L'\0';
     } else {
@@ -390,9 +649,10 @@ static void print_plan(FILE *out, const CleanPlan *plan, const CliCleanOptions *
 {
     CleanPlanSummary s;
     size_t i;
-    wchar_t reclaim[32], size[32], flags[64];
+    wchar_t reclaim[32], size[32], flags[128];
 
     if (opts->command == CLI_CLEAN_PROJECT) {
+        print_projects(out);
         fwprintf(out, L"Project cleanup plan: %ls\n", root);
     } else {
         fwprintf(out, L"System cleanup plan\n");
@@ -408,7 +668,7 @@ static void print_plan(FILE *out, const CleanPlan *plan, const CliCleanOptions *
         const wchar_t *mark = t->selected ? L"[x]" : clean_plan_selectable(t) ? L"[ ]" : L"[-]";
         format_size(t->reclaim, reclaim, 32);
         format_size(t->bytes, size, 32);
-        flags_text(t, flags, 64);
+        flags_text(t, flags, 128);
         fwprintf(out, L"  %-4u %-4ls %-10ls %-10ls %-16ls %-24ls %ls",
                  (unsigned)(i + 1), mark, t->ready ? reclaim : L"-", t->ready ? size : L"-",
                  t->state, t->id != NULL ? t->id : L"", t->location != NULL ? t->location : L"");
@@ -435,6 +695,28 @@ static void print_plan(FILE *out, const CleanPlan *plan, const CliCleanOptions *
         fwprintf(out, L"Guessed: %u selected target(s) have no project file next to them and may "
                       L"not be build output.\n",
                  (unsigned)s.guessed);
+    }
+    if (s.dirty > 0) {
+        fwprintf(out, L"Uncommitted changes: %u selected target(s) are in projects with uncommitted "
+                      L"changes.\n",
+                 (unsigned)s.dirty);
+    }
+    if (s.unpushed > 0) {
+        fwprintf(out, L"Unpushed commits: %u selected target(s) are in projects whose commits are "
+                      L"not on any remote.\n",
+                 (unsigned)s.unpushed);
+    }
+    {
+        size_t held = 0;
+        for (i = 0; i < plan->len; i++) {
+            held += (plan->items[i].flags & CLEAN_PLAN_DIRTY) && !plan->items[i].selected &&
+                    clean_plan_selectable(&plan->items[i]);
+        }
+        if (held > 0) {
+            fwprintf(out, L"%u target(s) in projects with uncommitted changes were not selected; "
+                          L"add --include-dirty to include them.\n",
+                     (unsigned)held);
+        }
     }
     for (i = 0; i < plan->len; i++) {
         if (is_dev_cache(&plan->items[i]) && !plan->items[i].selected &&
@@ -550,6 +832,9 @@ static void json_target_fields(JsonBuf *b, const CleanPlanTarget *t, size_t inde
     jsonl_field_bool(b, "caution", (t->flags & CLEAN_PLAN_CAUTION) != 0);
     jsonl_field_bool(b, "guessed", (t->flags & CLEAN_PLAN_GUESSED) != 0);
     jsonl_field_bool(b, "permanent", (t->flags & CLEAN_PLAN_PERMANENT) != 0);
+    if (t->source == CLEAN_SOURCE_PROJECT) {
+        json_project_ref(b, t);
+    }
 }
 
 static void json_summary(JsonBuf *b, const CleanPlanSummary *s)
@@ -563,6 +848,8 @@ static void json_summary(JsonBuf *b, const CleanPlanSummary *s)
     jsonl_field_u64(b, "caution", s->caution);
     jsonl_field_u64(b, "manual", s->manual);
     jsonl_field_u64(b, "guessed", s->guessed);
+    jsonl_field_u64(b, "dirty", s->dirty);
+    jsonl_field_u64(b, "unpushed", s->unpushed);
     jsonl_raw(b, "}");
 }
 
@@ -632,6 +919,9 @@ static void json_clean_doc(JsonBuf *b, const CliCleanOptions *opts, const CleanP
         jsonl_raw(b, "}");
     }
     jsonl_raw(b, "]");
+    if (opts->command == CLI_CLEAN_PROJECT) {
+        json_projects(b);
+    }
     jsonl_field_key(b, "totals");
     if (executed) {
         json_totals(b, tot);
@@ -656,6 +946,7 @@ static void jsonl_plan(JsonBuf *buf, const CleanPlan *plan, const CliCleanOption
     jsonl_field_string(buf, "root", root);
     jsonl_field_u64(buf, "targets", plan->len);
     jsonl_end_event(buf);
+    jsonl_projects(buf);
     for (i = 0; i < plan->len; i++) {
         jsonl_begin_event(buf, "clean_target");
         json_target_fields(buf, &plan->items[i], i);
@@ -780,6 +1071,15 @@ static void find_note(const CleanPlanTarget *t, wchar_t *buf, size_t len)
     if (t->shared > 0) {
         used += (size_t)swprintf(buf + used, len - used, L"hardlinks,");
     }
+    if (t->flags & CLEAN_PLAN_DIRTY) {
+        used += (size_t)swprintf(buf + used, len - used, L"uncommitted,");
+    }
+    if (t->flags & CLEAN_PLAN_UNPUSHED) {
+        used += (size_t)swprintf(buf + used, len - used, L"unpushed,");
+    }
+    if (t->flags & CLEAN_PLAN_DORMANT) {
+        used += (size_t)swprintf(buf + used, len - used, L"dormant,");
+    }
     if (used > 0) {
         buf[used - 1] = L'\0';
     } else {
@@ -814,20 +1114,29 @@ static void print_find(FILE *out, const CleanPlan *plan, const size_t *order, si
     find_totals(plan, order, n, &bytes, &reclaim, &cleanable);
     format_size(reclaim, r, 32);
     format_size(bytes, sz, 32);
+    print_projects(out);
     fwprintf(out, L"Cleanup candidates under %ls: %u found, %u cleanable, reclaim %ls (size %ls)\n",
              root, (unsigned)n, (unsigned)cleanable, r, sz);
     if (n > 0) {
-        fwprintf(out, L"  %-4ls %-10ls %-10ls %-13ls %-8ls %-22ls %ls\n", L"#", L"Reclaim",
-                 L"Size", L"Type", L"Eco", L"Note", L"Path");
+        fwprintf(out, L"  %-4ls %-10ls %-10ls %-13ls %-8ls %-5ls %-9ls %-22ls %ls\n", L"#",
+                 L"Reclaim", L"Size", L"Type", L"Eco", L"Proj", L"Recovery", L"Note", L"Path");
     }
     for (i = 0; i < n; i++) {
         const CleanPlanTarget *t = &plan->items[order[i]];
         format_size(t->reclaim, r, 32);
         format_size(t->bytes, sz, 32);
+        wchar_t proj[16];
         find_note(t, note, 128);
-        fwprintf(out, L"  %-4u %-10ls %-10ls %-13ls %-8ls %-22ls %ls\n", (unsigned)(i + 1), r, sz,
-                 t->id != NULL ? t->id : L"", cleanup_eco_name(t->eco), note,
-                 t->location != NULL ? t->location : L"");
+        if (t->project != (size_t)-1) {
+            swprintf(proj, 16, L"P%u", (unsigned)(t->project + 1));
+        } else {
+            swprintf(proj, 16, L"-");
+        }
+        fwprintf(out, L"  %-4u %-10ls %-10ls %-13ls %-8ls %-5ls %-9ls %-22ls %ls\n",
+                 (unsigned)(i + 1), r, sz, t->id != NULL ? t->id : L"", cleanup_eco_name(t->eco),
+                 proj,
+                 t->recovery >= 0 ? project_recovery_name((ProjectRecovery)t->recovery) : L"-",
+                 note, t->location != NULL ? t->location : L"");
     }
     if (cleanable > 0) {
         fwprintf(out, L"Nothing was changed. Use 'disk-scanner clean project' to see the cleanup "
@@ -853,6 +1162,7 @@ static void json_candidate_fields(JsonBuf *b, const CleanPlanTarget *t, size_t i
     jsonl_field_bool(b, "incomplete", (f & CLEANUP_ITEM_INCOMPLETE) != 0);
     jsonl_field_bool(b, "cleanable", t->ready);
     jsonl_field_string(b, "state", t->state);
+    json_project_ref(b, t);
 }
 
 static void json_find(JsonBuf *b, const CliCleanOptions *opts, const CleanPlan *plan,
@@ -880,6 +1190,7 @@ static void json_find(JsonBuf *b, const CliCleanOptions *opts, const CleanPlan *
             jsonl_raw(b, "}");
         }
         jsonl_raw(b, "]");
+        json_projects(b);
         jsonl_field_u64(b, "exit_code", (uint64_t)code);
         jsonl_raw(b, "}\n");
         return;
@@ -887,6 +1198,7 @@ static void json_find(JsonBuf *b, const CliCleanOptions *opts, const CleanPlan *
     jsonl_begin_event(b, "find_start");
     jsonl_field_string(b, "root", root);
     jsonl_end_event(b);
+    jsonl_projects(b);
     for (i = 0; i < n; i++) {
         jsonl_begin_event(b, "find_candidate");
         json_candidate_fields(b, &plan->items[order[i]], i);
@@ -905,25 +1217,32 @@ static void json_find(JsonBuf *b, const CliCleanOptions *opts, const CleanPlan *
 /* ---- 실행 ---- */
 
 /* 탐지해 계획을 만든다. 탐지 상태(SCAN_*)를 돌려주며 메모리 부족이면 SCAN_FATAL·*oom. */
-static ScanStatus detect(const CliCleanOptions *opts, CleanPlan *plan, wchar_t **root, int *oom)
+static ScanStatus detect(const CliCleanOptions *opts, CleanPlan *plan, ProjectList *projects,
+                         wchar_t **root, int *oom)
 {
     *oom = 0;
     *root = NULL;
     if (opts->command != CLI_CLEAN_SYSTEM) {
-        /* GUI [프로젝트 정리]와 같은 탐지 작업(보호 경로·앱 데이터 폴더 제외 포함). */
+        /* GUI [프로젝트 정리]와 같은 탐지 작업(보호 경로·앱 데이터 폴더 제외 포함) + 프로젝트 분석. */
         CleanupResult r;
-        CleanupJob *job = cleanup_job_start(opts->target, 1000, NULL, NULL);
+        ProjectOptions po;
+        CleanupJob *job;
         ScanStatus st;
+        memset(&po, 0, sizeof(po));
+        po.dormant_days = opts->dormant_days;
+        po.no_git = opts->no_git;
+        job = cleanup_job_start_ex(opts->target, 1000, &po, NULL, NULL);
         if (job == NULL) {
             *oom = 1;
             return SCAN_FATAL;
         }
         cleanup_result_init(&r);
-        st = cleanup_job_finish(job, &r);
+        st = cleanup_job_finish_ex(job, &r, projects);
         if (st != SCAN_FATAL && clean_plan_from_project(plan, &r, NULL) != 0) {
             *oom = 1;
             st = SCAN_FATAL;
         }
+        clean_plan_apply_projects(plan, projects);
         *root = r.root;
         r.root = NULL;
         cleanup_result_free(&r);
@@ -984,6 +1303,7 @@ int cli_clean_run(const CliCleanOptions *opts, FILE *out, FILE *err,
 {
     HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
     CleanPlan plan;
+    ProjectList projects;
     CleanPlanTotals totals;
     CleanPlanSummary s;
     JsonBuf buf;
@@ -995,9 +1315,11 @@ int cli_clean_run(const CliCleanOptions *opts, FILE *out, FILE *err,
     FILE *info = (opts->json || opts->jsonl) ? err : out;
 
     clean_plan_init(&plan);
+    project_list_init(&projects);
     jsonl_buf_init(&buf);
     memset(&totals, 0, sizeof(totals));
-    st = detect(opts, &plan, &root, &oom);
+    st = detect(opts, &plan, &projects, &root, &oom);
+    g_projects = opts->command == CLI_CLEAN_SYSTEM ? NULL : &projects;
     if (st == SCAN_FATAL) {
         if (oom) {
             swprintf(msg, 600, L"out of memory");
@@ -1092,6 +1414,8 @@ finish:
     }
 done:
     jsonl_buf_free(&buf);
+    g_projects = NULL;
+    project_list_free(&projects);
     clean_plan_free(&plan);
     free(root);
     if (SUCCEEDED(hr)) {

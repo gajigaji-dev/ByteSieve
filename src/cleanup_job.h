@@ -5,6 +5,7 @@
 #include <wchar.h>
 
 #include "cleanup_scan.h"
+#include "project_info.h"
 
 /*
  * cleanup_scan 을 별도 스레드에서 돌리는 작업(scan_job 과 같은 방식). UI 스레드는
@@ -27,6 +28,9 @@ typedef void (*cleanup_job_notify_fn)(int finished, void *ctx);
 typedef struct {
     CleanupProgress progress; /* current_dir 는 NULL, 대신 아래 버퍼를 쓴다 */
     wchar_t current_dir[CLEANUP_JOB_DIR_LEN];
+    int analyzing_projects;   /* 탐지 뒤 프로젝트(Git) 분석 중 */
+    size_t projects_done;
+    size_t projects_total;
     uint64_t elapsed_ms;
     int cancel_requested;
 } CleanupJobSnapshot;
@@ -38,6 +42,15 @@ typedef struct {
  */
 CleanupJob *cleanup_job_start(const wchar_t *root, uint32_t interval_ms,
                               cleanup_job_notify_fn notify, void *ctx);
+
+/*
+ * cleanup_job_start 와 같지만 projects 가 NULL 이 아니면 탐지가 끝난 뒤 같은 스레드에서 프로젝트 분석
+ * (project_analyze: 프로젝트별 묶기·Git 상태·마지막 수정·휴면·복구 가능성)도 한다. 탐지를 취소했거나
+ * 대상 폴더를 열지 못했으면 분석하지 않는다. 결과는 cleanup_job_finish_ex 로 받는다.
+ */
+CleanupJob *cleanup_job_start_ex(const wchar_t *root, uint32_t interval_ms,
+                                 const ProjectOptions *projects, cleanup_job_notify_fn notify,
+                                 void *ctx);
 
 /* 멈춰 달라고 요청한다(기다리지 않음). 어느 스레드에서 불러도 된다. */
 void cleanup_job_cancel(CleanupJob *job);
@@ -53,5 +66,8 @@ int cleanup_job_wait(CleanupJob *job, uint32_t timeout_ms);
  * job 을 해제한다. out 이 NULL 이면 결과를 버린다. 반환값은 탐색 상태.
  */
 ScanStatus cleanup_job_finish(CleanupJob *job, CleanupResult *out);
+
+/* cleanup_job_finish 와 같고 프로젝트 분석 결과도 projects 로 옮긴다(분석하지 않았으면 빈 목록). */
+ScanStatus cleanup_job_finish_ex(CleanupJob *job, CleanupResult *out, ProjectList *projects);
 
 #endif /* BYTESIEVE_CLEANUP_JOB_H */

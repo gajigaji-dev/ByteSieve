@@ -51,7 +51,8 @@ endif()
 file(TO_NATIVE_PATH "${FIXTURE}" native_fixture)
 file(TO_NATIVE_PATH "${FIXTURE}/app/server.log" native_conflict)
 set(ENV{BYTESIEVE_QUARANTINE_ROOT} "${native_fixture}")
-execute_process(COMMAND "${EXE}" --self-test-quarantine "${native_fixture}" "${native_conflict}"
+# 예제 폴더는 빌드 폴더(이 저장소) 안에 있으므로, 작업 트리의 Git 상태에 결과가 좌우되지 않게 git.exe 를 쓰지 않는다.
+execute_process(COMMAND ${CMAKE_COMMAND} -E env BYTESIEVE_GIT=none "${EXE}" --self-test-quarantine "${native_fixture}" "${native_conflict}"
                 RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err TIMEOUT 110)
 unset(ENV{BYTESIEVE_QUARANTINE_ROOT})
 

@@ -70,10 +70,17 @@ target_link_libraries(bytesieve_cleanup PUBLIC bytesieve_scanner bytesieve_clean
                       bytesieve_reclaim)
 bytesieve_configure(bytesieve_cleanup)
 
-# 탐지를 별도 스레드에서 돌리는 작업(진행률 스냅샷·취소).
+# Git 기반 프로젝트 분석(후보를 프로젝트별로 묶기, git.exe·.git 직접 읽기, 마지막 수정, 휴면, 복구 가능성).
+# 읽기 전용이며 git 은 --no-optional-locks·core.fsmonitor=false 로만 실행한다.
+add_library(bytesieve_project STATIC src/project_info.c)
+target_include_directories(bytesieve_project PUBLIC src)
+target_link_libraries(bytesieve_project PUBLIC bytesieve_cleanup)
+bytesieve_configure(bytesieve_project)
+
+# 탐지를 별도 스레드에서 돌리는 작업(진행률 스냅샷·취소, 선택하면 프로젝트 분석까지).
 add_library(bytesieve_cleanup_job STATIC src/cleanup_job.c)
 target_include_directories(bytesieve_cleanup_job PUBLIC src)
-target_link_libraries(bytesieve_cleanup_job PUBLIC bytesieve_cleanup)
+target_link_libraries(bytesieve_cleanup_job PUBLIC bytesieve_cleanup bytesieve_project)
 bytesieve_configure(bytesieve_cleanup_job)
 
 # 휴지통이 없는 드라이브용 격리 폴더(같은 볼륨 안 이동·기록·목록·복원·영구 삭제).
@@ -93,7 +100,7 @@ bytesieve_configure(bytesieve_cleanup_trash)
 # 정리 계획(탐지 결과 → 대상·선택 정책·요약 → 실행). GUI 두 정리 탭과 CLI(disk-scanner clean)가 함께 쓴다.
 add_library(bytesieve_plan STATIC src/clean_plan.c)
 target_include_directories(bytesieve_plan PUBLIC src)
-target_link_libraries(bytesieve_plan PUBLIC bytesieve_cleanup_trash shell32 ole32)
+target_link_libraries(bytesieve_plan PUBLIC bytesieve_cleanup_trash bytesieve_project shell32 ole32)
 bytesieve_configure(bytesieve_plan)
 
 # 공용 개발 캐시(npm·pip·Gradle·Cargo·NuGet) 위치 탐지·용량 세기. 읽기 전용이며 정리는 cleanup_trash 로.
@@ -397,6 +404,11 @@ add_executable(test_cli_clean tests/test_cli_clean.c)
 target_link_libraries(test_cli_clean PRIVATE bytesieve_cli_clean)
 bytesieve_configure(test_cli_clean)
 add_test(NAME cli_clean COMMAND test_cli_clean)
+
+add_executable(test_project tests/test_project.c)
+target_link_libraries(test_project PRIVATE bytesieve_project)
+bytesieve_configure(test_project)
+add_test(NAME project COMMAND test_project)
 
 add_executable(test_clean_plan tests/test_clean_plan.c)
 target_link_libraries(test_clean_plan PRIVATE bytesieve_plan)

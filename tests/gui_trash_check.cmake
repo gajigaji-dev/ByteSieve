@@ -45,7 +45,8 @@ if(NOT deny_rc EQUAL 0)
 endif()
 
 file(TO_NATIVE_PATH "${FIXTURE}" native_fixture)
-execute_process(COMMAND "${EXE}" --self-test-trash "${native_fixture}"
+# 예제 폴더는 빌드 폴더(이 저장소) 안에 있으므로, 작업 트리의 Git 상태에 결과가 좌우되지 않게 git.exe 를 쓰지 않는다.
+execute_process(COMMAND ${CMAKE_COMMAND} -E env BYTESIEVE_GIT=none "${EXE}" --self-test-trash "${native_fixture}"
                 RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err TIMEOUT 110)
 
 # 결과와 상관없이 테스트가 휴지통에 넣은 항목만 지운다.

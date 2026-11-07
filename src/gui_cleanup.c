@@ -55,7 +55,22 @@ enum {
 
 /* 목록 열. 첫 열(용량)에 체크 상자가 붙는다. */
 /* COL_RECLAIM: 실제 확보 가능(할당 크기, 하드 링크로 항목 밖과 나누는 파일 제외). 정렬은 파일 크기 순. */
-enum { COL_RECLAIM, COL_SIZE, COL_TYPE, COL_ECO, COL_PATH, COL_FILES, COL_NOTE, COL_CLEAN, COL_COUNT };
+/* COL_PROJECT·COL_ACTIVITY·COL_RECOVERY: 프로젝트 분석(project_info.h) — 프로젝트(Git 브랜치), 마지막 활동·휴면,
+ * 지운 뒤 복구할 수 있는지. */
+enum {
+    COL_RECLAIM,
+    COL_SIZE,
+    COL_TYPE,
+    COL_ECO,
+    COL_PATH,
+    COL_FILES,
+    COL_NOTE,
+    COL_RECOVERY,
+    COL_PROJECT,
+    COL_ACTIVITY,
+    COL_CLEAN,
+    COL_COUNT
+};
 
 /* 유형 필터 콤보 상자의 항목 순서와 비트. */
 static const struct {
@@ -114,6 +129,7 @@ typedef struct {
     /* 정리 계획(clean_plan.h): result.items 와 같은 순서. 경로 판정·선택·이동 결과를 담는다. */
     CleanPlan plan;
     int has_plan;
+    ProjectList projects; /* 프로젝트 분석 결과(탐지 작업이 함께 만든다) */
     size_t checked_count;
     uint64_t checked_bytes;
     uint64_t checked_reclaim; /* 선택한 항목의 실제 확보 가능 합 */
@@ -290,6 +306,55 @@ static void build_states(CleanupPanel *p)
         return;
     }
     p->has_plan = clean_plan_from_project(&p->plan, &p->result, &p->guard) == 0;
+    if (p->has_plan) {
+        /* 미커밋 변경이 있는 프로젝트의 후보는 [모두 선택]에서 빠진다(MANUAL). */
+        clean_plan_apply_projects(&p->plan, &p->projects);
+    }
+}
+
+/* 프로젝트 칸: "폴더 이름 (브랜치)" 또는 "폴더 이름". */
+static void project_text(CleanupPanel *p, const CleanPlanTarget *t, wchar_t *buf, size_t len)
+{
+    const ProjectInfo *pi;
+    const wchar_t *name;
+
+    buf[0] = L'\0';
+    if (t == NULL || t->project >= p->projects.len) {
+        return;
+    }
+    pi = &p->projects.items[t->project];
+    name = wcsrchr(pi->root, L'\\');
+    name = name != NULL && name[1] != L'\0' ? name + 1 : pi->root;
+    if (pi->is_git) {
+        swprintf(buf, len, L"%ls (Git %ls)", name, pi->branch != NULL ? pi->branch : L"?");
+    } else {
+        swprintf(buf, len, L"%ls", name);
+    }
+}
+
+/* 마지막 활동 칸: "2020-01-15 · 2487일 전 · 휴면". */
+static void activity_text(CleanupPanel *p, const CleanPlanTarget *t, wchar_t *buf, size_t len)
+{
+    const ProjectInfo *pi;
+    FILETIME u, l;
+    SYSTEMTIME st;
+
+    buf[0] = L'\0';
+    if (t == NULL || t->project >= p->projects.len) {
+        return;
+    }
+    pi = &p->projects.items[t->project];
+    if (pi->last_activity == 0) {
+        swprintf(buf, len, L"모름");
+        return;
+    }
+    u.dwLowDateTime = (DWORD)pi->last_activity;
+    u.dwHighDateTime = (DWORD)(pi->last_activity >> 32);
+    if (!FileTimeToLocalFileTime(&u, &l) || !FileTimeToSystemTime(&l, &st)) {
+        return;
+    }
+    swprintf(buf, len, L"%04u-%02u-%02u · %u일 전%ls", st.wYear, st.wMonth, st.wDay, pi->age_days,
+             pi->dormant ? L" · 휴면" : L"");
 }
 
 static void recount_checked(CleanupPanel *p)
@@ -463,6 +528,13 @@ static void update_progress(CleanupPanel *p)
     if (snap.cancel_requested) {
         return;
     }
+    if (snap.analyzing_projects) {
+        swprintf(text, sizeof(text) / sizeof(text[0]),
+                 L"프로젝트(Git) 분석 중... %u/%u · 후보 %u개", (unsigned)snap.projects_done,
+                 (unsigned)snap.projects_total, (unsigned)snap.progress.items);
+        SetWindowTextW(p->status, text);
+        return;
+    }
     /* 남은 폴더 수가 늘면 비율이 줄 수 있으므로 막대는 뒤로 가지 않게 한다. */
     done = snap.progress.dirs_scanned;
     all = done + snap.progress.dirs_pending;
@@ -492,7 +564,7 @@ static void finish_detect(CleanupPanel *p)
         return;
     }
     cleanup_job_progress(p->job, &snap);
-    status = cleanup_job_finish(p->job, &p->result);
+    status = cleanup_job_finish_ex(p->job, &p->result, &p->projects);
     p->job = NULL;
     p->has_result = 1;
     r = &p->result.report;
@@ -612,6 +684,15 @@ static int confirm_trash(CleanupPanel *p, const size_t *index, size_t count)
         APPEND(L"\n주의: '추정' 항목 %u개는 같은 폴더에 프로젝트 파일이 없어 빌드 결과물이 "
                L"아닐 수 있습니다.\n",
                (unsigned)guessed);
+    }
+    if (sum.dirty > 0) {
+        APPEND(L"\n주의: %u개는 커밋하지 않은 변경이 있는(작업 중인) 프로젝트의 항목입니다.\n",
+               (unsigned)sum.dirty);
+    }
+    if (sum.unpushed > 0) {
+        APPEND(L"\n참고: %u개는 원격에 올리지 않은 커밋이 있는 프로젝트의 항목입니다(정리 항목만 "
+               L"옮기며 소스와 커밋은 그대로입니다).\n",
+               (unsigned)sum.unpushed);
     }
     APPEND(L"\n계속할까요?");
 #undef APPEND
@@ -808,8 +889,36 @@ static void on_get_dispinfo(CleanupPanel *p, NMLVDISPINFOW *di)
         swprintf(p->cell, 64, L"%llu", (unsigned long long)item->files);
         di->item.pszText = p->cell;
         break;
-    case COL_NOTE:
-        note_text(item, p->cell, 64);
+    case COL_NOTE: {
+        const CleanPlanTarget *t = plan_at(p, p->view[row]);
+        note_text(item, p->cell, 128);
+        if (t != NULL && (t->flags & (CLEAN_PLAN_DIRTY | CLEAN_PLAN_UNPUSHED | CLEAN_PLAN_DORMANT))) {
+            size_t n = wcslen(p->cell);
+            swprintf(p->cell + n, 256 - n, L"%ls%ls%ls%ls", n > 0 ? L" · " : L"",
+                     (t->flags & CLEAN_PLAN_DIRTY) ? L"미커밋 변경 " : L"",
+                     (t->flags & CLEAN_PLAN_UNPUSHED) ? L"미푸시 커밋 " : L"",
+                     (t->flags & CLEAN_PLAN_DORMANT) ? L"휴면" : L"");
+            n = wcslen(p->cell);
+            while (n > 0 && p->cell[n - 1] == L' ') {
+                p->cell[--n] = L'\0';
+            }
+        }
+        di->item.pszText = p->cell;
+        break;
+    }
+    case COL_RECOVERY: {
+        const CleanPlanTarget *t = plan_at(p, p->view[row]);
+        di->item.pszText = (wchar_t *)(t != NULL && t->recovery >= 0
+                                           ? project_recovery_text((ProjectRecovery)t->recovery)
+                                           : L"");
+        break;
+    }
+    case COL_PROJECT:
+        project_text(p, plan_at(p, p->view[row]), p->cell, 256);
+        di->item.pszText = p->cell;
+        break;
+    case COL_ACTIVITY:
+        activity_text(p, plan_at(p, p->view[row]), p->cell, 256);
         di->item.pszText = p->cell;
         break;
     case COL_CLEAN:
@@ -899,7 +1008,10 @@ static void panel_create_controls(CleanupPanel *p)
         {L"개발 환경", 90, LVCFMT_LEFT},
         {L"경로", 440, LVCFMT_LEFT},
         {L"파일 수", 80, LVCFMT_RIGHT},
-        {L"비고", 150, LVCFMT_LEFT},
+        {L"비고", 200, LVCFMT_LEFT},
+        {L"복구", 190, LVCFMT_LEFT},
+        {L"프로젝트", 160, LVCFMT_LEFT},
+        {L"마지막 활동", 170, LVCFMT_LEFT},
         {L"정리", 220, LVCFMT_LEFT},
     };
     size_t i;
@@ -1088,6 +1200,7 @@ static LRESULT CALLBACK panel_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         if (p != NULL) {
             free(p->view);
             free_states(p);
+            project_list_free(&p->projects);
             cleanup_guard_free(&p->guard);
             cleanup_result_free(&p->result);
             free(p);
@@ -1163,7 +1276,13 @@ int cleanup_panel_start(HWND panel, const wchar_t *root)
     p->progress_pos = 0;
     SendMessageW(p->progress, PBM_SETPOS, 0, 0);
 
-    p->job = cleanup_job_start(target, PROGRESS_INTERVAL_MS, on_job_notify, panel);
+    {
+        /* 탐지 뒤 같은 스레드에서 프로젝트(Git) 분석까지 한다(휴면 기준은 기본 90일). */
+        ProjectOptions po;
+        memset(&po, 0, sizeof(po));
+        project_list_free(&p->projects);
+        p->job = cleanup_job_start_ex(target, PROGRESS_INTERVAL_MS, &po, on_job_notify, panel);
+    }
     free(target);
     if (p->job == NULL) {
         SetWindowTextW(p->status, L"탐지를 시작하지 못했습니다(메모리 또는 스레드 생성 실패).");
@@ -1205,6 +1324,12 @@ size_t cleanup_panel_check_all(HWND panel, int check)
         return 0;
     }
     for (i = 0; i < p->view_len; i++) {
+        const CleanPlanTarget *t = plan_at(p, p->view[i]);
+        /* [모두 선택]은 직접 골라야 하는 대상(미커밋 변경이 있는 프로젝트의 후보)을 고르지 않는다.
+         * 해제는 모두 한다. */
+        if (check && t != NULL && (t->flags & CLEAN_PLAN_MANUAL)) {
+            continue;
+        }
         set_checked(p, p->view[i], check);
     }
     InvalidateRect(p->list, NULL, FALSE);
@@ -1393,6 +1518,40 @@ int cleanup_panel_verify(HWND panel, int expect_cancelled)
     SendMessageW(p->eco, CB_SETCURSEL, 0, 0);
     apply_filter(p);
     PANEL_CHECK(ListView_GetItemCount(p->list) == (int)p->result.len);
+
+    /* 프로젝트 분석: 끝까지 탐지했으면 후보마다 프로젝트·복구 가능성이 있고 계획과 맞는다.
+     * 미커밋 변경이 있는 프로젝트의 후보는 직접 골라야 한다(MANUAL). */
+    if (!expect_cancelled && p->has_plan) {
+        size_t k, dirty = 0;
+        PANEL_CHECK(p->projects.item_count == p->result.len && p->projects.len > 0);
+        for (k = 0; k < p->plan.len && p->projects.item_count == p->result.len; k++) {
+            const CleanPlanTarget *t = &p->plan.items[k];
+            const ProjectInfo *pi;
+            PANEL_CHECK(t->project == p->projects.item_project[t->origin]);
+            PANEL_CHECK(t->recovery == (int)p->projects.item_recovery[t->origin]);
+            if (t->project >= p->projects.len) {
+                continue;
+            }
+            pi = &p->projects.items[t->project];
+            PANEL_CHECK(((t->flags & CLEAN_PLAN_DIRTY) != 0) == (pi->changes > 0));
+            PANEL_CHECK(((t->flags & CLEAN_PLAN_DORMANT) != 0) == (pi->dormant != 0));
+            if (t->flags & CLEAN_PLAN_DIRTY) {
+                PANEL_CHECK(t->flags & CLEAN_PLAN_MANUAL);
+                dirty++;
+            }
+        }
+        if (rows > 0) {
+            cell_text(p, 0, COL_PROJECT, buf, 64);
+            PANEL_CHECK(buf[0] != L'\0');
+            cell_text(p, 0, COL_RECOVERY, buf, 64);
+            PANEL_CHECK(buf[0] != L'\0');
+            cell_text(p, 0, COL_ACTIVITY, buf, 64);
+            PANEL_CHECK(buf[0] != L'\0');
+        }
+        wprintf(L"projects: %u, dirty candidates: %u\n", (unsigned)p->projects.len,
+                (unsigned)dirty);
+        fflush(stdout);
+    }
     return failures;
 }
 
