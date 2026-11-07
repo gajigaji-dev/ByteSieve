@@ -13,7 +13,7 @@
 
 ```
                     disk-scanner (CLI)                bytesieve-gui (GUI)
-                     │  cli · jsonl · cli_clean         │  폴더 스캔(+트리맵) │ 드라이브 │ 시스템 정리 │ 프로젝트 정리 │ 부스터 │ 격리 폴더 │ 시스템
+                     │  cli · jsonl · cli_clean         │  사이드바(nav_model) → 폴더 스캔(+트리맵) │ 드라이브 │ 프로젝트 정리 │ 시스템 정리 │ 개발 캐시 │ 격리 폴더 │ 모니터 │ 부스터
                      │        │                         │                         │             │
                      │        └──────── clean_plan (정리 계획: 대상·선택 정책·요약·실행) ┘─────────────┘
                      │                    │   ↑ cleaner_build_plan / clean_plan_from_project
@@ -53,21 +53,32 @@
 | `bytesieve_treemap` | 스퀘어리파이드 트리맵 배치(순수 계산, GUI 트리맵 보기 `gui_treemap`이 사용) |
 | `bytesieve_cli` / `bytesieve_jsonl` | CLI 인자 해석·출력, JSON Lines 직렬화(정리 명령용 일반 이벤트 도우미 포함) |
 | `bytesieve_project` | Git 기반 프로젝트 분석: 후보를 프로젝트(가장 가까운 Git 저장소, 없으면 폴더)별로 묶기, git.exe 읽기 전용 실행(`--no-optional-locks`, `core.fsmonitor=false`, 시간 제한)·없으면 `.git` 직접 읽기, 파일 마지막 수정, 휴면 판정, 후보별 복구 가능성(lockfile). 탐지 작업(`cleanup_job_start_ex`)이 같은 스레드에서 부른다 |
-| `bytesieve_plan` | 정리 계획: 탐지 결과를 대상(선택 단위)·실행 항목으로 바꾸고, 선택 정책([모두 선택]은 MANUAL 제외)·요약·실행 엔진(영구 삭제는 `allow_permanent` 일 때만 먼저, 실행 직전 실행 중 프로그램·최근 변경 확인, 항목마다 `cleanup_trash_one`)을 GUI 두 정리 탭과 CLI에 똑같이 제공 |
+| `bytesieve_plan` | 정리 계획: 탐지 결과를 대상(선택 단위)·실행 항목으로 바꾸고, 선택 정책([모두 선택]은 MANUAL 제외)·요약·실행 엔진(영구 삭제는 `allow_permanent` 일 때만 먼저, 실행 직전 실행 중 프로그램·최근 변경 확인, 항목마다 `cleanup_trash_one`)을 GUI 정리 페이지(프로젝트 정리·시스템 정리·개발 캐시)와 CLI에 똑같이 제공 |
 | `bytesieve_cli_clean` | `disk-scanner devenv`(개발 환경 분석·증가 기록, 읽기 전용)와 `disk-scanner find`·`clean project|system`: 인자 해석, CLI 선택(필터·`--include`·`--exclude`, 영구 삭제 항상 제외), 후보 목록(find, 읽기 전용)·dry-run·확인·실행(`--execute`), 텍스트·JSON 문서(`--json`, `"version":1`)·JSON Lines 출력, 공통 종료 코드. 탐지는 GUI와 같은 `cleanup_job`·`cleaner_analyze` |
 | `bytesieve_vdisk` / `bytesieve_devhist` | WSL2·Docker 가상 디스크 찾기(레지스트리 Lxss·Docker Desktop 기본 위치, 읽기 전용, 줄이는 명령 안내), 개발 캐시·가상 디스크 용량 기록(`devenv-history.tsv`, 원자적 저장, 캐시마다 최근 60개) |
-| `bytesieve_cleaner` | 시스템 정리(Cleaner): 사용자 임시 파일·오류 보고서·휴지통·브라우저 캐시·공용 개발 캐시 분석(읽기 전용, 위치 근거·캐시 위치 문제 포함, 항목마다 실제 확보 용량), 가상 디스크(분석만, `CLEANER_INFO_ONLY`), 증가 추적(`cleaner_apply_growth`), 분석 결과 → 정리 계획(`cleaner_build_plan`), 분석 작업 스레드. 기존 실행 API(`cleaner_run_*`)는 계획 실행 엔진을 감싼다 |
+| `bytesieve_cleaner` | 시스템 정리(Cleaner): 사용자 임시 파일·오류 보고서·휴지통·브라우저 캐시·공용 개발 캐시 분석(읽기 전용, 위치 근거·캐시 위치 문제 포함, 항목마다 실제 확보 용량), 가상 디스크(분석만, `CLEANER_INFO_ONLY`), 증가 추적(`cleaner_apply_growth`), 분석 결과 → 정리 계획(`cleaner_build_plan`), 분석 작업 스레드. 분석 범위(`CleanerOps.kinds`: 0 이면 모두, GUI 는 `CLEANER_KINDS_SYSTEM`·`CLEANER_KINDS_CACHE` 로 두 페이지에 나눔). 기존 실행 API(`cleaner_run_*`)는 계획 실행 엔진을 감싼다 |
 | `bytesieve_booster` | Booster: 시작 프로그램 목록·켜기/끄기(StartupApproved), 프로세스 목록·CPU 계산·보호 판정·끝내기(PID 재사용 확인) |
 | `bytesieve_ui_lang` | GUI 표시 언어(한국어·영어·일본어·중국어 간체) 번역 문자열 표와 언어 결정(환경 변수 → 레지스트리 → Windows 표시 언어). 창과 무관 |
+| `bytesieve_nav` | GUI 사이드바 메뉴 모델(`nav_model`): 목적별 그룹·페이지 표, 키 이동(머리글 건너뜀·끝에서 멈춤), 세로 배치와 마우스 위치 판정. 창·GDI 를 쓰지 않는 순수 계산 |
 
-GUI 안의 `gui_theme`은 창 외곽(DWM 둥근 모서리·Mica), 언어별 UI 글꼴, 글자 폭에 맞춘 컨트롤 크기를 맡습니다.
+GUI(`bytesieve-gui`) 안의 파일은 다음처럼 나뉩니다. 페이지마다 "패널 자식 창 + `*_panel_verify`(자체 검사)" 형태입니다.
+
+| 파일 | 역할 |
+|---|---|
+| `gui_main.c` | 창 골격(사이드바·페이지 제목·페이지 패널 배치), 페이지 전환(고른 패널만 보이기, 처음 열 때 조회·열 때마다 다시 읽기), 자체 검사 진행 |
+| `gui_nav` | 왼쪽 사이드바(직접 그리는 자식 창): 그리기와 마우스·키 입력만 맡고 메뉴 구성·이동·위치 판정은 `nav_model` 에 맡김 |
+| `gui_scan` | 폴더 스캔 페이지(경로·스캔·트리·순위·트리맵·내보내기·기록). 변화 추적은 CLI `--track` 과 같은 `history_track` |
+| `gui_cleaner` | Cleaner 패널. [시스템 정리]·[개발 캐시] 두 페이지가 같은 패널을 분석 범위만 달리해 하나씩 씀 |
+| `gui_drives`·`gui_cleanup`·`gui_quarantine`·`gui_monitor`·`gui_booster`·`gui_treemap` | 나머지 페이지 패널과 트리맵 보기 |
+| `gui_theme` | 창 외곽(DWM 둥근 모서리·Mica), 색 토큰(`THEME_COLOR_*`, 시스템 강조색), 언어별 UI 글꼴·페이지 제목 글꼴, 글자 폭에 맞춘 컨트롤 크기 |
+
 설계와 단계는 [ui-design.md](ui-design.md)를 참고하세요.
 
 실행 파일은 `disk-scanner`(CLI), `bytesieve-gui`(GUI), `bytesieve-bench`(성능 측정 도구)입니다.
 
 ## 정리 계획(탐지 → 계획 → 실행)
 
-정리는 GUI([프로젝트 정리]·[시스템 정리])와 CLI(`disk-scanner clean`) 모두 같은 세 단계를 거칩니다. 화면은 이 계획을 보여 주고
+정리는 GUI([프로젝트 정리]·[시스템 정리]·[개발 캐시])와 CLI(`disk-scanner clean`) 모두 같은 세 단계를 거칩니다. 화면은 이 계획을 보여 주고
 고르기만 하며, 무엇을 고를 수 있는지·무엇을 실행하는지는 계획 모듈(`clean_plan`)이 정합니다.
 
 | 단계 | 프로젝트 정리 | 시스템 정리 |

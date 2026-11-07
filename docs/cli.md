@@ -126,7 +126,7 @@ Nothing was changed. Use 'disk-scanner clean project' to see the cleanup plan an
 
 ## 정리 (`disk-scanner clean`)
 
-GUI의 [프로젝트 정리]·[시스템 정리] 탭과 **같은 탐지·계획·실행 코드**(`clean_plan`)를 씁니다. 기본은 `--dry-run`(계획과 예상 결과만 출력)이며, `--execute`를 줘야만 옮깁니다.
+GUI의 [프로젝트 정리]·[시스템 정리]·[개발 캐시] 페이지와 **같은 탐지·계획·실행 코드**(`clean_plan`)를 씁니다. 기본은 `--dry-run`(계획과 예상 결과만 출력)이며, `--execute`를 줘야만 옮깁니다.
 
 ```
 disk-scanner clean project <directory> [--category LIST] [--eco LIST] [--include-dirty]

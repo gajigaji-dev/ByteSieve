@@ -24,9 +24,16 @@ static const wchar_t *const k_text[UI_T_COUNT][UI_LANG_COUNT] = {
     [UI_T_NAV_DRIVES] = {L"드라이브", L"Drives", L"ドライブ", L"驱动器"},
     [UI_T_NAV_CLEANUP] = {L"프로젝트 정리", L"Project cleanup", L"プロジェクト整理", L"项目清理"},
     [UI_T_NAV_QUARANTINE] = {L"격리 폴더", L"Quarantine", L"隔離フォルダー", L"隔离文件夹"},
-    [UI_T_NAV_MONITOR] = {L"시스템", L"System", L"システム", L"系统"},
+    [UI_T_NAV_MONITOR] = {L"모니터", L"Monitor", L"モニター", L"监视器"},
     [UI_T_NAV_CLEANER] = {L"시스템 정리", L"System cleanup", L"システム整理", L"系统清理"},
     [UI_T_NAV_BOOSTER] = {L"부스터", L"Booster", L"ブースター", L"加速"},
+    [UI_T_NAV_CACHE] = {L"개발 캐시", L"Dev caches", L"開発キャッシュ", L"开发缓存"},
+
+    [UI_T_GROUP_ANALYSIS] = {L"프로젝트 분석", L"Project analysis", L"プロジェクト分析", L"项目分析"},
+    [UI_T_GROUP_CLEANUP] = {L"정리", L"Cleanup", L"整理", L"清理"},
+    [UI_T_GROUP_CACHE] = {L"캐시", L"Caches", L"キャッシュ", L"缓存"},
+    [UI_T_GROUP_QUARANTINE] = {L"격리·복원", L"Quarantine & restore", L"隔離・復元", L"隔离与恢复"},
+    [UI_T_GROUP_SYSTEM] = {L"시스템", L"System", L"システム", L"系统"},
 
     [UI_T_SCAN_BROWSE] = {L"찾아보기...", L"Browse...", L"参照...", L"浏览..."},
     [UI_T_SCAN_START] = {L"스캔", L"Scan", L"スキャン", L"扫描"},

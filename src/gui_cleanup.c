@@ -13,6 +13,7 @@
 #include "cleanup_scan.h"
 #include "cleanup_trash.h"
 #include "gui_cleanup.h"
+#include "gui_theme.h"
 #include "size_format.h"
 
 #define CLEANUP_PANEL_CLASS L"ByteSieveCleanupPanel"
@@ -1132,11 +1133,11 @@ static LRESULT CALLBACK panel_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         /* 보호 경로 경고는 빨간 글씨로. */
         if (p != NULL && (HWND)lp == p->warn && p->has_result && p->result.root_protected) {
             HDC dc = (HDC)wp;
+            LRESULT brush = theme_ctlcolor_static(dc);
             SetTextColor(dc, RGB(200, 0, 0));
-            SetBkColor(dc, GetSysColor(COLOR_BTNFACE));
-            return (LRESULT)GetSysColorBrush(COLOR_BTNFACE);
+            return brush;
         }
-        break;
+        return theme_ctlcolor_static((HDC)wp);
     case WM_NOTIFY: {
         NMHDR *hdr = (NMHDR *)lp;
         if (p == NULL || hdr->idFrom != IDC_C_LIST) {
@@ -1222,7 +1223,7 @@ int cleanup_panel_register(HINSTANCE inst)
     wc.lpfnWndProc = panel_proc;
     wc.hInstance = inst;
     wc.hCursor = LoadCursorW(NULL, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+    wc.hbrBackground = theme_bg_brush();
     wc.lpszClassName = CLEANUP_PANEL_CLASS;
     return RegisterClassExW(&wc) != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS ? 0 : -1;
 }

@@ -7,6 +7,7 @@
 
 #include "path.h"
 #include "scan_history.h"
+#include "size_format.h"
 
 #define HISTORY_MAGIC "BYTESIEVE-HISTORY 1"
 /* 손상된 파일로 메모리를 다 쓰지 않도록 읽을 크기를 제한한다. */
@@ -1037,4 +1038,137 @@ const wchar_t *history_kind_name(HistoryKind kind)
     default:
         return L"removed";
     }
+}
+
+/* ---- 변화 문구 ---- */
+
+void history_format_delta(int64_t delta, wchar_t *buf, size_t len)
+{
+    wchar_t size[32];
+    uint64_t mag = delta < 0 ? (uint64_t)0 - (uint64_t)delta : (uint64_t)delta;
+
+    if (buf == NULL || len == 0) {
+        return;
+    }
+    format_size(mag, size, 32);
+    swprintf(buf, len, L"%ls%ls", delta > 0 ? L"+" : delta < 0 ? L"-" : L"", size);
+}
+
+void history_change_text(const HistoryChange *c, wchar_t *buf, size_t len)
+{
+    wchar_t delta[48];
+
+    if (buf == NULL || len == 0) {
+        return;
+    }
+    if (c == NULL) {
+        buf[0] = L'\0';
+        return;
+    }
+    history_format_delta(c->delta, delta, 48);
+    swprintf(buf, len, L"%ls%ls%ls",
+             c->kind == HISTORY_ADDED     ? L"새 폴더 "
+             : c->kind == HISTORY_REMOVED ? L"삭제됨 "
+                                          : L"",
+             delta, c->uncertain ? L" (?)" : L"");
+}
+
+/* ---- 스캔 기록 추적 ---- */
+
+const wchar_t *history_track_status_text(HistoryTrackStatus status)
+{
+    switch (status) {
+    case HISTORY_TRACK_NONE:
+        return L"기록하지 않음";
+    case HISTORY_TRACK_BASELINE:
+        return L"첫 스캔: 기준으로 저장함";
+    case HISTORY_TRACK_COMPARED:
+        return L"직전 스캔과 비교하고 저장함";
+    case HISTORY_TRACK_CANCELLED:
+        return L"취소되어 기록하지 않음";
+    case HISTORY_TRACK_DISABLED:
+        return L"자동 저장이 꺼져 있어 기록하지 않음";
+    case HISTORY_TRACK_FAILED:
+        return L"기록을 저장하지 못함";
+    default:
+        return L"알 수 없음";
+    }
+}
+
+const wchar_t *history_track_status_name(HistoryTrackStatus status)
+{
+    switch (status) {
+    case HISTORY_TRACK_NONE:
+        return L"none";
+    case HISTORY_TRACK_BASELINE:
+        return L"baseline";
+    case HISTORY_TRACK_COMPARED:
+        return L"compared";
+    case HISTORY_TRACK_CANCELLED:
+        return L"cancelled";
+    case HISTORY_TRACK_DISABLED:
+        return L"disabled";
+    case HISTORY_TRACK_FAILED:
+        return L"failed";
+    default:
+        return L"unknown";
+    }
+}
+
+void history_track_result_free(HistoryTrackResult *r)
+{
+    if (r == NULL) {
+        return;
+    }
+    free(r->file);
+    memset(r, 0, sizeof(*r));
+}
+
+HistoryTrackStatus history_track(const ScanModel *model, const wchar_t *dir, const wchar_t *root,
+                                 int save, HistoryDiff *diff, HistoryTrackResult *out)
+{
+    wchar_t own_dir[MAX_PATH * 2];
+    HistorySnapshot prev, cur;
+
+    memset(out, 0, sizeof(*out));
+    history_diff_free(diff);
+    if (model == NULL || model->len == 0 || model->status == SCAN_FATAL) {
+        return out->status = HISTORY_TRACK_NONE;
+    }
+    if (dir == NULL) {
+        if (history_default_dir(own_dir, sizeof(own_dir) / sizeof(own_dir[0])) != 0) {
+            out->error = ERROR_PATH_NOT_FOUND;
+            return out->status = HISTORY_TRACK_FAILED;
+        }
+        dir = own_dir;
+    }
+    out->file = history_file_for(dir, root != NULL ? root : model->nodes[0].name);
+    if (out->file == NULL) {
+        out->error = ERROR_PATH_NOT_FOUND;
+        return out->status = HISTORY_TRACK_FAILED;
+    }
+    history_snapshot_init(&prev);
+    history_snapshot_init(&cur);
+    if (history_snapshot_from_model(&cur, model) != 0) {
+        out->error = ERROR_NOT_ENOUGH_MEMORY;
+        return out->status = HISTORY_TRACK_FAILED;
+    }
+    if (history_load(&prev, out->file) == 0 && history_diff(&prev, &cur, diff) == 0) {
+        out->has_diff = 1;
+    }
+    if (model->report.cancelled) {
+        out->status = HISTORY_TRACK_CANCELLED;
+    } else if (!save) {
+        out->status = HISTORY_TRACK_DISABLED;
+    } else if (history_ensure_dir(dir) != 0 || history_save(&cur, out->file, &out->error) != 0) {
+        if (out->error == 0) {
+            out->error = GetLastError();
+        }
+        out->status = HISTORY_TRACK_FAILED;
+    } else {
+        out->status = out->has_diff ? HISTORY_TRACK_COMPARED : HISTORY_TRACK_BASELINE;
+    }
+    history_snapshot_free(&prev);
+    history_snapshot_free(&cur);
+    return out->status;
 }

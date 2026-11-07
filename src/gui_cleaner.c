@@ -10,6 +10,7 @@
 #include "cleaner.h"
 #include "devenv_history.h"
 #include "gui_cleaner.h"
+#include "gui_theme.h"
 #include "path.h"
 #include "scan_history.h"
 #include "size_format.h"
@@ -69,6 +70,7 @@ typedef struct {
     HFONT font;
     int dpi;
 
+    unsigned kinds;      /* 분석 범위(CleanerOps.kinds, 0 이면 모든 종류) */
     CleanerScanJob *scan;
     CleanerList targets; /* 분석 결과(표시용: 상태·제외·위치 근거) */
     CleanPlan plan;      /* 정리 계획(targets 와 같은 순서): 선택·실행 결과 */
@@ -94,6 +96,8 @@ typedef struct {
 
     wchar_t cell[512];
 } CleanerPanel;
+
+static const wchar_t *info_text(unsigned kinds);
 
 static CleanerPanel *panel_of(HWND hwnd)
 {
@@ -870,13 +874,7 @@ static void panel_create_controls(CleanerPanel *p)
     p->status = panel_child(p, L"STATIC", L"", SS_LEFTNOWORDWRAP | SS_ENDELLIPSIS, 0,
                             IDC_C_STATUS);
     p->progress = panel_child(p, PROGRESS_CLASSW, L"", PBS_SMOOTH, 0, IDC_C_PROGRESS);
-    p->info = panel_child(p, L"STATIC",
-                          L"Windows 임시 파일·오류 보고서·휴지통·브라우저 캐시와 npm·pip·Gradle·"
-                          L"Cargo·NuGet 공용 캐시를 분석합니다. [실제 확보]는 디스크 할당 크기 기준이며 "
-                          L"하드 링크로 다른 곳과 나누는 파일은 뺍니다. 휴지통 비우기를 뺀 항목은 "
-                          L"휴지통(없는 드라이브는 격리 폴더)으로 옮기므로 그곳을 비워야 공간이 확보됩니다. "
-                          L"휴지통 비우기(영구 삭제)와 개발 도구 캐시는 [모두 선택]에 들어가지 않습니다.",
-                          SS_LEFT, 0, IDC_C_INFO);
+    p->info = panel_child(p, L"STATIC", info_text(p->kinds), SS_LEFT, 0, IDC_C_INFO);
     p->check_all = panel_child(p, L"BUTTON", L"모두 선택", BS_PUSHBUTTON | WS_TABSTOP, 0,
                                IDC_C_CHECK_ALL);
     p->check_none = panel_child(p, L"BUTTON", L"선택 해제", BS_PUSHBUTTON | WS_TABSTOP, 0,
@@ -930,6 +928,9 @@ static LRESULT CALLBACK panel_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_CREATE:
         panel_create_controls(p);
         return 0;
+    case WM_CTLCOLORSTATIC:
+        /* 정적 글자·체크 상자 배경을 창 배경색(theme BG)에 맞춘다. */
+        return theme_ctlcolor_static((HDC)wp);
     case WM_SIZE:
         panel_layout(p);
         return 0;
@@ -1036,7 +1037,7 @@ int cleaner_panel_register(HINSTANCE inst)
     wc.lpfnWndProc = panel_proc;
     wc.hInstance = inst;
     wc.hCursor = LoadCursorW(NULL, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+    wc.hbrBackground = theme_bg_brush();
     wc.lpszClassName = CLEANER_PANEL_CLASS;
     return RegisterClassExW(&wc) != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS ? 0 : -1;
 }
@@ -1050,6 +1051,44 @@ HWND cleaner_panel_create(HWND parent, int id, HFONT font, int dpi)
     return CreateWindowExW(WS_EX_CONTROLPARENT, CLEANER_PANEL_CLASS, L"",
                            WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN, 0, 0, 0, 0, parent,
                            (HMENU)(INT_PTR)id, GetModuleHandleW(NULL), &params);
+}
+
+/* 패널 위쪽 안내 문구(분석 범위에 맞춤). */
+static const wchar_t *info_text(unsigned kinds)
+{
+    if (kinds == CLEANER_KINDS_SYSTEM) {
+        return L"Windows 임시 파일·오류 보고서·휴지통·브라우저 캐시를 분석합니다. [실제 확보]는 디스크 "
+               L"할당 크기 기준이며 하드 링크로 다른 곳과 나누는 파일은 뺍니다. 휴지통 비우기를 뺀 항목은 "
+               L"휴지통(없는 드라이브는 격리 폴더)으로 옮기므로 그곳을 비워야 공간이 확보됩니다. "
+               L"휴지통 비우기(영구 삭제)는 [모두 선택]에 들어가지 않습니다.";
+    }
+    if (kinds == CLEANER_KINDS_CACHE) {
+        return L"npm·pip·Gradle·Cargo·NuGet 등 여러 프로젝트가 함께 쓰는 개발 캐시와 WSL·Docker 가상 "
+               L"디스크(분석만)를 봅니다. 개발 캐시는 지우면 다시 내려받아야 하므로 [모두 선택]에 들어가지 "
+               L"않고 행을 직접 체크해야 합니다. 정리한 캐시는 휴지통(없는 드라이브는 격리 폴더)으로 옮깁니다.";
+    }
+    return L"Windows 임시 파일·오류 보고서·휴지통·브라우저 캐시와 npm·pip·Gradle·"
+           L"Cargo·NuGet 공용 캐시를 분석합니다. [실제 확보]는 디스크 할당 크기 기준이며 "
+           L"하드 링크로 다른 곳과 나누는 파일은 뺍니다. 휴지통 비우기를 뺀 항목은 "
+           L"휴지통(없는 드라이브는 격리 폴더)으로 옮기므로 그곳을 비워야 공간이 확보됩니다. "
+           L"휴지통 비우기(영구 삭제)와 개발 도구 캐시는 [모두 선택]에 들어가지 않습니다.";
+}
+
+void cleaner_panel_set_kinds(HWND panel, unsigned kinds)
+{
+    CleanerPanel *p = panel_of(panel);
+
+    if (p != NULL && p->scan == NULL && p->run == NULL) {
+        p->kinds = kinds;
+        SetWindowTextW(p->info, info_text(kinds));
+    }
+}
+
+unsigned cleaner_panel_kinds(HWND panel)
+{
+    CleanerPanel *p = panel_of(panel);
+
+    return p != NULL ? p->kinds : 0;
 }
 
 int cleaner_panel_refresh(HWND panel)
@@ -1069,7 +1108,12 @@ int cleaner_panel_refresh(HWND panel)
     SendMessageW(p->progress, PBM_SETPOS, 0, 0);
     update_detail(p);
     p->started = GetTickCount64();
-    p->scan = cleaner_scan_start(NULL, on_scan_notify, panel);
+    {
+        CleanerOps ops;
+        memset(&ops, 0, sizeof(ops));
+        ops.kinds = p->kinds;
+        p->scan = cleaner_scan_start(&ops, on_scan_notify, panel);
+    }
     if (p->scan == NULL) {
         SetWindowTextW(p->status, L"분석을 시작하지 못했습니다(메모리 또는 스레드 생성 실패).");
         return 0;
@@ -1225,7 +1269,7 @@ static int is_under(const wchar_t *path, const wchar_t *root)
 int cleaner_panel_verify(HWND panel, const wchar_t *expect_root)
 {
     CleanerPanel *p = panel_of(panel);
-    int failures = 0, recycle_rows = 0;
+    int failures = 0, recycle_rows = 0, has_system, has_dev;
     size_t i, j, ready = 0, manual_ready = 0, dev_ready = 0;
     wchar_t buf[512], want[512];
 
@@ -1233,6 +1277,9 @@ int cleaner_panel_verify(HWND panel, const wchar_t *expect_root)
     if (p == NULL || !p->has_plan) {
         return failures;
     }
+    /* 분석 범위: [시스템 정리]는 고정 대상 6개, [개발 캐시]는 개발 캐시·가상 디스크만 */
+    has_system = cleaner_kinds_include(p->kinds, CLEANER_RECYCLE_BIN);
+    has_dev = cleaner_kinds_include(p->kinds, CLEANER_DEV_CACHE);
     /* 계획은 분석 결과와 같은 순서·같은 판정이어야 한다(GUI 와 CLI 가 같은 계획을 쓴다). */
     PANEL_CHECK(p->plan.len == p->targets.len);
     for (i = 0; i < p->plan.len && i < p->targets.len; i++) {
@@ -1249,9 +1296,12 @@ int cleaner_panel_verify(HWND panel, const wchar_t *expect_root)
     PANEL_CHECK(IsWindowEnabled(p->refresh) && !IsWindowEnabled(p->cancel));
     PANEL_CHECK(SendMessageW(p->progress, PBM_GETPOS, 0, 0) == PROGRESS_RANGE);
     PANEL_CHECK(ListView_GetItemCount(p->list) == (int)p->targets.len);
-    PANEL_CHECK(p->targets.len >= CLEANER_DEV_CACHE); /* 고정 대상 6개 + 개발 캐시 */
+    /* 고정 대상 6개(시스템 정리) + 개발 캐시 하나 이상(개발 캐시) */
+    PANEL_CHECK(p->targets.len >=
+                (size_t)(has_system ? CLEANER_DEV_CACHE : 0) + (has_dev ? 1u : 0u));
     for (i = 0; i < p->targets.len; i++) {
         const CleanerTarget *t = &p->targets.items[i];
+        PANEL_CHECK(cleaner_kinds_include(p->kinds, t->kind)); /* 범위 밖 종류의 행은 없다 */
         if (t->kind == CLEANER_RECYCLE_BIN) {
             recycle_rows++;
             continue;
@@ -1340,10 +1390,10 @@ int cleaner_panel_verify(HWND panel, const wchar_t *expect_root)
         dev_ready += cleaner_target_runnable(t) && t->kind == CLEANER_DEV_CACHE;
     }
     fflush(stdout);
-    PANEL_CHECK(recycle_rows == 1);
+    PANEL_CHECK(recycle_rows == (has_system ? 1 : 0));
     PANEL_CHECK(ready > 0);
     /* [모두 선택]은 휴지통·개발 도구 캐시를 고르지 않는다(직접 체크해야 함) */
-    PANEL_CHECK(dev_ready > 0 && dev_ready == manual_ready);
+    PANEL_CHECK(dev_ready == manual_ready && (dev_ready > 0) == (has_dev != 0));
     PANEL_CHECK(cleaner_panel_check_all(panel, 1) == ready - manual_ready);
     PANEL_CHECK(!p->recycle_checked && p->dev_checked == 0 && p->caution_checked == 0);
     for (i = 0; i < p->targets.len; i++) {

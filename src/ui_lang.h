@@ -27,7 +27,7 @@ typedef enum {
 
 /* 번역 문자열 번호. 새 항목은 ui_lang.c 의 표에 네 언어를 모두 채운다. */
 typedef enum {
-    /* 탐색(탭) */
+    /* 탐색(사이드바 메뉴·페이지 제목) */
     UI_T_NAV_SCAN,
     UI_T_NAV_DRIVES,
     UI_T_NAV_CLEANUP,
@@ -35,6 +35,14 @@ typedef enum {
     UI_T_NAV_MONITOR,
     UI_T_NAV_CLEANER,
     UI_T_NAV_BOOSTER,
+    UI_T_NAV_CACHE,
+
+    /* 사이드바 그룹 머리글(목적별 메뉴) */
+    UI_T_GROUP_ANALYSIS,
+    UI_T_GROUP_CLEANUP,
+    UI_T_GROUP_CACHE,
+    UI_T_GROUP_QUARANTINE,
+    UI_T_GROUP_SYSTEM,
 
     /* 폴더 스캔: 버튼·체크 상자·입력 칸 */
     UI_T_SCAN_BROWSE,

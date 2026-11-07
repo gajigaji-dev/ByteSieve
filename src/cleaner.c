@@ -301,6 +301,14 @@ int cleaner_empty_recycle_system(uint32_t *code, void *ctx)
     return clean_plan_empty_recycle_system(code, ctx);
 }
 
+int cleaner_kinds_include(unsigned kinds, CleanerKind kind)
+{
+    if ((unsigned)kind >= (unsigned)CLEANER_KIND_COUNT) {
+        return 0;
+    }
+    return kinds == 0 || (kinds & CLEANER_KIND_BIT(kind)) != 0;
+}
+
 static CleanerOps resolve_ops(const CleanerOps *ops)
 {
     CleanerOps r;
@@ -1180,7 +1188,9 @@ int cleaner_analyze(CleanerList *list, const CleanupGuard *guard, const CleanerO
 
 #define STEP(kind, call)                                                         \
     do {                                                                         \
-        if (rc == 0) {                                                           \
+        if (rc == 0 && !cleaner_kinds_include(a.ops.kinds, (kind))) {            \
+            step++; /* 분석 범위 밖 종류 */                                      \
+        } else if (rc == 0) {                                                    \
             uint64_t sum_ = 0;                                                   \
             size_t i_;                                                           \
             if (progress != NULL) {                                              \

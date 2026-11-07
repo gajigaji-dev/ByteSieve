@@ -541,6 +541,110 @@ static void test_clear(void)
     CHECK(history_clear(NULL, &r) == -1 && r.error != 0);
 }
 
+/* history_track(CLI --track·GUI 공통): 기준 저장 → 비교 → 끔·취소·실패, 변화 문구. */
+static void test_track(void)
+{
+    wchar_t dir[MAX_PATH], text[96], blocked[MAX_PATH];
+    ScanModel m;
+    HistoryDiff d;
+    HistoryTrackResult r;
+    HistoryChange c;
+    HANDLE h;
+    int i;
+
+    swprintf(dir, MAX_PATH, L"%ls\\track", g_hist);
+    history_diff_init(&d);
+    scan_model_init(&m);
+    scan_model_build(&m, g_root, SCAN_DEPTH_UNLIMITED, NULL, NULL);
+
+    /* 1. 직전 스냅숏이 없으면 기준으로 저장한다(root NULL 이면 모델 루트) */
+    CHECK(history_track(&m, dir, NULL, 1, &d, &r) == HISTORY_TRACK_BASELINE);
+    CHECK(!r.has_diff && d.len == 0 && r.error == 0 && r.file != NULL);
+    CHECK(r.file != NULL && GetFileAttributesW(r.file) != INVALID_FILE_ATTRIBUTES);
+    CHECK(history_count(dir) == 1);
+    history_track_result_free(&r);
+    CHECK(r.file == NULL);
+
+    /* 2. 다시 추적하면 비교한 뒤 저장한다(바뀐 것이 없으면 변화 0개) */
+    CHECK(history_track(&m, dir, g_root, 1, &d, &r) == HISTORY_TRACK_COMPARED);
+    CHECK(r.has_diff && d.len == 0 && d.old_total == d.new_total);
+    history_track_result_free(&r);
+
+    /* 3. 저장하지 않게 하면 비교만 한다 */
+    CHECK(history_track(&m, dir, NULL, 0, &d, &r) == HISTORY_TRACK_DISABLED);
+    CHECK(r.has_diff);
+    history_track_result_free(&r);
+
+    /* 4. 취소된 스캔은 저장하지 않는다 */
+    m.report.cancelled = 1;
+    CHECK(history_track(&m, dir, NULL, 1, &d, &r) == HISTORY_TRACK_CANCELLED);
+    CHECK(r.has_diff);
+    history_track_result_free(&r);
+    m.report.cancelled = 0;
+
+    /* 5. 기록 폴더 자리에 파일이 있으면 저장하지 못한다(FAILED, 오류 번호를 남김) */
+    swprintf(blocked, MAX_PATH, L"%ls\\track-blocked", g_hist);
+    h = CreateFileW(blocked, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    CHECK(h != INVALID_HANDLE_VALUE);
+    if (h != INVALID_HANDLE_VALUE) {
+        CloseHandle(h);
+    }
+    CHECK(history_track(&m, blocked, NULL, 1, &d, &r) == HISTORY_TRACK_FAILED);
+    CHECK(r.error != 0 && !r.has_diff);
+    history_track_result_free(&r);
+    DeleteFileW(blocked);
+
+    /* 6. 빈 모델·SCAN_FATAL 은 아무것도 하지 않는다(이전 diff 도 지운다) */
+    scan_model_free(&m);
+    scan_model_init(&m);
+    CHECK(history_track(&m, dir, NULL, 1, &d, &r) == HISTORY_TRACK_NONE);
+    CHECK(r.file == NULL && d.len == 0);
+    history_track_result_free(&r);
+    CHECK(history_track(NULL, dir, NULL, 1, &d, &r) == HISTORY_TRACK_NONE);
+
+    /* 상태 이름·문구는 모두 있고 서로 다르다 */
+    for (i = 0; i < HISTORY_TRACK_STATUS_COUNT; i++) {
+        CHECK(wcscmp(history_track_status_name((HistoryTrackStatus)i), L"unknown") != 0);
+        CHECK(history_track_status_text((HistoryTrackStatus)i)[0] != L'\0');
+        if (i > 0) {
+            CHECK(wcscmp(history_track_status_name((HistoryTrackStatus)i),
+                         history_track_status_name((HistoryTrackStatus)(i - 1))) != 0);
+        }
+    }
+    CHECK(wcscmp(history_track_status_name(HISTORY_TRACK_BASELINE), L"baseline") == 0);
+    CHECK(wcscmp(history_track_status_name(HISTORY_TRACK_STATUS_COUNT), L"unknown") == 0);
+
+    /* 변화 문구 */
+    history_format_delta(1024, text, 96);
+    CHECK(wcscmp(text, L"+1.00 KiB") == 0);
+    history_format_delta(-300, text, 96);
+    CHECK(wcscmp(text, L"-300 B") == 0);
+    history_format_delta(0, text, 96);
+    CHECK(wcscmp(text, L"0 B") == 0);
+    history_format_delta(INT64_MIN, text, 96);
+    CHECK(text[0] == L'-');
+    memset(&c, 0, sizeof(c));
+    c.kind = HISTORY_ADDED;
+    c.delta = 1024;
+    history_change_text(&c, text, 96);
+    CHECK(wcscmp(text, L"새 폴더 +1.00 KiB") == 0);
+    c.kind = HISTORY_REMOVED;
+    c.delta = -1024;
+    c.uncertain = 1;
+    history_change_text(&c, text, 96);
+    CHECK(wcscmp(text, L"삭제됨 -1.00 KiB (?)") == 0);
+    c.kind = HISTORY_GROWN;
+    c.delta = 5;
+    c.uncertain = 0;
+    history_change_text(&c, text, 96);
+    CHECK(wcscmp(text, L"+5 B") == 0);
+    history_change_text(NULL, text, 96);
+    CHECK(text[0] == L'\0');
+
+    history_diff_free(&d);
+    scan_model_free(&m);
+}
+
 static int setup(void)
 {
     wchar_t tmp[MAX_PATH];
@@ -586,6 +690,7 @@ int main(void)
     test_files_and_errors();
     test_autosave_setting();
     test_clear();
+    test_track();
     remove_tree(g_root);
     remove_tree(g_hist);
 

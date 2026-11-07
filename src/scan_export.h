@@ -50,4 +50,27 @@ int export_html(const ScanModel *model, const ExportInfo *info, const wchar_t *f
 /* 노드 상태 표시 문구("정상", "읽기 실패", "일부 누락", "취소됨", "링크", "깊이 제한"). */
 const wchar_t *export_node_state(uint32_t flags);
 
+/* 내보내기 형식(GUI 저장 대화 상자의 기본 이름·확장자). */
+typedef enum { EXPORT_KIND_CSV = 0, EXPORT_KIND_HTML, EXPORT_KIND_COUNT } ExportKind;
+
+/* 확장자("csv", "html"). */
+const wchar_t *export_kind_ext(ExportKind kind);
+
+/*
+ * 기본 파일 이름 "ByteSieve-<대상 폴더 이름>-YYYYMMDD-HHMM.<확장자>"를 buf 에 쓴다.
+ *   - 대상 폴더 이름은 root 의 마지막 경로 요소(끝 구분자 무시)이며 63자까지만 쓴다.
+ *   - 파일 이름에 못 쓰는 글자(\ / : * ? " < > | 와 제어 문자)는 _ 로 바꾸고, 끝의 _ 는 지운다("D:\" → "D").
+ *   - 이름이 비면 "ByteSieve-YYYYMMDD-HHMM.<확장자>".
+ * time 은 지역 시각(NULL 이면 지금 시각, GetLocalTime). root 가 NULL 이면 빈 이름으로 본다.
+ */
+typedef struct {
+    unsigned year, month, day, hour, minute;
+} ExportTime;
+
+void export_default_name(const wchar_t *root, ExportKind kind, const ExportTime *time,
+                         wchar_t *buf, size_t len);
+
+/* 내보내기 실패 원인(사용자용 한 문장). Windows 오류 번호로 고른다. */
+const wchar_t *export_error_text(unsigned long error);
+
 #endif /* BYTESIEVE_SCAN_EXPORT_H */
