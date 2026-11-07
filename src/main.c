@@ -17,6 +17,7 @@
 #include "scan_model.h"
 #include "scanner.h"
 #include "size_format.h"
+#include "version.h"
 
 /* JSON Lines 모드에서 progress 이벤트를 내는 항목 간격. */
 #define JSONL_PROGRESS_INTERVAL 1000
@@ -307,6 +308,12 @@ int wmain(int argc, wchar_t **argv)
     CliParseResult parsed;
 
     set_wide_mode(stderr);
+    /* 버전(인자가 이것 하나일 때만. "--version" 이라는 폴더는 "disk-scanner -- --version"). */
+    if (argc == 2 && wcscmp(argv[1], L"--version") == 0) {
+        set_wide_mode(stdout);
+        wprintf(L"disk-scanner %ls\n", BYTESIEVE_VERSION_WSTRING);
+        return EXIT_COMPLETE;
+    }
     /* 개발 환경 분석(읽기 전용). */
     if (argc >= 2 && wcscmp(argv[1], L"devenv") == 0) {
         return run_devenv(argc - 1, argv + 1);

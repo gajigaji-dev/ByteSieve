@@ -63,4 +63,17 @@ int cleanup_panel_verify(HWND panel, int expect_cancelled);
  */
 int cleanup_panel_verify_trash(HWND panel, size_t expect_moved);
 
+/*
+ * 자체 검사(--self-test-trash): 마지막 정리에서 휴지통 대신 격리 폴더로 간 항목 수.
+ * 휴지통을 쓸 수 없는 위치(이동식 드라이브, 휴지통 꺼짐·용량 부족으로 셸이 영구 삭제하려 함)면 0 보다 크다.
+ */
+size_t cleanup_panel_quarantined(HWND panel);
+
+/*
+ * 자체 검사 정리: 마지막 정리에서 격리 폴더로 간 항목만 원래 위치로 복원한다(덮어쓰지 않음, 영구 삭제
+ * 없음). 항목마다 "restored: <원래 경로>" 또는 "restore failed: <상태> <원래 경로>" 를 stdout 에 쓴다.
+ * 복원한 수를 반환한다.
+ */
+size_t cleanup_panel_restore_quarantined(HWND panel);
+
 #endif /* BYTESIEVE_GUI_CLEANUP_H */

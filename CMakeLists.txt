@@ -1,5 +1,13 @@
 cmake_minimum_required(VERSION 3.21)
-project(ByteSieve LANGUAGES C)
+# 버전은 여기 한 곳에서만 정한다(version.h·exe 버전 리소스·설치 프로그램·릴리스 이름이 따른다). docs/release.md 참고.
+project(ByteSieve VERSION 1.0.0 LANGUAGES C RC)
+
+# C 런타임을 정적으로 링크한다: 사용자 PC 에 VC++ 재배포 패키지가 없어도 exe 하나로 실행된다.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+# 생성 헤더(version.h): CLI·GUI·리소스가 함께 쓴다.
+configure_file(src/version.h.in ${CMAKE_CURRENT_BINARY_DIR}/generated/version.h @ONLY)
+set(BYTESIEVE_GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -7,8 +15,20 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 function(bytesieve_configure target)
     target_compile_definitions(${target} PRIVATE UNICODE _UNICODE)
+    target_include_directories(${target} PRIVATE ${BYTESIEVE_GENERATED_DIR})
     if(MSVC)
-        target_compile_options(${target} PRIVATE /W4 /utf-8 /std:c11)
+        # 리소스 파일(.rc)에는 C 컴파일러 옵션을 주지 않는다.
+        target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:C>:/W4 /utf-8 /std:c11>)
+    endif()
+endfunction()
+
+# 배포하는 exe: 아이콘·버전 정보·앱 매니페스트 리소스(res/*.rc). 매니페스트는 리소스로 넣으므로
+# 링커가 따로 만들지 않게 한다(중복 매니페스트 방지).
+function(bytesieve_exe_resources target rc)
+    target_sources(${target} PRIVATE ${rc})
+    target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/res)
+    if(MSVC)
+        target_link_options(${target} PRIVATE /MANIFEST:NO)
     endif()
 endfunction()
 
@@ -195,7 +215,8 @@ bytesieve_configure(bytesieve_settings)
 # 시스템 정리·개발 캐시 페이지(gui_cleaner 패널 둘, 분석 범위만 다름)·프로젝트 정리(gui_cleanup)·부스터(gui_booster).
 add_executable(bytesieve-gui WIN32 src/gui_main.c src/gui_nav.c src/gui_scan.c src/gui_theme.c
                src/gui_drives.c src/gui_cleanup.c src/gui_quarantine.c src/gui_monitor.c
-               src/gui_treemap.c src/gui_cleaner.c src/gui_booster.c src/gui_settings.c)
+               src/gui_treemap.c src/gui_cleaner.c src/gui_booster.c src/gui_settings.c
+               src/gui_progress.c)
 target_link_libraries(bytesieve-gui PRIVATE bytesieve_job bytesieve_history bytesieve_export
                       bytesieve_treemap bytesieve_ui_lang bytesieve_nav bytesieve_settings
                       bytesieve_cleaner bytesieve_booster
@@ -203,6 +224,7 @@ target_link_libraries(bytesieve-gui PRIVATE bytesieve_job bytesieve_history byte
                       bytesieve_cleanup_trash bytesieve_dev_cache bytesieve_sysmon comctl32
                       comdlg32 shell32 ole32 dwmapi uxtheme)
 bytesieve_configure(bytesieve-gui)
+bytesieve_exe_resources(bytesieve-gui ${CMAKE_CURRENT_SOURCE_DIR}/res/gui.rc)
 
 # 대용량 폴더 스캔의 실행 시간·메모리 측정 도구.
 add_executable(bytesieve-bench src/bench.c)
@@ -220,6 +242,12 @@ add_executable(disk-scanner src/main.c)
 target_link_libraries(disk-scanner PRIVATE bytesieve_cli bytesieve_cli_clean bytesieve_jsonl
                       bytesieve_cleanup_rules bytesieve_format)
 bytesieve_configure(disk-scanner)
+bytesieve_exe_resources(disk-scanner ${CMAKE_CURRENT_SOURCE_DIR}/res/cli.rc)
+
+# 배포 파일(설치 프로그램·포터블 ZIP 의 내용). tools/package.ps1 이 cmake --install 로 모은다.
+install(TARGETS bytesieve-gui disk-scanner RUNTIME DESTINATION .)
+install(FILES LICENSE DESTINATION . RENAME LICENSE.txt)
+install(FILES installer/README.txt DESTINATION .)
 
 enable_testing()
 
@@ -233,6 +261,9 @@ add_test(NAME no_args COMMAND disk-scanner)
 set_tests_properties(no_args PROPERTIES WILL_FAIL TRUE)
 
 add_test(NAME help COMMAND disk-scanner --help)
+# 버전: CMake project VERSION 과 같은 값을 출력한다(릴리스 이름·설치 프로그램 버전과 일치).
+add_test(NAME cli_version COMMAND disk-scanner --version)
+set_tests_properties(cli_version PROPERTIES PASS_REGULAR_EXPRESSION "^disk-scanner ${PROJECT_VERSION}")
 
 # 소스 디렉터리 스캔은 성공, 존재하지 않는 경로는 실패(종료 코드 2)해야 한다.
 add_test(NAME scan_source_dir COMMAND disk-scanner ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -511,6 +542,14 @@ add_test(NAME gui_cleanup_cancel
 add_test(NAME gui_trash
          COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:bytesieve-gui>
                  -DFIXTURE=${CMAKE_CURRENT_BINARY_DIR}/gui_trash_fixture
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/gui_trash_check.cmake)
+# 빌드 폴더에서 휴지통을 쓸 수 없으면(이동식 드라이브, 휴지통 꺼짐·용량 부족) 휴지통 경로는 검사할 수 없으므로
+# 이유를 쓰고 건너뛴다(격리한 테스트 파일은 복원해 실제 드라이브의 격리 폴더에 남기지 않음).
+set_tests_properties(gui_trash PROPERTIES SKIP_REGULAR_EXPRESSION "trash-skip:")
+# 위 건너뜀·복원 경로: 픽스처를 휴지통 없는 위치로 다뤄 격리로 전환되고, 이유를 알리고, 모두 원래 자리로 복원되는지.
+add_test(NAME gui_trash_fallback
+         COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:bytesieve-gui>
+                 -DFIXTURE=${CMAKE_CURRENT_BINARY_DIR}/gui_trash_fallback_fixture -DFORCE_QUARANTINE=1
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/gui_trash_check.cmake)
 # 격리 폴더 페이지: 픽스처를 휴지통 없는 드라이브처럼 다뤄(BYTESIEVE_QUARANTINE_ROOT) 정리 → 격리 →
 # 복원(같은 이름은 덮어쓰지 않고 건너뜀) → 영구 삭제까지 화면과 파일 상태를 확인한다.

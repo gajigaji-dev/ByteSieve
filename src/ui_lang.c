@@ -124,6 +124,11 @@ static const wchar_t *const k_text[UI_T_COUNT][UI_LANG_COUNT] = {
                                   L"Couldn't save the auto-save setting. Nothing was changed.",
                                   L"自動保存の設定を保存できませんでした。設定は変更されていません。",
                                   L"无法保存自动保存设置。设置未更改。"},
+    [UI_T_SET_ABOUT] = {L"정보", L"About", L"バージョン情報", L"关于"},
+    [UI_T_SET_VERSION] = {L"ByteSieve %ls · PolyForm Noncommercial 1.0.0 라이선스",
+                          L"ByteSieve %ls · PolyForm Noncommercial 1.0.0 license",
+                          L"ByteSieve %ls · PolyForm Noncommercial 1.0.0 ライセンス",
+                          L"ByteSieve %ls · PolyForm Noncommercial 1.0.0 许可证"},
 };
 
 static const wchar_t *const k_lang_name[UI_LANG_COUNT] = {L"ko", L"en", L"ja", L"zh-Hans"};

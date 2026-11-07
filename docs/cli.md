@@ -3,6 +3,7 @@
 ```
 disk-scanner [--max-depth N] [--jsonl] [--track [--history-dir DIR]] [--threads N] <directory>
 disk-scanner -h | --help
+disk-scanner --version                  # 버전(예: disk-scanner 1.0.0)
 disk-scanner find <directory> ...        # 정리 후보 찾기: 아래 [find](#정리-후보-찾기-disk-scanner-find) 참고
 disk-scanner clean project|system ...   # 정리: 아래 [clean](#정리-disk-scanner-clean) 참고
 disk-scanner devenv ...                 # 개발 환경 분석: 아래 [devenv](#개발-환경-분석-disk-scanner-devenv) 참고
@@ -16,6 +17,7 @@ disk-scanner devenv ...                 # 개발 환경 분석: 아래 [devenv](
 | `--history-dir DIR` | 스냅숏 폴더(`--track`과 함께만 사용). 기본: 환경 변수 `BYTESIEVE_HISTORY_DIR`, 없으면 `%LOCALAPPDATA%\ByteSieve\history` |
 | `--threads N` | 폴더 열거 작업 스레드 수(0 = 자동, 1 = 병렬 없음, 최대 8) |
 | `-h`, `--help` | 도움말(다른 인자보다 우선) |
+| `--version` | 버전을 출력하고 끝냄(인자가 이것 하나일 때만. 종료 코드 0). 이름이 `--version`인 폴더는 `disk-scanner -- --version` |
 | `--` | 다음 인자를 대상 폴더로 취급 |
 
 옵션과 대상의 순서는 상관없고 `--max-depth=2`처럼 `=` 형식도 받습니다.

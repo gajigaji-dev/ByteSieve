@@ -11,6 +11,7 @@
 #include <wchar.h>
 
 #include "gui_scan.h"
+#include "gui_progress.h"
 #include "gui_theme.h"
 #include "gui_treemap.h"
 #include "path.h"
@@ -996,7 +997,8 @@ static void start_scan(void)
 
     clear_results();
     g_scan.progress_pos = 0;
-    SendMessageW(g_scan.progress, PBM_SETPOS, 0, 0);
+    /* 첫 진행률이 오기 전에는 전체량을 모르므로 움직이는 막대로 보인다. */
+    progress_set(g_scan.progress, PROGRESS_BUSY, 0, PROGRESS_RANGE);
     precise = SendMessageW(g_scan.precise, BM_GETCHECK, 0, 0) == BST_CHECKED;
     g_scan.job = scan_job_start_ex(target, SCAN_DEPTH_UNLIMITED,
                                   precise ? (unsigned)SCAN_OPT_HARDLINKS : 0u,
@@ -1036,7 +1038,7 @@ static void update_progress(void)
     pos = (int)(scan_progress_fraction(&snap.progress) * PROGRESS_RANGE);
     if (pos > g_scan.progress_pos) {
         g_scan.progress_pos = pos;
-        SendMessageW(g_scan.progress, PBM_SETPOS, (WPARAM)pos, 0);
+        progress_set(g_scan.progress, PROGRESS_RUNNING, pos, PROGRESS_RANGE);
     }
     format_size(snap.progress.bytes, size, 32);
     if (snap.progress.precise) {
@@ -1096,7 +1098,7 @@ static void finish_scan(void)
                                                 : L"other";
         swprintf(text, sizeof(text) / sizeof(text[0]), L"%ls: 폴더를 열 수 없습니다 (%ls).",
                  head, kind);
-        SendMessageW(g_scan.progress, PBM_SETPOS, 0, 0);
+        progress_set(g_scan.progress, PROGRESS_FAILED, 0, PROGRESS_RANGE);
     } else {
         format_size(r->total_bytes, size, 32);
         swprintf(text, sizeof(text) / sizeof(text[0]),
@@ -1105,9 +1107,8 @@ static void finish_scan(void)
                  (unsigned long long)r->file_count, (unsigned long long)r->dir_count, size,
                  (unsigned long long)r->error_count, (unsigned long long)r->skipped_dir_count,
                  (double)snap.elapsed_ms / 1000.0);
-        if (!r->cancelled) {
-            SendMessageW(g_scan.progress, PBM_SETPOS, PROGRESS_RANGE, 0);
-        }
+        progress_set(g_scan.progress, r->cancelled ? PROGRESS_CANCELLED : PROGRESS_DONE, 0,
+                     PROGRESS_RANGE);
     }
     set_status(text);
     set_scanning(0);
@@ -1564,6 +1565,13 @@ static int verify_screen(void)
     /* 결과가 있으면(취소된 스캔 포함) 내보낼 수 있다. */
     SELF_CHECK(IsWindowEnabled(g_scan.export_csv) == (g_scan.model.status != SCAN_FATAL));
     SELF_CHECK(IsWindowEnabled(g_scan.export_html) == (g_scan.model.status != SCAN_FATAL));
+    /* 진행 막대: 끝난 방식(완료·취소·실패)이 막대 상태로도 보이고, 움직이는 막대는 멈췄다. */
+    SELF_CHECK(progress_state(g_scan.progress) ==
+               (g_scan.model.status == SCAN_FATAL  ? PROGRESS_FAILED
+                : g_scan.model.report.cancelled ? PROGRESS_CANCELLED
+                                                : PROGRESS_DONE));
+    SELF_CHECK((GetWindowLongW(g_scan.progress, GWL_STYLE) & PBS_MARQUEE) == 0);
+    SELF_CHECK(pos > 0); /* 실패·취소해도 막대가 비어 사라진 것처럼 보이지 않는다 */
 
     if (g_scan.self_test == SCAN_VERIFY_SCAN || g_scan.self_test == SCAN_VERIFY_CHANGES ||
         g_scan.self_test == SCAN_VERIFY_PRECISE) {
