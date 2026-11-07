@@ -34,6 +34,8 @@ typedef enum {
     UI_T_NAV_CACHE,
     UI_T_NAV_QUARANTINE,
     UI_T_NAV_MONITOR,
+    UI_T_NAV_CLEANER,
+    UI_T_NAV_BOOSTER,
 
     /* 폴더 스캔: 버튼·체크 상자·입력 칸 */
     UI_T_SCAN_BROWSE,

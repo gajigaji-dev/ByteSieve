@@ -1,0 +1,67 @@
+#ifndef BYTESIEVE_GUI_CLEANER_H
+#define BYTESIEVE_GUI_CLEANER_H
+
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <stddef.h>
+
+#include "cleaner.h"
+
+/*
+ * Cleaner 패널(자식 창): Windows 임시 파일·오류 보고서·휴지통·브라우저 캐시·개발 도구 캐시를 분석해
+ * 대상마다 예상 확보 용량·파일 수·상태(정리 가능, 프로그램 실행 중, 최근 항목 제외 등)를 체크 목록으로
+ * 보여 주고, 사용자가 체크하고 확인한 대상만 정리한다(cleaner.h).
+ *   - 분석·정리는 작업 스레드에서 한다. 분석은 읽기 전용이다.
+ *   - [모두 선택]은 휴지통과 개발 도구 캐시를 고르지 않는다(cleaner_target_manual_only). 휴지통
+ *     비우기는 영구 삭제이고, 개발 도구 캐시는 여러 프로젝트가 함께 써서 지우면 다시 내려받아야 하므로
+ *     사용자가 행을 직접 체크해야 한다.
+ *   - 정리 뒤 오프라인 빌드가 안 되는 개발 캐시(cleaner_target_caution)는 상태 칸에 "정리 가능 · 주의",
+ *     설명 칸에 [주의], 선택 요약에 "주의 n개", 확인 창에 [주의]와 경고 문단으로 알린다.
+ *   - 정리 전 확인 창(기본 [아니요]). 휴지통이 골라져 있으면 영구 삭제를 따로 한 번 더 묻는다
+ *     ([예] 비우고 진행, [아니요] 휴지통은 빼고 진행, [취소] 아무것도 하지 않음, 기본 [아니요]).
+ *   - 휴지통 외의 항목은 휴지통(없는 드라이브는 격리 폴더)으로 옮기며 영구 삭제하지 않는다.
+ *   - 끝나면 대상마다 결과(옮긴 수·확보 용량·건너뜀·실패)를 보여 주고, 실패한 항목을 알린다.
+ */
+
+/* 분석이 끝나면 부모에게 WM_COMMAND(MAKEWPARAM(id, CLN_ANALYZED), panel). */
+#define CLN_ANALYZED 1
+/* 정리가 끝나면 부모에게 WM_COMMAND(MAKEWPARAM(id, CLN_CLEANED), panel). */
+#define CLN_CLEANED 2
+
+int cleaner_panel_register(HINSTANCE inst);
+HWND cleaner_panel_create(HWND parent, int id, HFONT font, int dpi);
+
+/* 분석을 시작한다. 시작했으면 1. */
+int cleaner_panel_refresh(HWND panel);
+/* 한 번이라도 분석을 시작했으면 1. */
+int cleaner_panel_loaded(HWND panel);
+int cleaner_panel_busy(HWND panel);
+void cleaner_panel_cancel(HWND panel);
+
+/*
+ * 정리할 수 있는 대상을 모두 체크하거나(check=1, 휴지통·개발 도구 캐시는 건드리지 않음) 모두 해제한다
+ * (check=0, 직접 체크한 대상 포함). 체크한 대상 수를 반환한다.
+ */
+size_t cleaner_panel_check_all(HWND panel, int check);
+
+/* kind 인 대상 행을 사용자가 직접 체크·해제한 것처럼 바꾼다(정리할 수 없는 행은 체크되지 않음).
+ * 체크한 대상 수(전체)를 반환한다. */
+size_t cleaner_panel_check_kind(HWND panel, CleanerKind kind, int check);
+
+/* 체크한 대상의 정리를 시작한다. confirm 이 1 이면 확인 창을 띄운다. 시작했으면 1. */
+int cleaner_panel_run(HWND panel, int confirm);
+
+/*
+ * 자체 검사: 분석 결과 화면이 목록과 맞는지, 휴지통 행이 있고 휴지통·개발 도구 캐시가 [모두 선택]으로
+ * 체크되지 않는지, 주의 대상의 상태 칸·선택 요약이 맞는지(주의 대상마다 stdout 에 "caution: <이름>"),
+ * 파일 시스템 대상(임시 파일·브라우저·개발 캐시)의 위치가 모두 expect_root 아래인지 확인한다
+ * (아니면 실제 사용자 파일을 볼 수 있으므로 정리하면 안 된다). 실패 수를 반환한다.
+ */
+int cleaner_panel_verify(HWND panel, const wchar_t *expect_root);
+
+/* 자체 검사: 정리 뒤 옮긴 항목은 원래 자리에 없고 결과 표시가 맞는지, 휴지통은 비우지 않았는지. */
+int cleaner_panel_verify_run(HWND panel, size_t expect_targets);
+
+#endif /* BYTESIEVE_GUI_CLEANER_H */

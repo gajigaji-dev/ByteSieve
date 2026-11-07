@@ -26,6 +26,8 @@ static const wchar_t *const k_text[UI_T_COUNT][UI_LANG_COUNT] = {
     [UI_T_NAV_CACHE] = {L"공용 캐시", L"Shared caches", L"共有キャッシュ", L"共享缓存"},
     [UI_T_NAV_QUARANTINE] = {L"격리 폴더", L"Quarantine", L"隔離フォルダー", L"隔离文件夹"},
     [UI_T_NAV_MONITOR] = {L"시스템", L"System", L"システム", L"系统"},
+    [UI_T_NAV_CLEANER] = {L"클리너", L"Cleaner", L"クリーナー", L"清理"},
+    [UI_T_NAV_BOOSTER] = {L"부스터", L"Booster", L"ブースター", L"加速"},
 
     [UI_T_SCAN_BROWSE] = {L"찾아보기...", L"Browse...", L"参照...", L"浏览..."},
     [UI_T_SCAN_START] = {L"스캔", L"Scan", L"スキャン", L"扫描"},

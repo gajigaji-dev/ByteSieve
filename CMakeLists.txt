@@ -89,6 +89,20 @@ target_include_directories(bytesieve_dev_cache PUBLIC src)
 target_link_libraries(bytesieve_dev_cache PUBLIC bytesieve_cleanup_trash shell32 ole32)
 bytesieve_configure(bytesieve_dev_cache)
 
+# Cleaner: 사용자 임시 파일·Windows 오류 보고서·휴지통·브라우저 캐시·공용 개발 캐시 분석과,
+# 고른 대상만 정리(휴지통 비우기 외에는 cleanup_trash 의 안전 장치로 휴지통·격리 폴더로).
+add_library(bytesieve_cleaner STATIC src/cleaner.c)
+target_include_directories(bytesieve_cleaner PUBLIC src)
+target_link_libraries(bytesieve_cleaner PUBLIC bytesieve_cleanup_trash bytesieve_dev_cache
+                      bytesieve_scanner shell32 ole32)
+bytesieve_configure(bytesieve_cleaner)
+
+# Booster: 시작 프로그램 목록·켜기/끄기(StartupApproved), 프로세스 CPU·메모리, 보호 판정 후 끝내기.
+add_library(bytesieve_booster STATIC src/booster.c)
+target_include_directories(bytesieve_booster PUBLIC src)
+target_link_libraries(bytesieve_booster PUBLIC bytesieve_path advapi32 shell32 ole32 psapi user32)
+bytesieve_configure(bytesieve_booster)
+
 # 스퀘어리파이드 트리맵 배치(순수 계산). GUI 폴더 스캔 탭의 트리맵 보기가 쓴다.
 add_library(bytesieve_treemap STATIC src/treemap.c)
 target_include_directories(bytesieve_treemap PUBLIC src)
@@ -129,11 +143,12 @@ bytesieve_configure(bytesieve_ui_lang)
 # 격리 폴더 탭(휴지통 없는 드라이브에서 격리한 항목의 복원·영구 삭제),
 # 시스템 탭(RAM·CPU 실시간 사용률 막대·그래프).
 # gui_theme: Windows 11 창 외곽(DWM), 언어별 UI 글꼴, 글자 폭에 맞춘 컨트롤 크기.
+# Cleaner 탭(gui_cleaner)·Booster 탭(gui_booster).
 add_executable(bytesieve-gui WIN32 src/gui_main.c src/gui_theme.c src/gui_drives.c
                src/gui_cleanup.c src/gui_cache.c src/gui_quarantine.c src/gui_monitor.c
-               src/gui_treemap.c)
+               src/gui_treemap.c src/gui_cleaner.c src/gui_booster.c)
 target_link_libraries(bytesieve-gui PRIVATE bytesieve_job bytesieve_history bytesieve_export
-                      bytesieve_treemap bytesieve_ui_lang
+                      bytesieve_treemap bytesieve_ui_lang bytesieve_cleaner bytesieve_booster
                       bytesieve_drive bytesieve_format bytesieve_cleanup_job
                       bytesieve_cleanup_trash bytesieve_dev_cache bytesieve_sysmon comctl32
                       comdlg32 shell32 ole32 dwmapi)
@@ -312,6 +327,20 @@ target_link_libraries(test_size_format PRIVATE bytesieve_format)
 bytesieve_configure(test_size_format)
 add_test(NAME size_format COMMAND test_size_format)
 
+# Cleaner: 사용자 폴더를 픽스처로 돌리고 옮긴 항목은 픽스처의 격리 폴더로(BYTESIEVE_QUARANTINE_ROOT),
+# 휴지통 조회·비우기와 프로그램 실행 여부는 가짜 함수로(실제 휴지통은 건드리지 않음).
+add_executable(test_cleaner tests/test_cleaner.c)
+target_link_libraries(test_cleaner PRIVATE bytesieve_cleaner)
+bytesieve_configure(test_cleaner)
+add_test(NAME cleaner COMMAND test_cleaner)
+
+# Booster: 가짜 레지스트리 키(HKCU\Software\ByteSieveTest)·임시 폴더로 시작 프로그램 목록·켜기/끄기,
+# 보호 판정·CPU 계산, 테스트가 띄운 자식 프로세스만 끝내기.
+add_executable(test_booster tests/test_booster.c)
+target_link_libraries(test_booster PRIVATE bytesieve_booster)
+bytesieve_configure(test_booster)
+add_test(NAME booster COMMAND test_booster)
+
 # 표시 언어: 모든 번역이 채워졌는지, 언어마다 서식 지정자가 같은지, 언어 태그·LANGID 해석, 환경 변수 우선.
 add_executable(test_ui_lang tests/test_ui_lang.c)
 target_link_libraries(test_ui_lang PRIVATE bytesieve_ui_lang)
@@ -404,6 +433,15 @@ add_test(NAME gui_cache
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/gui_cache_check.cmake)
 # 시스템 탭: 몇 초 동안 RAM·CPU 를 측정해 화면·1초 갱신 간격·측정 실패 표시를 확인한다.
 add_test(NAME gui_monitor COMMAND bytesieve-gui --self-test-monitor)
+# Cleaner 탭: 사용자 폴더·TEMP 를 픽스처로 돌려 분석 → 화면 확인 → 휴지통 비우기를 뺀 정리 가능한
+# 대상을 모두 정리(픽스처의 격리 폴더로) → 오래된 항목만 옮기고 최근 항목·프로필 설정은 남는지 확인.
+add_test(NAME gui_cleaner
+         COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:bytesieve-gui>
+                 -DFIXTURE=${CMAKE_CURRENT_BINARY_DIR}/gui_cleaner_fixture
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/gui_cleaner_check.cmake)
+# Booster 탭: 시작 프로그램·프로세스 목록과 CPU 측정, 보호 대상(자신·시스템)은 고를 수 없는지(읽기만 함).
+add_test(NAME gui_booster COMMAND bytesieve-gui --self-test-booster)
+set_tests_properties(gui_cleaner gui_booster PROPERTIES TIMEOUT 120)
 # 표시 언어: 언어마다 창을 만들어 번역 문구·언어별 글꼴, 최소 창 크기에서 단추 문구가 잘리지 않고
 # 탭 영역 안에 있는지 확인한다(문구가 긴 언어에서 배치가 깨지지 않게).
 foreach(lang ko en ja zh-Hans)
