@@ -170,7 +170,8 @@ $env:BYTESIEVE_LANG = "ja"; build\Debug\bytesieve-gui.exe
 - 실행할 때 다시 확인합니다: 분석 뒤 바뀐 임시 파일, 그사이 실행된 브라우저의 캐시는 건너뜁니다. 사용 중이라 옮기지 못한 파일은 실패로 남기고 나머지는 계속합니다.
 - 끝나면 대상마다 옮긴 수·옮긴 크기·건너뜀·실패를 상태 칸에 쓰고, 정리하지 못한 항목은 창으로 알립니다(행을 고르면 항목별 사유).
 
-보호 조건은 [cleanup.md](cleanup.md#시스템-정리)를 참고하세요.
+보호 조건은 [cleanup.md](cleanup.md#시스템-정리)를 참고하세요. 같은 정리를 CLI에서는 `disk-scanner clean system`으로 할 수 있습니다
+(같은 분석·선택 정책·실행 코드, [cli.md](cli.md#정리-disk-scanner-clean)).
 
 ### 실제 확보 용량
 
@@ -200,7 +201,7 @@ $env:BYTESIEVE_LANG = "ja"; build\Debug\bytesieve-gui.exe
 5. 끝나면 **정리** 열에 항목별 결과(`휴지통으로 이동됨`, `격리 폴더로 이동됨`, `건너뜀: …`, `실패: …`)가 표시되고,
    옮긴 항목은 Windows 휴지통 또는 **격리 폴더** 탭에서 복원할 수 있습니다.
 
-탐지 규칙과 보호 조건은 [cleanup.md](cleanup.md)를 참고하세요.
+탐지 규칙과 보호 조건은 [cleanup.md](cleanup.md)를 참고하세요. 같은 정리를 CLI에서는 `disk-scanner clean project <폴더>`로 할 수 있습니다.
 
 ## 부스터
 

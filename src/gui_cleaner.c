@@ -59,11 +59,6 @@ typedef struct {
 } PanelParams;
 
 typedef struct {
-    int checked;
-    int ran; /* 이번 분석 결과로 정리를 실행했음(다시 분석하기 전에는 다시 고를 수 없음) */
-} RowState;
-
-typedef struct {
     HWND hwnd;
     HWND refresh, cancel, status, progress, info, check_all, check_none, run_btn, selection, list,
         detail;
@@ -71,23 +66,25 @@ typedef struct {
     int dpi;
 
     CleanerScanJob *scan;
-    CleanerList targets;
-    RowState *rows;
+    CleanerList targets; /* 분석 결과(표시용: 상태·제외·위치 근거) */
+    CleanPlan plan;      /* 정리 계획(targets 와 같은 순서): 선택·실행 결과 */
+    int has_plan;
     int has_result;
     int loaded;
     ULONGLONG started;
 
+    /* 선택 요약(clean_plan_summarize 에서 옮겨 둔다) */
     size_t checked_count;
     uint64_t checked_bytes;   /* 체크한 대상(휴지통 제외)의 파일 크기 합 */
     uint64_t checked_reclaim; /* 체크한 대상(휴지통 제외)의 실제 확보 가능 합 */
     int recycle_checked;
-    size_t caution_checked; /* 체크한 대상 중 주의(cleaner_target_caution) 수 */
-    size_t dev_checked;     /* 체크한 대상 중 개발 도구 캐시 수 */
+    size_t caution_checked; /* 체크한 대상 중 주의 수 */
+    size_t dev_checked;     /* 체크한 대상 중 직접 골라야 하는 대상(개발 도구 캐시) 수 */
 
-    CleanerRunJob *run;
+    CleanPlanRunJob *run;
     int run_interactive;
     ULONGLONG run_started;
-    CleanerRunResult result;
+    CleanPlanTotals totals; /* 마지막 실행 합계 */
     int has_run;
 
     wchar_t cell[512];
@@ -108,9 +105,20 @@ static const CleanerKindInfo *kind_of(const CleanerTarget *t)
     return cleaner_kind_info(t->kind);
 }
 
-static int can_check(const CleanerPanel *p, size_t i)
+static CleanPlanTarget *plan_at(CleanerPanel *p, size_t i)
 {
-    return p->rows != NULL && !p->rows[i].ran && cleaner_target_runnable(&p->targets.items[i]);
+    return p->has_plan && i < p->plan.len ? &p->plan.items[i] : NULL;
+}
+
+static int can_check(CleanerPanel *p, size_t i)
+{
+    return clean_plan_selectable(plan_at(p, i));
+}
+
+static int is_checked(CleanerPanel *p, size_t i)
+{
+    const CleanPlanTarget *t = plan_at(p, i);
+    return t != NULL && t->selected;
 }
 
 static void error_text(uint32_t code, wchar_t *buf, size_t len)
@@ -136,22 +144,21 @@ static void target_text(const CleanerTarget *t, wchar_t *buf, size_t len)
     }
 }
 
-static void state_text(const CleanerPanel *p, size_t i, wchar_t *buf, size_t len)
+static void state_text(CleanerPanel *p, size_t i, wchar_t *buf, size_t len)
 {
     const CleanerTarget *t = &p->targets.items[i];
     wchar_t size[32], why[160];
 
-    if (p->has_run && p->result.targets != NULL && i < p->result.target_count &&
-        p->result.targets[i].selected) {
-        const CleanerTargetResult *r = &p->result.targets[i];
+    if (p->has_run && plan_at(p, i) != NULL && plan_at(p, i)->ran) {
+        const CleanPlanTarget *r = plan_at(p, i);
         if (kind_of(t)->permanent) {
-            if (p->result.recycle_emptied) {
-                format_size(p->result.recycle_bytes, size, 32);
+            if (r->moved > 0) {
+                format_size(r->moved_bytes, size, 32);
                 swprintf(buf, len, L"비움(영구 삭제) · %ls", size);
             } else {
-                error_text(p->result.recycle_code, why, 160);
+                error_text(p->totals.permanent_code, why, 160);
                 swprintf(buf, len, L"비우지 못함: %ls (0x%08X)", why[0] ? why : L"오류",
-                         (unsigned)p->result.recycle_code);
+                         (unsigned)p->totals.permanent_code);
             }
             return;
         }
@@ -205,27 +212,15 @@ static void excluded_text(const CleanerTarget *t, wchar_t *buf, size_t len)
 
 static void recount(CleanerPanel *p)
 {
-    size_t i;
+    CleanPlanSummary s;
 
-    p->checked_count = 0;
-    p->checked_bytes = 0;
-    p->checked_reclaim = 0;
-    p->recycle_checked = 0;
-    p->caution_checked = 0;
-    p->dev_checked = 0;
-    for (i = 0; p->rows != NULL && i < p->targets.len; i++) {
-        if (p->rows[i].checked) {
-            p->checked_count++;
-            p->caution_checked += (size_t)cleaner_target_caution(&p->targets.items[i]);
-            p->dev_checked += p->targets.items[i].kind == CLEANER_DEV_CACHE;
-            if (kind_of(&p->targets.items[i])->permanent) {
-                p->recycle_checked = 1;
-            } else {
-                p->checked_bytes += p->targets.items[i].bytes;
-                p->checked_reclaim += p->targets.items[i].reclaim_bytes;
-            }
-        }
-    }
+    clean_plan_summarize(p->has_plan ? &p->plan : NULL, &s);
+    p->checked_count = s.targets;
+    p->checked_bytes = s.bytes;
+    p->checked_reclaim = s.reclaim;
+    p->recycle_checked = s.permanent > 0;
+    p->caution_checked = s.caution;
+    p->dev_checked = s.manual;
 }
 
 static void update_selection(CleanerPanel *p)
@@ -244,8 +239,8 @@ static void update_selection(CleanerPanel *p)
         swprintf(text + n, sizeof(text) / sizeof(text[0]) - n, L" · 주의 %u개",
                  (unsigned)p->caution_checked);
     }
-    SetWindowTextW(p->selection, p->rows != NULL ? text : L"");
-    EnableWindow(p->check_all, !busy && p->rows != NULL);
+    SetWindowTextW(p->selection, p->has_plan ? text : L"");
+    EnableWindow(p->check_all, !busy && p->has_plan);
     EnableWindow(p->check_none, !busy && p->checked_count > 0);
     EnableWindow(p->run_btn, !busy && p->checked_count > 0);
 }
@@ -259,8 +254,20 @@ static void set_busy(CleanerPanel *p, int busy)
 
 static void set_checked(CleanerPanel *p, size_t i, int on)
 {
-    p->rows[i].checked = on && can_check(p, i);
+    clean_plan_set_selected(&p->plan, i, on);
     recount(p);
+}
+
+/* 마지막 실행에서 옮기지 못한 항목(건너뜀·실패·거부). 아직 시도 안 했거나 취소한 것은 아니다. */
+static int entry_unmoved(const CleanPlanEntry *e)
+{
+    CleanupTrashStatus s = e->outcome.status;
+
+    if (e->skip != CLEAN_SKIP_NONE) {
+        return 1;
+    }
+    return s != CLEANUP_TRASH_PENDING && s != CLEANUP_TRASH_MOVED &&
+           s != CLEANUP_TRASH_QUARANTINED && s != CLEANUP_TRASH_CANCELLED;
 }
 
 /* 고른 행의 설명·위치·제외 항목·실패 내역. */
@@ -272,7 +279,7 @@ static void update_detail(CleanerPanel *p)
     wchar_t text[1600], excl[256], state[256], source[MAX_PATH + 40], shared[200], size[32];
     size_t used, k;
 
-    if (row < 0 || p->rows == NULL || (size_t)row >= p->targets.len) {
+    if (row < 0 || !p->has_plan || (size_t)row >= p->targets.len) {
         SetWindowTextW(p->detail, p->has_result ? L"항목을 고르면 무엇을 정리하는지와 주의 사항이 "
                                                   L"여기 표시됩니다."
                                                 : L"");
@@ -301,16 +308,16 @@ static void update_detail(CleanerPanel *p)
              excl[0] ? L" · 제외: " : L"", excl, shared);
     /* 실행 뒤: 이 대상에서 옮기지 못한 항목 몇 개 */
     used = wcslen(text);
-    for (k = 0; p->has_run && k < p->result.entry_count && used + MAX_PATH + 80 < 1600; k++) {
-        const CleanerEntryOutcome *o = &p->result.entries[k];
-        int moved = o->skip == CLEANER_SKIP_NONE && (o->trash.status == CLEANUP_TRASH_MOVED ||
-                                                     o->trash.status == CLEANUP_TRASH_QUARANTINED);
-        if (o->target != (size_t)row || moved || o->trash.status == CLEANUP_TRASH_CANCELLED) {
+    for (k = 0; p->has_run && plan_at(p, (size_t)row)->ran &&
+                k < plan_at(p, (size_t)row)->entry_count && used + MAX_PATH + 80 < 1600;
+         k++) {
+        const CleanPlanEntry *o = &plan_at(p, (size_t)row)->entries[k];
+        if (!entry_unmoved(o)) {
             continue;
         }
-        swprintf(text + used, 1600 - used, L"\r\n  · %ls — %ls", o->path,
-                 o->skip != CLEANER_SKIP_NONE ? cleaner_skip_text(o->skip)
-                                              : cleanup_trash_status_text(o->trash.status));
+        swprintf(text + used, 1600 - used, L"\r\n  · %ls — %ls", o->item.path,
+                 o->skip != CLEAN_SKIP_NONE ? clean_skip_text(o->skip)
+                                            : cleanup_trash_status_text(o->outcome.status));
         used = wcslen(text);
     }
     SetWindowTextW(p->detail, text);
@@ -347,8 +354,14 @@ static void update_scan_progress(CleanerPanel *p)
 
 static void free_result(CleanerPanel *p)
 {
-    cleaner_run_result_free(&p->result);
+    memset(&p->totals, 0, sizeof(p->totals));
     p->has_run = 0;
+}
+
+static void free_plan(CleanerPanel *p)
+{
+    clean_plan_free(&p->plan);
+    p->has_plan = 0;
 }
 
 static void finish_scan(CleanerPanel *p)
@@ -364,11 +377,12 @@ static void finish_scan(CleanerPanel *p)
     rc = cleaner_scan_finish(p->scan, &p->targets);
     p->scan = NULL;
     p->has_result = 1;
-    free(p->rows);
-    p->rows = calloc(p->targets.len > 0 ? p->targets.len : 1, sizeof(*p->rows));
-    if (rc != 0 || p->rows == NULL) {
-        free(p->rows);
-        p->rows = NULL;
+    free_plan(p);
+    if (rc == 0 && cleaner_build_plan(&p->targets, &p->plan) == 0) {
+        p->has_plan = 1;
+    }
+    if (rc != 0 || !p->has_plan) {
+        free_plan(p);
         cleaner_list_free(&p->targets);
         SetWindowTextW(p->status, L"분석 결과를 표시하지 못했습니다(메모리 부족).");
         set_busy(p, 0);
@@ -407,13 +421,13 @@ static void on_run_notify(int finished, void *ctx)
 
 static void update_run_progress(CleanerPanel *p)
 {
-    CleanerRunSnapshot s;
+    CleanPlanSnapshot s;
     wchar_t text[256], size[32];
 
     if (p->run == NULL) {
         return;
     }
-    cleaner_run_progress(p->run, &s);
+    clean_plan_run_progress(p->run, &s);
     if (s.cancel_requested) {
         return;
     }
@@ -454,7 +468,7 @@ static int confirm_run(CleanerPanel *p)
            p->recycle_checked ? L" + 휴지통 비우기" : L"");
     for (i = 0; i < p->targets.len; i++) {
         const CleanerTarget *t = &p->targets.items[i];
-        if (!p->rows[i].checked) {
+        if (!is_checked(p, i)) {
             continue;
         }
         target_text(t, name, 160);
@@ -508,7 +522,7 @@ static int confirm_recycle(CleanerPanel *p, const CleanerTarget *t)
 
 static void show_failures(CleanerPanel *p, size_t failed)
 {
-    size_t k, shown = 0, cap = 1024 + (size_t)FAILURE_LIST_MAX * (MAX_PATH + 200), used;
+    size_t t, k, shown = 0, cap = 1024 + (size_t)FAILURE_LIST_MAX * (MAX_PATH + 200), used;
     wchar_t *text = malloc(cap * sizeof(*text)), why[200];
     int n;
 
@@ -519,33 +533,34 @@ static void show_failures(CleanerPanel *p, size_t failed)
                             L"사용 중인 프로그램을 닫은 뒤 다시 분석해 정리할 수 있습니다.\n\n",
                  (unsigned)failed);
     used = n > 0 ? (size_t)n : 0;
-    if (p->result.recycle_requested && !p->result.recycle_emptied) {
-        error_text(p->result.recycle_code, why, 200);
+    if (p->totals.permanent_requested && !p->totals.permanent_done) {
+        error_text(p->totals.permanent_code, why, 200);
         n = swprintf(text + used, cap - used, L"휴지통\n    비우지 못함: %ls (0x%08X)\n",
-                     why[0] ? why : L"오류", (unsigned)p->result.recycle_code);
+                     why[0] ? why : L"오류", (unsigned)p->totals.permanent_code);
         used += n > 0 ? (size_t)n : 0;
     }
-    for (k = 0; k < p->result.entry_count && shown < FAILURE_LIST_MAX; k++) {
-        const CleanerEntryOutcome *o = &p->result.entries[k];
-        int moved = o->skip == CLEANER_SKIP_NONE && (o->trash.status == CLEANUP_TRASH_MOVED ||
-                                                     o->trash.status == CLEANUP_TRASH_QUARANTINED);
-        if (moved || o->trash.status == CLEANUP_TRASH_CANCELLED) {
-            continue;
+    for (t = 0; t < p->plan.len && shown < FAILURE_LIST_MAX; t++) {
+        const CleanPlanTarget *pt = &p->plan.items[t];
+        for (k = 0; pt->ran && k < pt->entry_count && shown < FAILURE_LIST_MAX; k++) {
+            const CleanPlanEntry *o = &pt->entries[k];
+            if (!entry_unmoved(o)) {
+                continue;
+            }
+            if (o->skip != CLEAN_SKIP_NONE) {
+                swprintf(why, 200, L"%ls", clean_skip_text(o->skip));
+            } else if (o->outcome.status == CLEANUP_TRASH_FAILED ||
+                       o->outcome.status == CLEANUP_TRASH_QUARANTINE_FAILED) {
+                wchar_t err[160];
+                error_text(o->outcome.code, err, 160);
+                swprintf(why, 200, L"%ls (0x%08X)", err[0] ? err : L"옮기지 못함",
+                         (unsigned)o->outcome.code);
+            } else {
+                swprintf(why, 200, L"%ls", cleanup_trash_status_text(o->outcome.status));
+            }
+            n = swprintf(text + used, cap - used, L"%ls\n    %ls\n", o->item.path, why);
+            used += n > 0 ? (size_t)n : 0;
+            shown++;
         }
-        if (o->skip != CLEANER_SKIP_NONE) {
-            swprintf(why, 200, L"%ls", cleaner_skip_text(o->skip));
-        } else if (o->trash.status == CLEANUP_TRASH_FAILED ||
-                   o->trash.status == CLEANUP_TRASH_QUARANTINE_FAILED) {
-            wchar_t err[160];
-            error_text(o->trash.code, err, 160);
-            swprintf(why, 200, L"%ls (0x%08X)", err[0] ? err : L"옮기지 못함",
-                     (unsigned)o->trash.code);
-        } else {
-            swprintf(why, 200, L"%ls", cleanup_trash_status_text(o->trash.status));
-        }
-        n = swprintf(text + used, cap - used, L"%ls\n    %ls\n", o->path, why);
-        used += n > 0 ? (size_t)n : 0;
-        shown++;
     }
     MessageBoxW(GetAncestor(p->hwnd, GA_ROOT), text, L"Cleaner 결과", MB_OK | MB_ICONWARNING);
     free(text);
@@ -553,33 +568,30 @@ static void show_failures(CleanerPanel *p, size_t failed)
 
 static void finish_run(CleanerPanel *p)
 {
-    size_t i, moved = 0, failed = 0, skipped = 0;
-    uint64_t bytes = 0;
+    size_t i, moved, failed, skipped;
+    uint64_t bytes;
     wchar_t text[400], size[32], recycle[96];
 
     if (p->run == NULL) {
         return;
     }
     free_result(p);
-    cleaner_run_finish(p->run, &p->result);
+    /* 이번 실행에 들지 않은 대상의 지난 결과는 지운다(상태 칸은 마지막 실행만 보인다). */
+    for (i = 0; i < p->plan.len; i++) {
+        p->plan.items[i].ran = 0;
+    }
+    clean_plan_run_finish(p->run, &p->plan, &p->totals);
     p->run = NULL;
     p->has_run = 1;
-    for (i = 0; i < p->result.target_count && i < p->targets.len; i++) {
-        const CleanerTargetResult *r = &p->result.targets[i];
-        if (r->selected) {
-            p->rows[i].ran = 1;
-            p->rows[i].checked = 0;
-        }
-        moved += r->moved;
-        failed += r->failed;
-        skipped += r->skipped;
-        bytes += r->moved_bytes;
-    }
+    moved = p->totals.moved;
+    failed = p->totals.failed;
+    skipped = p->totals.skipped;
+    bytes = p->totals.moved_bytes; /* 휴지통 비우기는 들어 있지 않다(따로 알린다) */
     recount(p);
     recycle[0] = L'\0';
-    if (p->result.recycle_requested) {
-        format_size(p->result.recycle_bytes, size, 32);
-        if (p->result.recycle_emptied) {
+    if (p->totals.permanent_requested) {
+        format_size(p->totals.permanent_bytes, size, 32);
+        if (p->totals.permanent_done) {
             swprintf(recycle, 96, L" · 휴지통 비움(%ls)", size);
         } else {
             swprintf(recycle, 96, L" · 휴지통 비우지 못함");
@@ -589,15 +601,15 @@ static void finish_run(CleanerPanel *p)
     swprintf(text, sizeof(text) / sizeof(text[0]),
              L"정리 완료: %u개 옮김(%ls, 휴지통·격리 폴더를 비우면 확보)%ls · 건너뜀 %u개 · 실패 %u개%ls · %.1f초",
              (unsigned)moved, size, recycle, (unsigned)skipped, (unsigned)failed,
-             p->result.cancelled ? L" · 취소됨" : L"",
+             p->totals.was_cancelled ? L" · 취소됨" : L"",
              (double)(GetTickCount64() - p->run_started) / 1000.0);
     SetWindowTextW(p->status, text);
-    SendMessageW(p->progress, PBM_SETPOS, p->result.cancelled ? 0 : PROGRESS_RANGE, 0);
+    SendMessageW(p->progress, PBM_SETPOS, p->totals.was_cancelled ? 0 : PROGRESS_RANGE, 0);
     set_busy(p, 0);
     InvalidateRect(p->list, NULL, TRUE);
     update_detail(p);
     if (p->run_interactive &&
-        (failed + skipped > 0 || (p->result.recycle_requested && !p->result.recycle_emptied))) {
+        (failed + skipped > 0 || (p->totals.permanent_requested && !p->totals.permanent_done))) {
         show_failures(p, failed + skipped);
     }
     SendMessageW(GetParent(p->hwnd), WM_COMMAND, MAKEWPARAM(GetDlgCtrlID(p->hwnd), CLN_CLEANED),
@@ -610,18 +622,18 @@ static void toggle_rows(CleanerPanel *p, int clicked)
 {
     int row, on = -1;
 
-    if (p->rows == NULL || p->scan != NULL || p->run != NULL) {
+    if (!p->has_plan || p->scan != NULL || p->run != NULL) {
         return;
     }
     if (clicked >= 0) {
         if ((size_t)clicked < p->targets.len) {
-            set_checked(p, (size_t)clicked, !p->rows[clicked].checked);
+            set_checked(p, (size_t)clicked, !is_checked(p, (size_t)clicked));
             ListView_RedrawItems(p->list, clicked, clicked);
         }
     } else {
         for (row = ListView_GetNextItem(p->list, -1, LVNI_SELECTED); row >= 0;
              row = ListView_GetNextItem(p->list, row, LVNI_SELECTED)) {
-            if (can_check(p, (size_t)row) && !p->rows[row].checked) {
+            if (can_check(p, (size_t)row) && !is_checked(p, (size_t)row)) {
                 on = 1;
             }
         }
@@ -639,12 +651,12 @@ static void on_get_dispinfo(CleanerPanel *p, NMLVDISPINFOW *di)
     size_t i = (size_t)di->item.iItem;
     const CleanerTarget *t;
 
-    if (p->rows == NULL || i >= p->targets.len) {
+    if (!p->has_plan || i >= p->targets.len) {
         return;
     }
     t = &p->targets.items[i];
     if (di->item.mask & LVIF_STATE) {
-        int image = can_check(p, i) ? (p->rows[i].checked ? CHECK_ON : CHECK_OFF) : CHECK_NONE;
+        int image = can_check(p, i) ? (is_checked(p, i) ? CHECK_ON : CHECK_OFF) : CHECK_NONE;
         di->item.state = INDEXTOSTATEIMAGEMASK(image);
         di->item.stateMask = LVIS_STATEIMAGEMASK;
     }
@@ -898,15 +910,15 @@ static LRESULT CALLBACK panel_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             p->scan = NULL;
         }
         if (p != NULL && p->run != NULL) {
-            cleaner_run_cancel(p->run);
-            cleaner_run_finish(p->run, NULL);
+            clean_plan_run_cancel(p->run);
+            clean_plan_run_finish(p->run, NULL, NULL);
             p->run = NULL;
         }
         return 0;
     case WM_NCDESTROY:
         if (p != NULL) {
             free_result(p);
-            free(p->rows);
+            free_plan(p);
             cleaner_list_free(&p->targets);
             free(p);
         }
@@ -951,8 +963,7 @@ int cleaner_panel_refresh(HWND panel)
         return 0;
     }
     ListView_SetItemCountEx(p->list, 0, 0);
-    free(p->rows);
-    p->rows = NULL;
+    free_plan(p);
     free_result(p);
     cleaner_list_free(&p->targets);
     p->has_result = 0;
@@ -992,7 +1003,7 @@ void cleaner_panel_cancel(HWND panel)
         EnableWindow(p->cancel, FALSE);
         SetWindowTextW(p->status, L"취소하는 중...");
     } else if (p != NULL && p->run != NULL) {
-        cleaner_run_cancel(p->run);
+        clean_plan_run_cancel(p->run);
         EnableWindow(p->cancel, FALSE);
         SetWindowTextW(p->status, L"취소하는 중... 옮기던 항목과 휴지통 비우기는 끝까지 합니다.");
     }
@@ -1001,18 +1012,12 @@ void cleaner_panel_cancel(HWND panel)
 size_t cleaner_panel_check_all(HWND panel, int check)
 {
     CleanerPanel *p = panel_of(panel);
-    size_t i;
 
-    if (p == NULL || p->rows == NULL || p->scan != NULL || p->run != NULL) {
+    if (p == NULL || !p->has_plan || p->scan != NULL || p->run != NULL) {
         return 0;
     }
-    for (i = 0; i < p->targets.len; i++) {
-        /* 휴지통 비우기(영구 삭제)와 개발 도구 캐시는 직접 체크해야 한다. 해제는 모두 한다. */
-        if (check && cleaner_target_manual_only(&p->targets.items[i])) {
-            continue;
-        }
-        p->rows[i].checked = check && can_check(p, i);
-    }
+    /* 휴지통 비우기(영구 삭제)와 개발 도구 캐시(MANUAL)는 직접 체크해야 한다. 해제는 모두 한다. */
+    clean_plan_select_all(&p->plan, check);
     recount(p);
     InvalidateRect(p->list, NULL, FALSE);
     update_selection(p);
@@ -1024,12 +1029,12 @@ size_t cleaner_panel_check_kind(HWND panel, CleanerKind kind, int check)
     CleanerPanel *p = panel_of(panel);
     size_t i;
 
-    if (p == NULL || p->rows == NULL || p->scan != NULL || p->run != NULL) {
+    if (p == NULL || !p->has_plan || p->scan != NULL || p->run != NULL) {
         return 0;
     }
     for (i = 0; i < p->targets.len; i++) {
         if (p->targets.items[i].kind == kind) {
-            p->rows[i].checked = check && can_check(p, i);
+            clean_plan_set_selected(&p->plan, i, check);
         }
     }
     recount(p);
@@ -1041,10 +1046,10 @@ size_t cleaner_panel_check_kind(HWND panel, CleanerKind kind, int check)
 int cleaner_panel_run(HWND panel, int confirm)
 {
     CleanerPanel *p = panel_of(panel);
-    int *selected;
-    size_t i, n = 0;
+    CleanPlanOps ops;
+    size_t i;
 
-    if (p == NULL || p->rows == NULL || p->scan != NULL || p->run != NULL) {
+    if (p == NULL || !p->has_plan || p->scan != NULL || p->run != NULL) {
         return 0;
     }
     if (p->checked_count == 0) {
@@ -1055,31 +1060,30 @@ int cleaner_panel_run(HWND panel, int confirm)
         SetWindowTextW(p->status, L"정리를 취소했습니다. 아무것도 바뀌지 않았습니다.");
         return 0;
     }
-    selected = calloc(p->targets.len, sizeof(*selected));
-    if (selected == NULL) {
-        return 0;
-    }
-    for (i = 0; i < p->targets.len; i++) {
-        selected[i] = p->rows[i].checked && can_check(p, i);
-        if (selected[i] && kind_of(&p->targets.items[i])->permanent) {
+    memset(&ops, 0, sizeof(ops));
+    for (i = 0; i < p->plan.len; i++) {
+        const CleanPlanTarget *t = &p->plan.items[i];
+        if (t->selected && (t->flags & CLEAN_PLAN_PERMANENT)) {
             /* 영구 삭제는 확인 창에서 직접 [예]를 고른 경우에만(자체 검사는 고르지 않음). */
             int answer = confirm ? confirm_recycle(p, &p->targets.items[i]) : 0;
             if (answer < 0) {
-                free(selected);
                 SetWindowTextW(p->status, L"정리를 취소했습니다. 아무것도 바뀌지 않았습니다.");
                 return 0;
             }
-            selected[i] = answer == 1;
+            if (answer == 1) {
+                ops.allow_permanent = 1;
+            } else {
+                clean_plan_set_selected(&p->plan, i, 0);
+            }
         }
-        n += selected[i] != 0;
     }
-    if (n == 0) {
-        free(selected);
+    recount(p);
+    if (p->checked_count == 0) {
+        update_selection(p);
         SetWindowTextW(p->status, L"정리할 대상이 없습니다. 아무것도 바뀌지 않았습니다.");
         return 0;
     }
-    p->run = cleaner_run_start(&p->targets, selected, NULL, on_run_notify, panel);
-    free(selected);
+    p->run = clean_plan_run_start(&p->plan, &ops, on_run_notify, panel);
     if (p->run == NULL) {
         SetWindowTextW(p->status, L"정리를 시작하지 못했습니다(메모리 또는 스레드 생성 실패).");
         return 0;
@@ -1128,9 +1132,21 @@ int cleaner_panel_verify(HWND panel, const wchar_t *expect_root)
     size_t i, j, ready = 0, manual_ready = 0, dev_ready = 0;
     wchar_t buf[512], want[512];
 
-    PANEL_CHECK(p != NULL && p->rows != NULL);
-    if (p == NULL || p->rows == NULL) {
+    PANEL_CHECK(p != NULL && p->has_plan);
+    if (p == NULL || !p->has_plan) {
         return failures;
+    }
+    /* 계획은 분석 결과와 같은 순서·같은 판정이어야 한다(GUI 와 CLI 가 같은 계획을 쓴다). */
+    PANEL_CHECK(p->plan.len == p->targets.len);
+    for (i = 0; i < p->plan.len && i < p->targets.len; i++) {
+        const CleanPlanTarget *pt = &p->plan.items[i];
+        const CleanerTarget *ct = &p->targets.items[i];
+        PANEL_CHECK(pt->origin == i && pt->ready == cleaner_target_runnable(ct));
+        PANEL_CHECK(pt->reclaim == ct->reclaim_bytes && pt->bytes == ct->bytes);
+        PANEL_CHECK(((pt->flags & CLEAN_PLAN_MANUAL) != 0) == cleaner_target_manual_only(ct));
+        PANEL_CHECK(((pt->flags & CLEAN_PLAN_CAUTION) != 0) == cleaner_target_caution(ct));
+        PANEL_CHECK(wcscmp(pt->id, cleaner_target_id(ct)) == 0);
+        PANEL_CHECK(pt->entry_count == ct->entry_count);
     }
     PANEL_CHECK(p->scan == NULL && p->has_result && p->loaded && !p->targets.cancelled);
     PANEL_CHECK(IsWindowEnabled(p->refresh) && !IsWindowEnabled(p->cancel));
@@ -1217,7 +1233,7 @@ int cleaner_panel_verify(HWND panel, const wchar_t *expect_root)
     PANEL_CHECK(!p->recycle_checked && p->dev_checked == 0 && p->caution_checked == 0);
     for (i = 0; i < p->targets.len; i++) {
         if (cleaner_target_manual_only(&p->targets.items[i])) {
-            PANEL_CHECK(!p->rows[i].checked);
+            PANEL_CHECK(!is_checked(p, i));
         }
     }
     GetWindowTextW(p->selection, buf, 512);
@@ -1229,7 +1245,7 @@ int cleaner_panel_verify(HWND panel, const wchar_t *expect_root)
     {
         uint64_t sum = 0;
         for (i = 0; i < p->targets.len; i++) {
-            if (p->rows[i].checked) {
+            if (is_checked(p, i)) {
                 sum += p->targets.items[i].reclaim_bytes;
             }
         }
@@ -1251,41 +1267,46 @@ int cleaner_panel_verify_run(HWND panel, size_t expect_targets)
 {
     CleanerPanel *p = panel_of(panel);
     int failures = 0;
-    size_t i, selected = 0, moved = 0;
+    size_t i, j, selected = 0, moved = 0;
     wchar_t buf[512];
 
-    PANEL_CHECK(p != NULL && p->has_run);
-    if (p == NULL || !p->has_run) {
+    PANEL_CHECK(p != NULL && p->has_run && p->has_plan);
+    if (p == NULL || !p->has_run || !p->has_plan) {
         return failures;
     }
     PANEL_CHECK(p->run == NULL && IsWindowEnabled(p->refresh) && !IsWindowEnabled(p->cancel));
-    PANEL_CHECK(!p->result.recycle_requested && !p->result.recycle_emptied);
-    for (i = 0; i < p->result.target_count; i++) {
-        selected += p->result.targets[i].selected;
-        PANEL_CHECK(!p->result.targets[i].selected || p->rows[i].ran);
-    }
-    PANEL_CHECK(selected == expect_targets);
-    for (i = 0; i < p->result.entry_count; i++) {
-        const CleanerEntryOutcome *o = &p->result.entries[i];
-        if (o->skip == CLEANER_SKIP_NONE && (o->trash.status == CLEANUP_TRASH_MOVED ||
-                                             o->trash.status == CLEANUP_TRASH_QUARANTINED)) {
-            moved++;
-            PANEL_CHECK(GetFileAttributesW(o->path) == INVALID_FILE_ATTRIBUTES);
-            PANEL_CHECK(o->trash.recycled_path != NULL &&
-                        GetFileAttributesW(o->trash.recycled_path) != INVALID_FILE_ATTRIBUTES);
-            if (o->trash.recycled_path != NULL) {
-                wprintf(L"%ls: %ls\n",
-                        o->trash.status == CLEANUP_TRASH_MOVED ? L"recycled" : L"quarantined",
-                        o->trash.recycled_path);
+    PANEL_CHECK(!p->totals.permanent_requested && !p->totals.permanent_done);
+    PANEL_CHECK(p->totals.targets == expect_targets);
+    for (i = 0; i < p->plan.len; i++) {
+        const CleanPlanTarget *t = &p->plan.items[i];
+        if (!t->ran) {
+            continue;
+        }
+        selected++;
+        for (j = 0; j < t->entry_count; j++) {
+            const CleanPlanEntry *e = &t->entries[j];
+            if (e->skip == CLEAN_SKIP_NONE && (e->outcome.status == CLEANUP_TRASH_MOVED ||
+                                               e->outcome.status == CLEANUP_TRASH_QUARANTINED)) {
+                moved++;
+                PANEL_CHECK(GetFileAttributesW(e->item.path) == INVALID_FILE_ATTRIBUTES);
+                PANEL_CHECK(e->outcome.recycled_path != NULL &&
+                            GetFileAttributesW(e->outcome.recycled_path) !=
+                                INVALID_FILE_ATTRIBUTES);
+                if (e->outcome.recycled_path != NULL) {
+                    wprintf(L"%ls: %ls\n",
+                            e->outcome.status == CLEANUP_TRASH_MOVED ? L"recycled" : L"quarantined",
+                            e->outcome.recycled_path);
+                }
             }
         }
     }
     fflush(stdout);
-    PANEL_CHECK(moved > 0);
+    PANEL_CHECK(selected == expect_targets);
+    PANEL_CHECK(moved > 0 && moved == p->totals.moved);
     GetWindowTextW(p->status, buf, 512);
     PANEL_CHECK(wcsncmp(buf, L"정리 완료: ", wcslen(L"정리 완료: ")) == 0);
     for (i = 0; i < p->targets.len; i++) {
-        if (p->result.targets[i].selected) {
+        if (p->plan.items[i].ran) {
             ListView_GetItemText(p->list, (int)i, COL_STATE, buf, 512);
             PANEL_CHECK(wcsncmp(buf, L"정리함 ", wcslen(L"정리함 ")) == 0);
             PANEL_CHECK(!can_check(p, i));

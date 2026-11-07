@@ -54,6 +54,18 @@ void jsonl_complete(JsonBuf *buf, ScanStatus status, int exit_code);
  */
 void jsonl_changes(JsonBuf *buf, const HistoryDiff *diff, const wchar_t *saved_to, size_t limit);
 
+/*
+ * 일반 이벤트를 만드는 도우미(정리 명령 disk-scanner clean 등). begin 으로 {"event":name 을 열고
+ * field_* 로 키를 더한 뒤 end 로 닫는다. field_key 는 키만 쓰고 값(배열·객체)은 raw 로 호출자가 쓴다.
+ */
+void jsonl_begin_event(JsonBuf *buf, const char *name);
+void jsonl_end_event(JsonBuf *buf);
+void jsonl_field_key(JsonBuf *buf, const char *key);
+void jsonl_field_u64(JsonBuf *buf, const char *key, uint64_t value);
+void jsonl_field_bool(JsonBuf *buf, const char *key, int value);
+void jsonl_field_string(JsonBuf *buf, const char *key, const wchar_t *value);
+void jsonl_raw(JsonBuf *buf, const char *text);
+
 /* scan_directory 의 visit 콜백으로 써서 interval 항목마다 progress 이벤트를 낸다. */
 typedef struct {
     JsonBuf *buf;

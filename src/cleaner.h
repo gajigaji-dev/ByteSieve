@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <wchar.h>
 
+#include "clean_plan.h"
 #include "cleanup_scan.h"
 #include "cleanup_trash.h"
 #include "dev_cache.h"
@@ -153,6 +154,17 @@ int cleaner_target_manual_only(const CleanerTarget *t);
 /* 정리 뒤 오프라인 빌드가 안 되는 등 더 주의할 대상이면 1(개발 캐시의 dev_cache caution). */
 int cleaner_target_caution(const CleanerTarget *t);
 
+/* 영문 식별자: 개발 캐시는 캐시 종류("npm", "gradle_wrapper"), 그 밖은 대상 종류("user_temp"). CLI --include 에 쓴다. */
+const wchar_t *cleaner_target_id(const CleanerTarget *t);
+
+/*
+ * 분석 결과를 정리 계획(clean_plan.h)으로 바꾼다(이전 내용은 지운다). 대상마다 계획 대상 하나, 순서는
+ * list->items 와 같다(plan->items[i].origin == i). ready 는 cleaner_target_runnable, 플래그는
+ * MANUAL(cleaner_target_manual_only)·CAUTION·PERMANENT(휴지통)·CHECK_RECENT(임시 파일·오류 보고서),
+ * app 은 실행 중이면 건너뛸 프로그램. 메모리가 부족하면 -1.
+ */
+int cleaner_build_plan(const CleanerList *list, CleanPlan *plan);
+
 /*
  * 시스템 연동 함수(테스트에서 바꿔 끼움). NULL 인 함수는 실제 시스템을 쓴다.
  *   app_running   exe 이름(대소문자 무시)의 프로세스가 실행 중이면 1
@@ -257,9 +269,11 @@ typedef struct {
 
 /*
  * selected[i] 가 0 이 아닌 대상만 정리하는 스레드를 시작한다(실행할 수 없는 대상은 무시).
- * 필요한 경로는 복사하므로 호출 뒤 list 를 바꿔도 된다. 휴지통이 골라져 있으면 먼저 비운다.
- * 휴지통 비우기 외에는 항목마다 cleanup_trash_one(시스템 기준 보호 목록)으로 옮긴다.
- * 실패하면 NULL.
+ * 내부적으로 cleaner_build_plan 으로 계획을 만들어 clean_plan_run_start 로 실행한다(GUI·CLI 와 같은 엔진).
+ * 필요한 경로는 복사하므로 호출 뒤 list 를 바꿔도 된다. 휴지통이 골라져 있으면 먼저 비운다
+ * (이 함수는 호출자가 영구 삭제를 이미 확인했다고 본다). 휴지통 비우기 외에는 항목마다
+ * cleanup_trash_one(시스템 기준 보호 목록)으로 옮긴다. 실행할 항목이 없으면 notify(1) 을 바로 부르고
+ * 빈 결과를 내는 작업을 돌려준다. 메모리가 부족하면 NULL.
  */
 CleanerRunJob *cleaner_run_start(const CleanerList *list, const int *selected,
                                  const CleanerOps *ops, cleaner_notify_fn notify, void *ctx);

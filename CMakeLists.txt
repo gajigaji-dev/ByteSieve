@@ -90,6 +90,12 @@ target_link_libraries(bytesieve_cleanup_trash PUBLIC bytesieve_cleanup bytesieve
                       shell32 uuid)
 bytesieve_configure(bytesieve_cleanup_trash)
 
+# 정리 계획(탐지 결과 → 대상·선택 정책·요약 → 실행). GUI 두 정리 탭과 CLI(disk-scanner clean)가 함께 쓴다.
+add_library(bytesieve_plan STATIC src/clean_plan.c)
+target_include_directories(bytesieve_plan PUBLIC src)
+target_link_libraries(bytesieve_plan PUBLIC bytesieve_cleanup_trash shell32 ole32)
+bytesieve_configure(bytesieve_plan)
+
 # 공용 개발 캐시(npm·pip·Gradle·Cargo·NuGet) 위치 탐지·용량 세기. 읽기 전용이며 정리는 cleanup_trash 로.
 add_library(bytesieve_dev_cache STATIC src/dev_cache.c)
 target_include_directories(bytesieve_dev_cache PUBLIC src)
@@ -100,7 +106,7 @@ bytesieve_configure(bytesieve_dev_cache)
 # 고른 대상만 정리(휴지통 비우기 외에는 cleanup_trash 의 안전 장치로 휴지통·격리 폴더로).
 add_library(bytesieve_cleaner STATIC src/cleaner.c)
 target_include_directories(bytesieve_cleaner PUBLIC src)
-target_link_libraries(bytesieve_cleaner PUBLIC bytesieve_cleanup_trash bytesieve_dev_cache
+target_link_libraries(bytesieve_cleaner PUBLIC bytesieve_plan bytesieve_cleanup_trash bytesieve_dev_cache
                       bytesieve_scanner shell32 ole32)
 bytesieve_configure(bytesieve_cleaner)
 
@@ -166,8 +172,16 @@ add_executable(bytesieve-bench src/bench.c)
 target_link_libraries(bytesieve-bench PRIVATE bytesieve_model bytesieve_cleanup bytesieve_format psapi)
 bytesieve_configure(bytesieve-bench)
 
+# disk-scanner clean: GUI 정리 탭과 같은 탐지(cleanup_job·cleaner)·계획(clean_plan)·실행을 쓰는 CLI.
+add_library(bytesieve_cli_clean STATIC src/cli_clean.c)
+target_include_directories(bytesieve_cli_clean PUBLIC src)
+target_link_libraries(bytesieve_cli_clean PUBLIC bytesieve_plan bytesieve_cleaner bytesieve_cleanup_job
+                      bytesieve_jsonl bytesieve_format bytesieve_cli ole32)
+bytesieve_configure(bytesieve_cli_clean)
+
 add_executable(disk-scanner src/main.c)
-target_link_libraries(disk-scanner PRIVATE bytesieve_cli bytesieve_jsonl bytesieve_cleanup_rules)
+target_link_libraries(disk-scanner PRIVATE bytesieve_cli bytesieve_cli_clean bytesieve_jsonl
+                      bytesieve_cleanup_rules bytesieve_format)
 bytesieve_configure(disk-scanner)
 
 enable_testing()
@@ -211,7 +225,7 @@ endfunction()
 set(SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 bytesieve_cli_test(complete 0 "${SRC_DIR}"
-    "Files: +[1-9]|Directories: +0|Total size: +[0-9.]+ KiB|Errors: +0\n|Status: +complete" "")
+    "Files: +[1-9]|Directories: +0|Total size: +[0-9.]+ [KM]iB|Errors: +0\n|Status: +complete" "")
 bytesieve_cli_test(options_after_target 0 "${SRC_DIR}|--max-depth=0"
     "Max depth: +0\n|Status: +complete" "")
 bytesieve_cli_test(partial 1 "@FIXTURE@"
@@ -257,6 +271,16 @@ add_test(NAME cli_track
                  -DFIXTURE=${CMAKE_CURRENT_BINARY_DIR}/cli_track_fixture
                  -DHIST=${CMAKE_CURRENT_BINARY_DIR}/cli_track_history
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_track_check.cmake)
+
+# disk-scanner clean: 미리보기·거부·실행(픽스처의 격리 폴더로). system 은 사용자 폴더를 픽스처로 돌린다.
+add_test(NAME cli_clean_project
+         COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:disk-scanner> -DMODE=project
+                 -DFIXTURE=${CMAKE_CURRENT_BINARY_DIR}/cli_clean_project_fixture
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_clean_check.cmake)
+add_test(NAME cli_clean_system
+         COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:disk-scanner> -DMODE=system
+                 -DFIXTURE=${CMAKE_CURRENT_BINARY_DIR}/cli_clean_system_fixture
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_clean_check.cmake)
 
 add_executable(test_path tests/test_path.c)
 target_link_libraries(test_path PRIVATE bytesieve_path)
@@ -363,6 +387,16 @@ add_executable(test_cleanup_rules tests/test_cleanup_rules.c)
 target_link_libraries(test_cleanup_rules PRIVATE bytesieve_cleanup_rules)
 bytesieve_configure(test_cleanup_rules)
 add_test(NAME cleanup_rules COMMAND test_cleanup_rules)
+
+add_executable(test_cli_clean tests/test_cli_clean.c)
+target_link_libraries(test_cli_clean PRIVATE bytesieve_cli_clean)
+bytesieve_configure(test_cli_clean)
+add_test(NAME cli_clean COMMAND test_cli_clean)
+
+add_executable(test_clean_plan tests/test_clean_plan.c)
+target_link_libraries(test_clean_plan PRIVATE bytesieve_plan)
+bytesieve_configure(test_clean_plan)
+add_test(NAME clean_plan COMMAND test_clean_plan)
 
 add_executable(test_reclaim tests/test_reclaim.c)
 target_link_libraries(test_reclaim PRIVATE bytesieve_cleanup)

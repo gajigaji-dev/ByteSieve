@@ -10,10 +10,12 @@
 
 #include "cleanup_rules.h"
 #include "cli.h"
+#include "cli_clean.h"
 #include "jsonl.h"
 #include "scan_history.h"
 #include "scan_model.h"
 #include "scanner.h"
+#include "size_format.h"
 
 /* JSON Lines 모드에서 progress 이벤트를 내는 항목 간격. */
 #define JSONL_PROGRESS_INTERVAL 1000
@@ -212,6 +214,63 @@ static int run_scan_jsonl(const CliOptions *opts)
     return code;
 }
 
+/* 표준 입력이 콘솔(대화형)이면 1. 파이프·파일·NUL 이면 확인을 받을 수 없다. */
+static int stdin_interactive(void)
+{
+    DWORD mode;
+    return GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &mode) != 0;
+}
+
+/* clean --apply 확인: 고른 대상 수·실제 확보 용량을 보여 주고 y/yes 일 때만 진행한다(기본 아니요). */
+static int console_confirm(const CleanPlanSummary *s, void *ctx)
+{
+    wchar_t line[32], size[32];
+    size_t n;
+
+    (void)ctx;
+    format_size(s->reclaim, size, 32);
+    fwprintf(stderr,
+             L"Move %u selected target(s) (reclaim %ls) to the Recycle Bin or quarantine "
+             L"folder? [y/N] ",
+             (unsigned)s->targets, size);
+    fflush(stderr);
+    if (fgetws(line, (int)(sizeof(line) / sizeof(line[0])), stdin) == NULL) {
+        return 0;
+    }
+    n = wcslen(line);
+    while (n > 0 && (line[n - 1] == L'\n' || line[n - 1] == L'\r' || line[n - 1] == L' ')) {
+        line[--n] = L'\0';
+    }
+    return _wcsicmp(line, L"y") == 0 || _wcsicmp(line, L"yes") == 0;
+}
+
+/* disk-scanner clean ...: GUI 정리 탭과 같은 탐지·계획·실행(cli_clean.h). */
+static int run_clean(int argc, wchar_t **argv)
+{
+    CliCleanOptions opts;
+    wchar_t err[512];
+
+    switch (cli_clean_parse_args(argc, argv, &opts, err, sizeof(err) / sizeof(err[0]))) {
+    case CLI_PARSE_HELP:
+        set_wide_mode(stdout);
+        cli_clean_print_usage(stdout);
+        return EXIT_COMPLETE;
+    case CLI_PARSE_ERROR:
+        fwprintf(stderr, L"error: %ls\n\n", err);
+        cli_clean_print_usage(stderr);
+        return EXIT_FATAL;
+    default:
+        break;
+    }
+    if (opts.jsonl) {
+        _setmode(_fileno(stdout), _O_BINARY);
+    } else {
+        set_wide_mode(stdout);
+    }
+    return cli_clean_run(&opts, stdout, stderr, stdin_interactive() ? console_confirm : NULL,
+                         NULL);
+}
+
 int wmain(int argc, wchar_t **argv)
 {
     CliOptions opts;
@@ -219,6 +278,10 @@ int wmain(int argc, wchar_t **argv)
     CliParseResult parsed;
 
     set_wide_mode(stderr);
+    /* 정리 명령. 이름이 clean 인 폴더를 스캔하려면 "disk-scanner -- clean" 또는 ".\clean". */
+    if (argc >= 2 && wcscmp(argv[1], L"clean") == 0) {
+        return run_clean(argc - 1, argv + 1);
+    }
     parsed = cli_parse_args(argc, argv, &opts, err, sizeof(err) / sizeof(err[0]));
     if (parsed == CLI_PARSE_OK && opts.threads >= 0) {
         scan_set_threads((unsigned)opts.threads);

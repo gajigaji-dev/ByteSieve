@@ -169,6 +169,43 @@ static void end_event(JsonBuf *buf)
     append(buf, "}\n", 2);
 }
 
+void jsonl_begin_event(JsonBuf *buf, const char *name)
+{
+    begin_event(buf, name);
+}
+
+void jsonl_end_event(JsonBuf *buf)
+{
+    end_event(buf);
+}
+
+void jsonl_field_key(JsonBuf *buf, const char *key)
+{
+    append_key(buf, key);
+}
+
+void jsonl_field_u64(JsonBuf *buf, const char *key, uint64_t value)
+{
+    append_u64_field(buf, key, value);
+}
+
+void jsonl_field_bool(JsonBuf *buf, const char *key, int value)
+{
+    append_key(buf, key);
+    append_str(buf, value ? "true" : "false");
+}
+
+void jsonl_field_string(JsonBuf *buf, const char *key, const wchar_t *value)
+{
+    append_key(buf, key);
+    jsonl_append_string(buf, value);
+}
+
+void jsonl_raw(JsonBuf *buf, const char *text)
+{
+    append_str(buf, text);
+}
+
 void jsonl_start(JsonBuf *buf, const wchar_t *target)
 {
     begin_event(buf, "start");
