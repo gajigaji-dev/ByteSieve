@@ -12,7 +12,7 @@
 
 ```
                     disk-scanner (CLI)                bytesieve-gui (GUI)
-                     │  cli · jsonl                     │  폴더 스캔(+트리맵) │ 드라이브 │ 정리 후보 │ 공용 캐시 │ 격리 폴더 │ 시스템
+                     │  cli · jsonl                     │  폴더 스캔(+트리맵) │ 드라이브 │ 클리너 │ 부스터 │ 정리 후보 │ 공용 캐시 │ 격리 폴더 │ 시스템
                      │                                  │
    scan_history ── scan_model ── scan_job        cleanup_job ── cleanup_trash ── dev_cache   drive   sysmon   treemap
    (변화 추적)     (폴더 트리)   (스캔 스레드)   (탐지 스레드)   (휴지통 이동)    (공용 캐시)  (드라이브· (RAM·CPU) (트리맵 배치)
@@ -45,6 +45,8 @@
 | `bytesieve_drive` / `bytesieve_sysmon` / `bytesieve_format` | 드라이브 조회(용량, BitLocker 상태: 셸 속성 `System.Volume.BitLockerProtection`), RAM·CPU 측정, 용량 표시 문자열 |
 | `bytesieve_treemap` | 스퀘어리파이드 트리맵 배치(순수 계산, GUI 트리맵 보기 `gui_treemap`이 사용) |
 | `bytesieve_cli` / `bytesieve_jsonl` | CLI 인자 해석·출력, JSON Lines 직렬화 |
+| `bytesieve_cleaner` | Cleaner: 사용자 임시 파일·오류 보고서·휴지통·브라우저 캐시·공용 개발 캐시 분석(읽기 전용), 고른 대상 정리(휴지통 비우기 → 항목마다 `cleanup_trash_one`), 분석·정리 작업 스레드 |
+| `bytesieve_booster` | Booster: 시작 프로그램 목록·켜기/끄기(StartupApproved), 프로세스 목록·CPU 계산·보호 판정·끝내기(PID 재사용 확인) |
 | `bytesieve_ui_lang` | GUI 표시 언어(한국어·영어·일본어·중국어 간체) 번역 문자열 표와 언어 결정(환경 변수 → 레지스트리 → Windows 표시 언어). 창과 무관 |
 
 GUI 안의 `gui_theme`은 창 외곽(DWM 둥근 모서리·Mica), 언어별 UI 글꼴, 글자 폭에 맞춘 컨트롤 크기를 맡습니다.

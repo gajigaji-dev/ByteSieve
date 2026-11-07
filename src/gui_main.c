@@ -10,7 +10,9 @@
 #include <string.h>
 #include <wchar.h>
 
+#include "gui_booster.h"
 #include "gui_cache.h"
+#include "gui_cleaner.h"
 #include "gui_cleanup.h"
 #include "gui_drives.h"
 #include "gui_monitor.h"
@@ -64,14 +66,31 @@ enum {
     IDC_EXPORT_HTML,
     IDC_CACHE,
     IDC_PRECISE,
-    IDC_TREEMAP
+    IDC_TREEMAP,
+    IDC_CLEANER,
+    IDC_BOOSTER
 };
 
 /* 내보내기 형식. */
 typedef enum { EXPORT_KIND_CSV, EXPORT_KIND_HTML } ExportKind;
 
 /* 탭 순서. */
-enum { TAB_SCAN, TAB_DRIVES, TAB_CLEANUP, TAB_CACHE, TAB_QUARANTINE, TAB_MONITOR };
+enum {
+    TAB_SCAN,
+    TAB_DRIVES,
+    TAB_CLEANER,
+    TAB_BOOSTER,
+    TAB_CLEANUP,
+    TAB_CACHE,
+    TAB_QUARANTINE,
+    TAB_MONITOR,
+    TAB_COUNT
+};
+
+/* 탭 이름(TAB_* 순서). */
+static const UiText k_tab_text[TAB_COUNT] = {
+    UI_T_NAV_SCAN,    UI_T_NAV_DRIVES, UI_T_NAV_CLEANER,    UI_T_NAV_BOOSTER,
+    UI_T_NAV_CLEANUP, UI_T_NAV_CACHE,  UI_T_NAV_QUARANTINE, UI_T_NAV_MONITOR};
 
 /* 순위 목록 열. */
 /* COL_UNIQUE·COL_DUP 는 정밀 스캔 결과일 때만 보인다(기본 스캔이면 너비 0). */
@@ -120,7 +139,10 @@ typedef enum {
     SELF_TEST_PRECISE, /* [정밀 스캔] 체크 → 스캔 → 하드 링크 보정 열·보기·분석 줄 검증·출력 → 종료 */
     SELF_TEST_CACHE,  /* 공용 캐시 탭 탐지 → 픽스처 안인지·화면 검증 → 정리 가능한 캐시를 모두
                        * 휴지통으로(확인 창 없이) → 결과 검증 → 종료 */
-    SELF_TEST_LANG    /* 지정한 언어로 창을 만들어 번역 문구·글꼴·최소 창 크기의 배치 검증 → 종료 */
+    SELF_TEST_LANG,   /* 지정한 언어로 창을 만들어 번역 문구·글꼴·최소 창 크기의 배치 검증 → 종료 */
+    SELF_TEST_CLEANER, /* Cleaner 탭 분석 → 픽스처 안인지·화면 검증 → 휴지통을 뺀 정리 가능한 대상을
+                        * 모두 정리(확인 창 없이) → 결과 검증 → 종료 */
+    SELF_TEST_BOOSTER /* Booster 탭 목록·CPU 측정 → 화면·보호 판정 검증(아무것도 바꾸지 않음) → 종료 */
 } SelfTest;
 
 typedef struct {
@@ -128,7 +150,7 @@ typedef struct {
     HWND path, browse, scan, cancel, progress, status, tree, list, view, analysis;
     HWND precise; /* [정밀 스캔(하드 링크)] 체크 상자 */
     HWND autosave, clear_history, export_csv, export_html;
-    HWND tabs, drives, cleanup, cache, quarantine, monitor;
+    HWND tabs, drives, cleanup, cache, quarantine, monitor, cleaner, booster;
     HWND treemap; /* 보기가 트리맵일 때 목록 자리에 보인다 */
     int map_syncing; /* 트리맵 조작을 트리에 반영하는 중(트리 선택으로 기준 폴더를 바꾸지 않음) */
     HFONT font;
@@ -159,6 +181,8 @@ typedef struct {
     const wchar_t *export_prefix;  /* SELF_TEST_EXPORT: 내보낼 파일 경로(확장자 제외) */
     const wchar_t *cache_root;     /* SELF_TEST_CACHE: 찾은 캐시가 모두 이 폴더 안이어야 정리한다 */
     size_t cache_expect;           /* SELF_TEST_CACHE: 선택해 옮기기 시작한 캐시 수 */
+    const wchar_t *cleaner_root;   /* SELF_TEST_CLEANER: 분석한 위치가 모두 이 폴더 안이어야 정리한다 */
+    size_t cleaner_expect;         /* SELF_TEST_CLEANER: 골라 정리를 시작한 대상 수 */
     int export_enabled_before_scan; /* SELF_TEST_EXPORT: 스캔 전 내보내기 버튼이 켜져 있었으면 1 */
 } App;
 
@@ -315,6 +339,10 @@ static void layout(void)
                body_h > 0 ? body_h : 0, TRUE);
     MoveWindow(g_app.monitor, x + m, rc.top + m, w - 2 * m > 0 ? w - 2 * m : 0,
                body_h > 0 ? body_h : 0, TRUE);
+    MoveWindow(g_app.cleaner, x + m, rc.top + m, w - 2 * m > 0 ? w - 2 * m : 0,
+               body_h > 0 ? body_h : 0, TRUE);
+    MoveWindow(g_app.booster, x + m, rc.top + m, w - 2 * m > 0 ? w - 2 * m : 0,
+               body_h > 0 ? body_h : 0, TRUE);
 }
 
 /* ---- 탭 ---- */
@@ -357,6 +385,15 @@ static void show_tab(int tab)
     ShowWindow(g_app.cache, tab == TAB_CACHE ? SW_SHOW : SW_HIDE);
     ShowWindow(g_app.quarantine, tab == TAB_QUARANTINE ? SW_SHOW : SW_HIDE);
     ShowWindow(g_app.monitor, tab == TAB_MONITOR ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_app.cleaner, tab == TAB_CLEANER ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_app.booster, tab == TAB_BOOSTER ? SW_SHOW : SW_HIDE);
+    /* Cleaner 는 처음 열 때 분석하고, Booster 는 처음 열 때 목록·측정을 시작한다. */
+    if (tab == TAB_CLEANER && !cleaner_panel_loaded(g_app.cleaner)) {
+        cleaner_panel_refresh(g_app.cleaner);
+    }
+    if (tab == TAB_BOOSTER) {
+        booster_panel_start(g_app.booster);
+    }
     if (tab == TAB_DRIVES && !drive_panel_loaded(g_app.drives)) {
         drive_panel_refresh(g_app.drives);
     }
@@ -1976,8 +2013,6 @@ static int text_is(HWND h, const wchar_t *expect)
  * 최소 창 크기에서도 폴더 스캔 탭의 단추·체크 상자 문구가 잘리지 않고 탭 영역 안에 있는지 확인한다. */
 static int verify_lang(void)
 {
-    static const UiText tabs[] = {UI_T_NAV_SCAN,  UI_T_NAV_DRIVES,     UI_T_NAV_CLEANUP,
-                                  UI_T_NAV_CACHE, UI_T_NAV_QUARANTINE, UI_T_NAV_MONITOR};
     static const UiText views[VIEW_COUNT] = {UI_T_VIEW_SIZE,   UI_T_VIEW_ALLOC, UI_T_VIEW_CHANGE,
                                              UI_T_VIEW_UNIQUE, UI_T_VIEW_DUP,
                                              UI_T_VIEW_TREEMAP};
@@ -1997,7 +2032,7 @@ static int verify_lang(void)
     RECT area, r;
     int failures = 0, cx, cy, i;
 
-    for (i = 0; i < (int)(sizeof(tabs) / sizeof(tabs[0])); i++) {
+    for (i = 0; i < TAB_COUNT; i++) {
         TCITEMW item;
         memset(&item, 0, sizeof(item));
         item.mask = TCIF_TEXT;
@@ -2005,7 +2040,7 @@ static int verify_lang(void)
         item.cchTextMax = (int)(sizeof(buf) / sizeof(buf[0]));
         buf[0] = L'\0';
         SendMessageW(g_app.tabs, TCM_GETITEMW, (WPARAM)i, (LPARAM)&item);
-        SELF_CHECK(wcscmp(buf, ui_text(tabs[i])) == 0);
+        SELF_CHECK(wcscmp(buf, ui_text(k_tab_text[i])) == 0);
     }
     for (i = 0; i < VIEW_COUNT; i++) {
         buf[0] = L'\0';
@@ -2094,8 +2129,6 @@ static void create_controls(void)
         {64, LVCFMT_RIGHT},  /* 파일 수 */
         {56, LVCFMT_RIGHT},  /* 비율 */
     };
-    static const UiText tabs[] = {UI_T_NAV_SCAN,  UI_T_NAV_DRIVES,     UI_T_NAV_CLEANUP,
-                                  UI_T_NAV_CACHE, UI_T_NAV_QUARANTINE, UI_T_NAV_MONITOR};
     static const UiText views[VIEW_COUNT] = {UI_T_VIEW_SIZE,   UI_T_VIEW_ALLOC, UI_T_VIEW_CHANGE,
                                              UI_T_VIEW_UNIQUE, UI_T_VIEW_DUP,
                                              UI_T_VIEW_TREEMAP};
@@ -2112,11 +2145,11 @@ static void create_controls(void)
     }
 
     g_app.tabs = make_child(WC_TABCONTROLW, L"", WS_CLIPSIBLINGS | WS_TABSTOP, 0, IDC_TABS);
-    for (i = 0; i < (int)(sizeof(tabs) / sizeof(tabs[0])); i++) {
+    for (i = 0; i < TAB_COUNT; i++) {
         TCITEMW tab;
         memset(&tab, 0, sizeof(tab));
         tab.mask = TCIF_TEXT;
-        tab.pszText = (wchar_t *)ui_text(tabs[i]);
+        tab.pszText = (wchar_t *)ui_text(k_tab_text[i]);
         SendMessageW(g_app.tabs, TCM_INSERTITEMW, (WPARAM)i, (LPARAM)&tab);
     }
 
@@ -2217,6 +2250,8 @@ static void create_controls(void)
     g_app.quarantine =
         quarantine_panel_create(g_app.hwnd, IDC_QUARANTINE, g_app.font, g_app.dpi);
     g_app.monitor = monitor_panel_create(g_app.hwnd, IDC_MONITOR, g_app.font, g_app.dpi);
+    g_app.cleaner = cleaner_panel_create(g_app.hwnd, IDC_CLEANER, g_app.font, g_app.dpi);
+    g_app.booster = booster_panel_create(g_app.hwnd, IDC_BOOSTER, g_app.font, g_app.dpi);
     /* 새 자식 창은 Z 순서 맨 아래에 붙으므로, 모두 만든 뒤 탭 컨트롤을 맨 아래로 보내
      * 탭 위의 컨트롤이 가려지지 않게 한다. */
     SetWindowPos(g_app.tabs, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
@@ -2398,6 +2433,40 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 DestroyWindow(hwnd);
             }
             return 0;
+        case IDC_CLEANER:
+            if (HIWORD(wp) == CLN_ANALYZED && g_app.self_test == SELF_TEST_CLEANER) {
+                /* 분석한 위치가 모두 픽스처 안이고 화면이 맞을 때만 정리한다(실제 파일 보호).
+                 * [모두 선택]은 휴지통 비우기(영구 삭제)와 개발 도구 캐시를 고르지 않으므로
+                 * 개발 도구 캐시는 사용자처럼 직접 체크한다. 휴지통은 고르지 않는다. */
+                int failures = cleaner_panel_verify(g_app.cleaner, g_app.cleaner_root);
+                g_app.cleaner_expect = 0;
+                if (failures == 0) {
+                    cleaner_panel_check_all(g_app.cleaner, 1);
+                    g_app.cleaner_expect =
+                        cleaner_panel_check_kind(g_app.cleaner, CLEANER_DEV_CACHE, 1);
+                }
+                if (failures != 0 || g_app.cleaner_expect == 0 ||
+                    !cleaner_panel_run(g_app.cleaner, 0)) {
+                    fwprintf(stderr, L"self-test failed: cleaner did not start (%u selected)\n",
+                             (unsigned)g_app.cleaner_expect);
+                    KillTimer(hwnd, TIMER_SELF_TEST);
+                    g_app.self_test_exit = 1;
+                    DestroyWindow(hwnd);
+                }
+            } else if (HIWORD(wp) == CLN_CLEANED && g_app.self_test == SELF_TEST_CLEANER) {
+                KillTimer(hwnd, TIMER_SELF_TEST);
+                g_app.self_test_exit =
+                    cleaner_panel_verify_run(g_app.cleaner, g_app.cleaner_expect) == 0 ? 0 : 1;
+                DestroyWindow(hwnd);
+            }
+            return 0;
+        case IDC_BOOSTER:
+            if (HIWORD(wp) == BPN_REFRESHED && g_app.self_test == SELF_TEST_BOOSTER) {
+                KillTimer(hwnd, TIMER_SELF_TEST);
+                g_app.self_test_exit = booster_panel_verify(g_app.booster) == 0 ? 0 : 1;
+                DestroyWindow(hwnd);
+            }
+            return 0;
         }
         break;
     case WM_NOTIFY:
@@ -2472,6 +2541,11 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
  *   bytesieve-gui --self-test-export <dir> <prefix>
  *                                         스캔 후 <prefix>.csv·<prefix>.html 로 내보내고(대화 상자 없음)
  *                                         화면을 검증한 뒤 폴더 수를 stdout 에 쓰고 종료
+ *   bytesieve-gui --self-test-cleaner <dir> Cleaner 탭에서 분석한 위치가 모두 <dir> 안인지 확인한 뒤
+ *                                         휴지통 비우기를 뺀 정리 가능한 대상을 모두 정리하고(확인 창
+ *                                         없음) 결과를 검증하고 종료(TEMP·LOCALAPPDATA 등을 <dir> 안으로)
+ *   bytesieve-gui --self-test-booster     Booster 탭의 시작 프로그램·프로세스 목록과 CPU 측정을 검증하고
+ *                                         종료(아무것도 바꾸지 않음)
  *   bytesieve-gui --self-test-lang <tag>  <tag> 언어(ko, en, ja, zh-Hans)로 창을 만들어 번역 문구·글꼴과
  *                                         최소 창 크기에서 단추 문구가 잘리지 않는지 검증하고 종료
  *
@@ -2539,6 +2613,11 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmd, int show)
         g_app.cache_root = argv[2];
     } else if (argv != NULL && argc >= 2 && wcscmp(argv[1], L"--self-test-monitor") == 0) {
         g_app.self_test = SELF_TEST_MONITOR;
+    } else if (argv != NULL && argc >= 3 && wcscmp(argv[1], L"--self-test-cleaner") == 0) {
+        g_app.self_test = SELF_TEST_CLEANER;
+        g_app.cleaner_root = argv[2];
+    } else if (argv != NULL && argc >= 2 && wcscmp(argv[1], L"--self-test-booster") == 0) {
+        g_app.self_test = SELF_TEST_BOOSTER;
     } else if (argv != NULL && argc >= 3 && wcscmp(argv[1], L"--self-test-lang") == 0) {
         g_app.self_test = SELF_TEST_LANG;
         lang_tag = argv[2];
@@ -2584,6 +2663,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmd, int show)
     cache_panel_register(inst);
     quarantine_panel_register(inst);
     monitor_panel_register(inst);
+    cleaner_panel_register(inst);
+    booster_panel_register(inst);
     treemap_view_register(inst);
 
     memset(&wc, 0, sizeof(wc));
@@ -2668,6 +2749,20 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmd, int show)
         } else {
             SetTimer(g_app.hwnd, TIMER_SELF_TEST, SELF_TEST_TIMEOUT_MS, NULL);
         }
+    }
+    if (g_app.self_test == SELF_TEST_CLEANER) {
+        show_tab(TAB_CLEANER);
+        if (!cleaner_panel_busy(g_app.cleaner)) {
+            fwprintf(stderr, L"self-test failed: cleaner analysis did not start\n");
+            g_app.self_test_exit = 1;
+            DestroyWindow(g_app.hwnd);
+        } else {
+            SetTimer(g_app.hwnd, TIMER_SELF_TEST, SELF_TEST_TIMEOUT_MS, NULL);
+        }
+    }
+    if (g_app.self_test == SELF_TEST_BOOSTER) {
+        SetTimer(g_app.hwnd, TIMER_SELF_TEST, SELF_TEST_TIMEOUT_MS, NULL);
+        show_tab(TAB_BOOSTER);
     }
     if (g_app.self_test == SELF_TEST_MONITOR) {
         show_tab(TAB_MONITOR);
