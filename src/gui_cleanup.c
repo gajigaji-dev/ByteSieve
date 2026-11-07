@@ -1129,12 +1129,17 @@ static LRESULT CALLBACK panel_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             return 0;
         }
         break;
+    case WM_CTLCOLOREDIT:
+    case WM_CTLCOLORLISTBOX:
+    case WM_CTLCOLORBTN:
+        /* 입력 칸·콤보 상자 목록(어둡게일 때 SURFACE 색). */
+        return theme_ctlcolor(hwnd, msg, wp, lp);
     case WM_CTLCOLORSTATIC:
         /* 보호 경로 경고는 빨간 글씨로. */
         if (p != NULL && (HWND)lp == p->warn && p->has_result && p->result.root_protected) {
             HDC dc = (HDC)wp;
             LRESULT brush = theme_ctlcolor_static(dc);
-            SetTextColor(dc, RGB(200, 0, 0));
+            SetTextColor(dc, THEME_COLOR_DANGER);
             return brush;
         }
         return theme_ctlcolor_static((HDC)wp);

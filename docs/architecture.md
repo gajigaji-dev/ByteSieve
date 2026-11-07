@@ -13,7 +13,7 @@
 
 ```
                     disk-scanner (CLI)                bytesieve-gui (GUI)
-                     │  cli · jsonl · cli_clean         │  사이드바(nav_model) → 폴더 스캔(+트리맵) │ 드라이브 │ 프로젝트 정리 │ 시스템 정리 │ 개발 캐시 │ 격리 폴더 │ 모니터 │ 부스터
+                     │  cli · jsonl · cli_clean         │  사이드바(nav_model) → 폴더 스캔(+트리맵) │ 드라이브 │ 프로젝트 정리 │ 시스템 정리 │ 개발 캐시 │ 격리 폴더 │ 모니터 │ 부스터 │ 설정
                      │        │                         │                         │             │
                      │        └──────── clean_plan (정리 계획: 대상·선택 정책·요약·실행) ┘─────────────┘
                      │                    │   ↑ cleaner_build_plan / clean_plan_from_project
@@ -59,18 +59,20 @@
 | `bytesieve_cleaner` | 시스템 정리(Cleaner): 사용자 임시 파일·오류 보고서·휴지통·브라우저 캐시·공용 개발 캐시 분석(읽기 전용, 위치 근거·캐시 위치 문제 포함, 항목마다 실제 확보 용량), 가상 디스크(분석만, `CLEANER_INFO_ONLY`), 증가 추적(`cleaner_apply_growth`), 분석 결과 → 정리 계획(`cleaner_build_plan`), 분석 작업 스레드. 분석 범위(`CleanerOps.kinds`: 0 이면 모두, GUI 는 `CLEANER_KINDS_SYSTEM`·`CLEANER_KINDS_CACHE` 로 두 페이지에 나눔). 기존 실행 API(`cleaner_run_*`)는 계획 실행 엔진을 감싼다 |
 | `bytesieve_booster` | Booster: 시작 프로그램 목록·켜기/끄기(StartupApproved), 프로세스 목록·CPU 계산·보호 판정·끝내기(PID 재사용 확인) |
 | `bytesieve_ui_lang` | GUI 표시 언어(한국어·영어·일본어·중국어 간체) 번역 문자열 표와 언어 결정(환경 변수 → 레지스트리 → Windows 표시 언어). 창과 무관 |
-| `bytesieve_nav` | GUI 사이드바 메뉴 모델(`nav_model`): 목적별 그룹·페이지 표, 키 이동(머리글 건너뜀·끝에서 멈춤), 세로 배치와 마우스 위치 판정. 창·GDI 를 쓰지 않는 순수 계산 |
+| `bytesieve_nav` | GUI 사이드바 메뉴 모델(`nav_model`): 목적별 그룹·페이지 표([설정]은 머리글 없는 footer), 키 이동(머리글 건너뜀·끝에서 멈춤), 세로 배치(footer 는 아래 끝에 붙임)와 마우스 위치 판정. 창·GDI 를 쓰지 않는 순수 계산 |
+| `bytesieve_settings` | GUI 설정(`app_settings`): 테마(`system`·`light`·`dark`)·표시 언어를 `HKCU\Software\ByteSieve`에 저장·읽기(테스트는 `BYTESIEVE_SETTINGS_KEY`로 테스트 키), 실제로 어둡게 할지(테마 설정·Windows 앱 모드·고대비) 판정. 창과 무관 |
 
 GUI(`bytesieve-gui`) 안의 파일은 다음처럼 나뉩니다. 페이지마다 "패널 자식 창 + `*_panel_verify`(자체 검사)" 형태입니다.
 
 | 파일 | 역할 |
 |---|---|
-| `gui_main.c` | 창 골격(사이드바·페이지 제목·페이지 패널 배치), 페이지 전환(고른 패널만 보이기, 처음 열 때 조회·열 때마다 다시 읽기), 자체 검사 진행 |
+| `gui_main.c` | 창 골격(사이드바·페이지 제목·페이지 패널 배치), 페이지 전환(고른 패널만 보이기, 처음 열 때 조회·열 때마다 다시 읽기), 테마 적용(시작할 때·[설정]에서 바꿀 때·Windows 앱 모드가 바뀔 때), 자체 검사 진행 |
 | `gui_nav` | 왼쪽 사이드바(직접 그리는 자식 창): 그리기와 마우스·키 입력만 맡고 메뉴 구성·이동·위치 판정은 `nav_model` 에 맡김 |
 | `gui_scan` | 폴더 스캔 페이지(경로·스캔·트리·순위·트리맵·내보내기·기록). 변화 추적은 CLI `--track` 과 같은 `history_track` |
 | `gui_cleaner` | Cleaner 패널. [시스템 정리]·[개발 캐시] 두 페이지가 같은 패널을 분석 범위만 달리해 하나씩 씀 |
+| `gui_settings` | 설정 페이지(테마·표시 언어·스캔 기록 자동 저장). 저장은 `app_settings`, 자동 저장은 `gui_main`을 거쳐 폴더 스캔 패널과 같은 경로 |
 | `gui_drives`·`gui_cleanup`·`gui_quarantine`·`gui_monitor`·`gui_booster`·`gui_treemap` | 나머지 페이지 패널과 트리맵 보기 |
-| `gui_theme` | 창 외곽(DWM 둥근 모서리·Mica), 색 토큰(`THEME_COLOR_*`, 시스템 강조색), 언어별 UI 글꼴·페이지 제목 글꼴, 글자 폭에 맞춘 컨트롤 크기 |
+| `gui_theme` | 창 외곽(DWM 둥근 모서리·Mica·어두운 제목 표시줄), 밝게·어둡게 색 토큰(`theme_color`, 시스템 강조색), 창 트리 전체에 모드 적용(`theme_apply_window`: 목록·트리·단추·입력 칸 테마와 색, 클래스 배경), 패널의 `WM_CTLCOLOR*` 처리, 언어별 UI 글꼴·페이지 제목 글꼴, 글자 폭에 맞춘 컨트롤 크기 |
 
 설계와 단계는 [ui-design.md](ui-design.md)를 참고하세요.
 

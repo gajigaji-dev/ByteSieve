@@ -9,6 +9,9 @@
 #define UI_LANG_REG_KEY L"Software\\ByteSieve"
 #define UI_LANG_REG_VALUE L"Language"
 #define UI_LANG_ENV L"BYTESIEVE_LANG"
+/* 설정 키를 바꾸는 환경 변수(테스트가 사용자의 실제 설정을 건드리지 않게). */
+#define UI_SETTINGS_KEY_ENV L"BYTESIEVE_SETTINGS_KEY"
+#define UI_SETTINGS_KEY_MAX 256
 /* 언어 태그 최대 길이(널 포함). "zh-Hans-CN" 같은 태그도 들어간다. */
 #define UI_LANG_TAG_MAX 32
 
@@ -28,6 +31,7 @@ static const wchar_t *const k_text[UI_T_COUNT][UI_LANG_COUNT] = {
     [UI_T_NAV_CLEANER] = {L"시스템 정리", L"System cleanup", L"システム整理", L"系统清理"},
     [UI_T_NAV_BOOSTER] = {L"부스터", L"Booster", L"ブースター", L"加速"},
     [UI_T_NAV_CACHE] = {L"개발 캐시", L"Dev caches", L"開発キャッシュ", L"开发缓存"},
+    [UI_T_NAV_SETTINGS] = {L"설정", L"Settings", L"設定", L"设置"},
 
     [UI_T_GROUP_ANALYSIS] = {L"프로젝트 분석", L"Project analysis", L"プロジェクト分析", L"项目分析"},
     [UI_T_GROUP_CLEANUP] = {L"정리", L"Cleanup", L"整理", L"清理"},
@@ -85,6 +89,41 @@ static const wchar_t *const k_text[UI_T_COUNT][UI_LANG_COUNT] = {
     [UI_T_FLAG_REPARSE] = {L" [링크]", L" [link]", L" [リンク]", L" [链接]"},
     [UI_T_FLAG_DEPTH_LIMIT] = {L" [깊이 제한]", L" [depth limit]", L" [深さ制限]",
                                L" [深度限制]"},
+
+    [UI_T_SET_APPEARANCE] = {L"모양", L"Appearance", L"外観", L"外观"},
+    [UI_T_SET_THEME] = {L"테마", L"Theme", L"テーマ", L"主题"},
+    [UI_T_THEME_SYSTEM] = {L"시스템 설정 따르기", L"Use system setting", L"システム設定に従う",
+                           L"跟随系统设置"},
+    [UI_T_THEME_LIGHT] = {L"밝게", L"Light", L"ライト", L"浅色"},
+    [UI_T_THEME_DARK] = {L"어둡게", L"Dark", L"ダーク", L"深色"},
+    [UI_T_SET_THEME_HC] = {L"고대비 테마가 켜져 있어 어둡게 표시하지 않습니다.",
+                           L"High contrast is on, so dark mode isn't applied.",
+                           L"ハイコントラストがオンのため、ダーク モードは適用されません。",
+                           L"已打开高对比度，因此不应用深色模式。"},
+    [UI_T_SET_LANGUAGE] = {L"표시 언어", L"Display language", L"表示言語", L"显示语言"},
+    [UI_T_SET_LANG_LABEL] = {L"언어", L"Language", L"言語", L"语言"},
+    [UI_T_LANG_SYSTEM] = {L"시스템 설정 따르기(%ls)", L"Use system setting (%ls)",
+                          L"システム設定に従う（%ls）", L"跟随系统设置（%ls）"},
+    [UI_T_SET_LANG_RESTART] = {L"ByteSieve를 다시 시작하면 적용됩니다.",
+                               L"Restart ByteSieve to apply.",
+                               L"ByteSieve を再起動すると適用されます。",
+                               L"重新启动 ByteSieve 后生效。"},
+    [UI_T_SET_LANG_ENV] = {L"환경 변수 BYTESIEVE_LANG(%ls)이 이 설정보다 먼저 적용됩니다.",
+                           L"The BYTESIEVE_LANG environment variable (%ls) takes precedence.",
+                           L"環境変数 BYTESIEVE_LANG（%ls）がこの設定より優先されます。",
+                           L"环境变量 BYTESIEVE_LANG（%ls）优先于此设置。"},
+    [UI_T_SET_HISTORY] = {L"스캔 기록", L"Scan history", L"スキャン履歴", L"扫描记录"},
+    [UI_T_SET_HISTORY_DIR] = {L"기록 폴더: %ls", L"History folder: %ls", L"履歴フォルダー: %ls",
+                              L"记录文件夹：%ls"},
+    [UI_T_SET_OPEN_DIR] = {L"폴더 열기", L"Open folder", L"フォルダーを開く", L"打开文件夹"},
+    [UI_T_SET_SAVE_FAILED] = {L"설정을 저장하지 못했습니다(오류 %lu). 이번 실행에만 적용됩니다.",
+                              L"Couldn't save the setting (error %lu). It applies to this session only.",
+                              L"設定を保存できませんでした（エラー %lu）。今回の実行にのみ適用されます。",
+                              L"无法保存设置（错误 %lu）。仅对本次运行有效。"},
+    [UI_T_SET_AUTOSAVE_FAILED] = {L"자동 저장 설정을 저장하지 못했습니다. 설정은 바뀌지 않았습니다.",
+                                  L"Couldn't save the auto-save setting. Nothing was changed.",
+                                  L"自動保存の設定を保存できませんでした。設定は変更されていません。",
+                                  L"无法保存自动保存设置。设置未更改。"},
 };
 
 static const wchar_t *const k_lang_name[UI_LANG_COUNT] = {L"ko", L"en", L"ja", L"zh-Hans"};
@@ -203,6 +242,16 @@ UiLang ui_lang_from_langid(unsigned short langid)
     }
 }
 
+/* 설정 키: 환경 변수 BYTESIEVE_SETTINGS_KEY 가 있으면 그 키(테스트용), 없으면 기본 키.
+ * app_settings 의 settings_reg_key 와 같은 규칙이다(test_app_settings 가 확인). */
+static const wchar_t *settings_key(void)
+{
+    static wchar_t key[UI_SETTINGS_KEY_MAX];
+    DWORD n = GetEnvironmentVariableW(UI_SETTINGS_KEY_ENV, key, UI_SETTINGS_KEY_MAX);
+
+    return n > 0 && n < UI_SETTINGS_KEY_MAX ? key : UI_LANG_REG_KEY;
+}
+
 UiLang ui_lang_detect(void)
 {
     wchar_t buf[UI_LANG_TAG_MAX];
@@ -214,7 +263,7 @@ UiLang ui_lang_detect(void)
         return lang;
     }
     size = (DWORD)sizeof(buf);
-    if (RegGetValueW(HKEY_CURRENT_USER, UI_LANG_REG_KEY, UI_LANG_REG_VALUE, RRF_RT_REG_SZ, NULL,
+    if (RegGetValueW(HKEY_CURRENT_USER, settings_key(), UI_LANG_REG_VALUE, RRF_RT_REG_SZ, NULL,
                      buf, &size) == ERROR_SUCCESS &&
         ui_lang_from_tag(buf, &lang)) {
         return lang;

@@ -9,6 +9,7 @@
 #include <string.h>
 #include <wchar.h>
 
+#include "app_settings.h"
 #include "cleaner.h"
 #include "gui_booster.h"
 #include "gui_cleaner.h"
@@ -18,9 +19,11 @@
 #include "gui_nav.h"
 #include "gui_quarantine.h"
 #include "gui_scan.h"
+#include "gui_settings.h"
 #include "gui_theme.h"
 #include "gui_treemap.h"
 #include "nav_model.h"
+#include "scan_history.h"
 #include "ui_lang.h"
 
 /*
@@ -34,6 +37,10 @@
  *   캐시           개발 캐시(시스템 정리 패널을 개발 캐시·가상 디스크 범위로 하나 더 만든 것)
  *   격리·복원      격리 폴더
  *   시스템         모니터 · 부스터
+ *   (아래 끝)      설정(테마·표시 언어·스캔 기록)
+ *
+ * 테마: 시작할 때 저장된 테마(app_settings)를 적용하고, [설정]에서 바꾸면 바로 창 전체에 적용한다.
+ * "시스템 설정 따르기"면 Windows 의 앱 모드가 바뀔 때(WM_SETTINGCHANGE "ImmersiveColorSet") 따라간다.
  */
 
 /* 공용 컨트롤 v6(비주얼 스타일). */
@@ -60,6 +67,7 @@ enum {
 #define IDC_QUARANTINE (IDC_PAGE_BASE + NAV_PAGE_QUARANTINE)
 #define IDC_MONITOR (IDC_PAGE_BASE + NAV_PAGE_MONITOR)
 #define IDC_BOOSTER (IDC_PAGE_BASE + NAV_PAGE_BOOSTER)
+#define IDC_SETTINGS (IDC_PAGE_BASE + NAV_PAGE_SETTINGS)
 
 typedef enum {
     SELF_TEST_NONE = 0,
@@ -80,7 +88,9 @@ typedef enum {
     SELF_TEST_LANG,   /* 지정한 언어로 창을 만들어 번역 문구·글꼴·최소 창 크기의 배치 검증 → 종료 */
     SELF_TEST_CLEANER, /* 시스템 정리 분석·검증 → 정리 → 개발 캐시 분석·검증 → 정리 → 결과 검증 → 종료 */
     SELF_TEST_BOOSTER, /* 부스터 페이지 목록·CPU 측정 → 화면·보호 판정 검증(아무것도 바꾸지 않음) → 종료 */
-    SELF_TEST_NAV     /* 사이드바 키보드·마우스 이동 → 페이지 전환·제목·처음 열 때 조회 횟수 검증 → 종료 */
+    SELF_TEST_NAV,    /* 사이드바 키보드·마우스 이동 → 페이지 전환·제목·처음 열 때 조회 횟수 검증 → 종료 */
+    SELF_TEST_THEME,  /* 테마 밝게 → 어둡게 → 시스템(어둡게·밝게) → 밝게 고정, 단계마다 컨트롤 색 검증 → 종료 */
+    SELF_TEST_SETTINGS /* [설정]에서 언어 저장(다음 실행 언어)·자동 저장 끄고 켜기 → 저장 값·두 페이지 검증 → 종료 */
 } SelfTest;
 
 typedef struct {
@@ -92,6 +102,7 @@ typedef struct {
     HFONT font;
     HFONT title_font;
     int dpi;
+    ThemeMode theme_mode; /* 지금 테마 설정(시스템·밝게·어둡게) */
 
     /* 페이지를 열 때 시작한 조회(처음 열 때 조회·열 때마다 다시 읽기) 횟수. */
     unsigned loads[NAV_PAGE_COUNT];
@@ -127,24 +138,33 @@ static int nav_width(void)
 }
 
 /*
- * 최소 창 크기: 기본 800×380(96 DPI 기준)에서, 문구가 긴 언어에서도 폴더 스캔 페이지의 두 줄이
- * 패널 안에 들어가도록 넓힌다(사이드바 폭 + 여백 + 패널 최소 폭).
+ * 최소 창 크기: 기본 800×380(96 DPI 기준)에서, 문구가 긴 언어에서도 폴더 스캔·설정 페이지의 줄이
+ * 패널 안에 들어가도록 넓히고(사이드바 폭 + 여백 + 패널 최소 폭), 사이드바 항목이 겹치지 않게 높인다.
  */
 static void min_window_size(int *cx, int *cy)
 {
     RECT frame = {0, 0, 0, 0};
-    int need;
+    int need, panel_w, settings_w;
 
     *cx = scale(800);
     *cy = scale(380);
     if (g_app.pages[NAV_PAGE_SCAN] == NULL) {
         return; /* 컨트롤을 만들기 전(WM_CREATE 이전) */
     }
-    need = nav_width() + 2 * scale(MAIN_MARGIN) + scan_panel_min_width(g_app.pages[NAV_PAGE_SCAN]);
+    panel_w = scan_panel_min_width(g_app.pages[NAV_PAGE_SCAN]);
+    settings_w = settings_panel_min_width(g_app.pages[NAV_PAGE_SETTINGS]);
+    if (settings_w > panel_w) {
+        panel_w = settings_w;
+    }
+    need = nav_width() + 2 * scale(MAIN_MARGIN) + panel_w;
     AdjustWindowRectEx(&frame, WS_OVERLAPPEDWINDOW, FALSE, 0);
     need += frame.right - frame.left;
     if (need > *cx) {
         *cx = need;
+    }
+    need = nav_view_min_height(g_app.nav) + frame.bottom - frame.top;
+    if (need > *cy) {
+        *cy = need;
     }
 }
 
@@ -253,7 +273,36 @@ static void show_page(NavPage page)
     for (i = 0; i < NAV_PAGE_COUNT; i++) {
         ShowWindow(g_app.pages[i], i == (int)page ? SW_SHOW : SW_HIDE);
     }
+    if (page == NAV_PAGE_SETTINGS) {
+        /* 폴더 스캔 페이지에서 바꾼 자동 저장 상태·고대비 여부를 다시 보인다(읽기만 함). */
+        settings_panel_sync(g_app.pages[NAV_PAGE_SETTINGS],
+                            scan_panel_autosave(g_app.pages[NAV_PAGE_SCAN]), 1);
+    }
     load_on_open(page);
+}
+
+/* ---- 테마 ---- */
+
+/* 지금 테마 설정을 실제 모드(시스템 앱 모드·고대비 반영)로 바꿔 창 전체에 적용한다. */
+static void apply_theme(void)
+{
+    theme_set_dark(settings_theme_is_dark(g_app.theme_mode, settings_system_dark(),
+                                          settings_high_contrast()));
+    theme_apply_window(g_app.hwnd);
+}
+
+/* [설정] 패널 알림: 테마를 바꿨으면 적용하고, 자동 저장 요청은 폴더 스캔 패널과 같은 경로로 저장한다. */
+static void on_settings_notify(int code)
+{
+    HWND settings = g_app.pages[NAV_PAGE_SETTINGS], scan = g_app.pages[NAV_PAGE_SCAN];
+
+    if (code == STN_THEME_CHANGED) {
+        g_app.theme_mode = settings_panel_theme(settings);
+        apply_theme();
+    } else if (code == STN_AUTOSAVE) {
+        int ok = scan_panel_set_autosave(scan, settings_panel_autosave_request(settings));
+        settings_panel_sync(settings, scan_panel_autosave(scan), ok);
+    }
 }
 
 /* ---- 자체 검사(--self-test) ---- */
@@ -414,7 +463,15 @@ static int verify_lang(void)
     }
     page_rect(&page);
     SELF_CHECK(page.left >= nav.right);
+    /* 사이드바 항목이 서로 겹치지 않는다([설정]은 아래 끝) */
+    SELF_CHECK(nav_view_item_rect(g_app.nav, NAV_PAGE_BOOSTER, &item));
+    {
+        RECT settings;
+        SELF_CHECK(nav_view_item_rect(g_app.nav, NAV_PAGE_SETTINGS, &settings));
+        SELF_CHECK(settings.top >= item.bottom && settings.bottom <= nav.bottom);
+    }
     failures += scan_panel_verify_lang(g_app.pages[NAV_PAGE_SCAN]);
+    failures += settings_panel_verify_lang(g_app.pages[NAV_PAGE_SETTINGS]);
 
     /* 성공했을 때만 요약을 쓴다(CTest 가 이 줄로 통과를 판정한다). */
     if (failures == 0) {
@@ -480,14 +537,18 @@ static int verify_nav(void)
             seen[steps++] = g_app.page;
         }
     }
-    SELF_CHECK(g_app.page == NAV_PAGE_BOOSTER && steps == NAV_PAGE_COUNT);
+    SELF_CHECK(g_app.page == NAV_PAGE_SETTINGS && steps == NAV_PAGE_COUNT);
     /* ↑ 한 번, Home, End */
     SendMessageW(g_app.nav, WM_KEYDOWN, VK_UP, 0);
-    failures += verify_page_shown(NAV_PAGE_MONITOR);
+    failures += verify_page_shown(NAV_PAGE_BOOSTER);
     SendMessageW(g_app.nav, WM_KEYDOWN, VK_HOME, 0);
     failures += verify_page_shown(NAV_PAGE_SCAN);
     SendMessageW(g_app.nav, WM_KEYDOWN, VK_END, 0);
-    failures += verify_page_shown(NAV_PAGE_BOOSTER);
+    failures += verify_page_shown(NAV_PAGE_SETTINGS);
+    /* [설정]은 사이드바 아래 끝에 붙는다 */
+    SELF_CHECK(nav_view_item_rect(g_app.nav, NAV_PAGE_SETTINGS, &item));
+    GetClientRect(g_app.nav, &nav);
+    SELF_CHECK(item.bottom >= nav.bottom - scale(16) && item.bottom <= nav.bottom);
 
     /* 마우스: 모든 페이지를 차례로 누른다(두 번째 방문) */
     for (p = 0; p < NAV_PAGE_COUNT; p++) {
@@ -496,13 +557,17 @@ static int verify_nav(void)
         quarantine_visits += p == NAV_PAGE_QUARANTINE;
     }
     /* 같은 항목을 다시 눌러도 그대로(조회를 다시 하지 않음) */
-    click_nav(NAV_PAGE_BOOSTER);
-    failures += verify_page_shown(NAV_PAGE_BOOSTER);
-    /* 그룹 머리글(첫 항목 바로 위)을 누르면 아무것도 바뀌지 않는다 */
+    click_nav(NAV_PAGE_SETTINGS);
+    failures += verify_page_shown(NAV_PAGE_SETTINGS);
+    /* 그룹 머리글(첫 항목 바로 위)·부스터와 설정 사이 빈 곳을 누르면 아무것도 바뀌지 않는다 */
     SELF_CHECK(nav_view_item_rect(g_app.nav, NAV_PAGE_SCAN, &item));
     SendMessageW(g_app.nav, WM_LBUTTONDOWN, MK_LBUTTON,
                  MAKELPARAM((item.left + item.right) / 2, item.top - scale(8)));
-    failures += verify_page_shown(NAV_PAGE_BOOSTER);
+    failures += verify_page_shown(NAV_PAGE_SETTINGS);
+    SELF_CHECK(nav_view_item_rect(g_app.nav, NAV_PAGE_SETTINGS, &item));
+    SendMessageW(g_app.nav, WM_LBUTTONDOWN, MK_LBUTTON,
+                 MAKELPARAM((item.left + item.right) / 2, item.top - scale(20)));
+    failures += verify_page_shown(NAV_PAGE_SETTINGS);
 
     /* 처음 열 때 조회는 한 번만, 격리 폴더는 열 때마다 */
     SELF_CHECK(g_app.loads[NAV_PAGE_SCAN] == 0 && g_app.loads[NAV_PAGE_CLEANUP] == 0);
@@ -521,6 +586,203 @@ static int verify_nav(void)
             wprintf(L" %ls", nav_page_name(seen[i]));
         }
         wprintf(L"\n");
+        fflush(stdout);
+    }
+    return failures == 0 ? 0 : 1;
+}
+
+/* root 아래에서 처음 만나는 cls 클래스 자식 창. */
+typedef struct {
+    const wchar_t *cls;
+    HWND found;
+} FindClass;
+
+static BOOL CALLBACK find_class_proc(HWND h, LPARAM lp)
+{
+    FindClass *f = (FindClass *)lp;
+    wchar_t cls[64];
+
+    if (GetClassNameW(h, cls, 64) > 0 && _wcsicmp(cls, f->cls) == 0) {
+        f->found = h;
+        return FALSE;
+    }
+    return TRUE;
+}
+
+static HWND find_class(HWND root, const wchar_t *cls)
+{
+    FindClass f;
+
+    f.cls = cls;
+    f.found = NULL;
+    EnumChildWindows(root, find_class_proc, (LPARAM)&f);
+    return f.found;
+}
+
+/* 모든 목록·트리의 색이 지금 모드와 맞는지 센다. */
+typedef struct {
+    int dark;
+    int lists, trees, bad;
+} ThemeCheck;
+
+static BOOL CALLBACK theme_check_proc(HWND h, LPARAM lp)
+{
+    ThemeCheck *c = (ThemeCheck *)lp;
+    wchar_t cls[64];
+    COLORREF bk = c->dark ? theme_color_in(1, THEME_TOKEN_SURFACE) : GetSysColor(COLOR_WINDOW);
+    COLORREF fg = c->dark ? theme_color_in(1, THEME_TOKEN_TEXT) : GetSysColor(COLOR_WINDOWTEXT);
+
+    if (GetClassNameW(h, cls, 64) <= 0) {
+        return TRUE;
+    }
+    if (_wcsicmp(cls, WC_LISTVIEWW) == 0) {
+        c->lists++;
+        c->bad += ListView_GetBkColor(h) != bk || ListView_GetTextColor(h) != fg ||
+                  ListView_GetTextBkColor(h) != bk;
+    } else if (_wcsicmp(cls, WC_TREEVIEWW) == 0) {
+        c->trees++;
+        c->bad += TreeView_GetBkColor(h) != (c->dark ? bk : (COLORREF)-1) ||
+                  TreeView_GetTextColor(h) != (c->dark ? fg : (COLORREF)-1);
+    }
+    return TRUE;
+}
+
+/*
+ * 지금 화면이 dark 모드로 그려지는지: 모드, 모든 목록·트리 색, 창 클래스 배경 브러시, 제목(정적)·
+ * 입력 칸·체크 상자의 WM_CTLCOLOR* 응답 색. 실패 수.
+ */
+static int verify_theme_state(int dark)
+{
+    int failures = 0;
+    ThemeCheck c;
+    HDC dc;
+    HWND scan = g_app.pages[NAV_PAGE_SCAN];
+    HWND edit = find_class(scan, WC_EDITW);
+    COLORREF bg = theme_color_in(dark, THEME_TOKEN_BG);
+
+    SELF_CHECK(theme_is_dark() == dark);
+    memset(&c, 0, sizeof(c));
+    c.dark = dark;
+    EnumChildWindows(g_app.hwnd, theme_check_proc, (LPARAM)&c);
+    SELF_CHECK(c.lists >= 6 && c.trees >= 1 && c.bad == 0);
+    SELF_CHECK((HBRUSH)GetClassLongPtrW(g_app.hwnd, GCLP_HBRBACKGROUND) == theme_bg_brush());
+    SELF_CHECK((HBRUSH)GetClassLongPtrW(g_app.nav, GCLP_HBRBACKGROUND) == theme_bg_brush());
+    SELF_CHECK((HBRUSH)GetClassLongPtrW(g_app.pages[NAV_PAGE_SETTINGS], GCLP_HBRBACKGROUND) ==
+               theme_bg_brush());
+    SELF_CHECK(theme_color(THEME_TOKEN_BG) == bg);
+
+    dc = CreateCompatibleDC(NULL);
+    SELF_CHECK(dc != NULL && edit != NULL);
+    if (dc != NULL) {
+        SendMessageW(g_app.hwnd, WM_CTLCOLORSTATIC, (WPARAM)dc, (LPARAM)g_app.title);
+        SELF_CHECK(GetBkColor(dc) == bg);
+        SELF_CHECK(GetTextColor(dc) ==
+                   (dark ? theme_color_in(1, THEME_TOKEN_TEXT) : GetSysColor(COLOR_WINDOWTEXT)));
+        if (dark && edit != NULL) {
+            SELF_CHECK(SendMessageW(scan, WM_CTLCOLOREDIT, (WPARAM)dc, (LPARAM)edit) != 0);
+            SELF_CHECK(GetBkColor(dc) == theme_color_in(1, THEME_TOKEN_SURFACE));
+            SELF_CHECK(GetTextColor(dc) == theme_color_in(1, THEME_TOKEN_TEXT));
+        }
+        DeleteDC(dc);
+    }
+    return failures;
+}
+
+/* WM_SETTINGCHANGE("ImmersiveColorSet")를 보내 Windows 앱 모드가 바뀐 것처럼 한다(테스트용 환경 변수로). */
+static void simulate_system_theme(const wchar_t *mode)
+{
+    SetEnvironmentVariableW(L"BYTESIEVE_SYSTEM_THEME", mode);
+    SendMessageW(g_app.hwnd, WM_SETTINGCHANGE, 0, (LPARAM)L"ImmersiveColorSet");
+}
+
+/*
+ * --self-test-theme: 설정 키(테스트 키)가 비어 있어 "시스템 설정 따르기"로 시작하고 시스템은 밝게
+ * (BYTESIEVE_SYSTEM_THEME=light). [설정]에서 어둡게 → 시스템 따르기(시스템 어둡게·밝게로 바뀜) →
+ * 밝게(시스템이 어둡게로 바뀌어도 그대로) 차례로 바꾸며 화면 색과 저장 값을 확인한다. 지나간 단계를 stdout 에.
+ */
+static int verify_theme(void)
+{
+    HWND settings = g_app.pages[NAV_PAGE_SETTINGS];
+    int failures = 0;
+
+    show_page(NAV_PAGE_SETTINGS);
+    SELF_CHECK(g_app.theme_mode == THEME_MODE_SYSTEM);
+    failures += verify_theme_state(0);
+    failures += settings_panel_verify(settings, scan_panel_autosave(g_app.pages[NAV_PAGE_SCAN]));
+
+    SELF_CHECK(settings_panel_set_theme(settings, THEME_MODE_DARK));
+    SELF_CHECK(g_app.theme_mode == THEME_MODE_DARK && settings_load_theme() == THEME_MODE_DARK);
+    failures += verify_theme_state(1);
+    failures += verify_page_shown(NAV_PAGE_SETTINGS);
+
+    SELF_CHECK(settings_panel_set_theme(settings, THEME_MODE_SYSTEM));
+    failures += verify_theme_state(0);
+    simulate_system_theme(L"dark");
+    failures += verify_theme_state(1);
+    simulate_system_theme(L"light");
+    failures += verify_theme_state(0);
+
+    SELF_CHECK(settings_panel_set_theme(settings, THEME_MODE_LIGHT));
+    SELF_CHECK(settings_load_theme() == THEME_MODE_LIGHT);
+    simulate_system_theme(L"dark"); /* 밝게로 정했으면 시스템을 따르지 않는다 */
+    failures += verify_theme_state(0);
+    failures += settings_panel_verify(settings, scan_panel_autosave(g_app.pages[NAV_PAGE_SCAN]));
+
+    if (failures == 0) {
+        wprintf(L"theme: light dark system-dark system-light light-fixed\n");
+        fflush(stdout);
+    }
+    return failures == 0 ? 0 : 1;
+}
+
+/*
+ * --self-test-settings: [설정]에서 표시 언어를 일본어 → 한국어 → 시스템 따르기로 저장하며 저장 값·다음 실행
+ * 언어(ui_lang_detect)·안내를 확인하고(지금 화면 언어는 그대로), [스캔 기록 자동 저장]을 끄고 켜며 폴더 스캔
+ * 페이지·설정 파일과 맞는지 확인한다. BYTESIEVE_LANG 이 없고 BYTESIEVE_HISTORY_DIR 이 테스트 폴더여야 한다.
+ */
+static int verify_settings(void)
+{
+    HWND settings = g_app.pages[NAV_PAGE_SETTINGS], scan = g_app.pages[NAV_PAGE_SCAN];
+    wchar_t dir[MAX_PATH * 2];
+    UiLang lang = UI_LANG_JA, stored;
+    int failures = 0, before;
+
+    SELF_CHECK(!settings_lang_env_override(&stored));
+    SELF_CHECK(GetEnvironmentVariableW(L"BYTESIEVE_HISTORY_DIR", dir, MAX_PATH * 2) > 0);
+    SELF_CHECK(history_default_dir(dir, sizeof(dir) / sizeof(dir[0])) == 0);
+    show_page(NAV_PAGE_SETTINGS);
+    failures += verify_page_shown(NAV_PAGE_SETTINGS);
+    failures += settings_panel_verify(settings, scan_panel_autosave(scan));
+
+    /* 언어: 저장만 하고 지금 화면 언어(한국어)는 바꾸지 않는다 */
+    SELF_CHECK(settings_panel_set_language(settings, &lang));
+    SELF_CHECK(settings_load_language(&stored) && stored == UI_LANG_JA);
+    SELF_CHECK(ui_lang_detect() == UI_LANG_JA);
+    SELF_CHECK(ui_lang_current() == UI_LANG_KO);
+    failures += settings_panel_verify(settings, scan_panel_autosave(scan));
+    lang = UI_LANG_KO;
+    SELF_CHECK(settings_panel_set_language(settings, &lang));
+    SELF_CHECK(ui_lang_detect() == UI_LANG_KO);
+    failures += settings_panel_verify(settings, scan_panel_autosave(scan));
+    SELF_CHECK(settings_panel_set_language(settings, NULL));
+    SELF_CHECK(!settings_load_language(&stored));
+    SELF_CHECK(ui_lang_detect() == ui_lang_from_langid(GetUserDefaultUILanguage()));
+    failures += settings_panel_verify(settings, scan_panel_autosave(scan));
+
+    /* 자동 저장: 설정 페이지에서 끄고 켠다(폴더 스캔 페이지·설정 파일이 함께 바뀜) */
+    before = scan_panel_autosave(scan);
+    settings_panel_click_autosave(settings);
+    SELF_CHECK(scan_panel_autosave(scan) == !before);
+    SELF_CHECK(history_autosave_enabled(dir) == !before);
+    failures += settings_panel_verify(settings, !before);
+    settings_panel_click_autosave(settings);
+    SELF_CHECK(scan_panel_autosave(scan) == before);
+    SELF_CHECK(history_autosave_enabled(dir) == before);
+    failures += settings_panel_verify(settings, before);
+
+    if (failures == 0) {
+        wprintf(L"settings: language ja ko system, autosave %ls %ls\n", before ? L"off" : L"on",
+                before ? L"on" : L"off");
         fflush(stdout);
     }
     return failures == 0 ? 0 : 1;
@@ -596,6 +858,8 @@ static void create_controls(void)
         monitor_panel_create(g_app.hwnd, IDC_MONITOR, g_app.font, g_app.dpi);
     g_app.pages[NAV_PAGE_BOOSTER] =
         booster_panel_create(g_app.hwnd, IDC_BOOSTER, g_app.font, g_app.dpi);
+    g_app.pages[NAV_PAGE_SETTINGS] =
+        settings_panel_create(g_app.hwnd, IDC_SETTINGS, g_app.font, g_app.dpi);
     /* 시스템 정리와 개발 캐시는 같은 Cleaner 패널을 분석 범위만 달리해 쓴다. */
     cleaner_panel_set_kinds(g_app.pages[NAV_PAGE_CLEANER], CLEANER_KINDS_SYSTEM);
     cleaner_panel_set_kinds(g_app.pages[NAV_PAGE_CACHE], CLEANER_KINDS_CACHE);
@@ -728,11 +992,43 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         ((MINMAXINFO *)lp)->ptMinTrackSize.y = cy;
         return 0;
     }
+    case WM_CTLCOLOREDIT:
+    case WM_CTLCOLORLISTBOX:
+    case WM_CTLCOLORBTN:
+        /* 입력 칸·콤보 상자 목록(어둡게일 때 SURFACE 색). */
+        return theme_ctlcolor(hwnd, msg, wp, lp);
     case WM_CTLCOLORSTATIC:
         return theme_ctlcolor_static((HDC)wp);
+    case WM_SETTINGCHANGE:
+        /* Windows 앱 모드(밝게·어둡게)나 고대비가 바뀌었다. 시스템 설정 따르기면 따라간다. */
+        if ((lp != 0 && lstrcmpiW((LPCWSTR)lp, L"ImmersiveColorSet") == 0) ||
+            wp == SPI_SETHIGHCONTRAST) {
+            apply_theme();
+            settings_panel_sync(g_app.pages[NAV_PAGE_SETTINGS],
+                                scan_panel_autosave(g_app.pages[NAV_PAGE_SCAN]), 1);
+        }
+        break;
+    case WM_SYSCOLORCHANGE: {
+        /* 공용 컨트롤은 시스템 색이 바뀐 것을 부모가 알려 줘야 한다. 그 뒤 밝게 쪽 색을 다시 맞춘다. */
+        HWND child;
+        for (child = GetWindow(hwnd, GW_CHILD); child != NULL;
+             child = GetWindow(child, GW_HWNDNEXT)) {
+            SendMessageW(child, WM_SYSCOLORCHANGE, wp, lp);
+        }
+        apply_theme();
+        return 0;
+    }
+    case WM_DWMCOLORIZATIONCOLORCHANGED:
+        /* 강조색(사이드바 선택 막대)이 바뀌었다. */
+        InvalidateRect(g_app.nav, NULL, FALSE);
+        break;
     case WM_COMMAND:
         if (LOWORD(wp) == IDC_NAV && HIWORD(wp) == NVN_SELCHANGE) {
             show_page(nav_view_selected(g_app.nav));
+            return 0;
+        }
+        if (LOWORD(wp) == IDC_SETTINGS) {
+            on_settings_notify(HIWORD(wp));
             return 0;
         }
         if (LOWORD(wp) == IDOK) {
@@ -790,6 +1086,8 @@ static void parse_args(int argc, wchar_t **argv, const wchar_t **target,
         {L"--self-test-booster", SELF_TEST_BOOSTER, 0},
         {L"--self-test-lang", SELF_TEST_LANG, 1},
         {L"--self-test-nav", SELF_TEST_NAV, 0},
+        {L"--self-test-theme", SELF_TEST_THEME, 0},
+        {L"--self-test-settings", SELF_TEST_SETTINGS, 0},
     };
     size_t i;
 
@@ -859,6 +1157,22 @@ static void start_self_test(const wchar_t *target, const wchar_t *cleanup_target
     if (g_app.self_test == SELF_TEST_NAV) {
         g_app.dry_load = 1;
         finish_self_test(verify_nav());
+        return;
+    }
+    if (g_app.self_test == SELF_TEST_THEME || g_app.self_test == SELF_TEST_SETTINGS) {
+        /* 설정을 바꾸므로 테스트 키에서만 한다. 끝나면 테스트 키를 지운다. */
+        int rc;
+        if (!settings_key_is_test()) {
+            fwprintf(stderr, L"self-test failed: BYTESIEVE_SETTINGS_KEY must be under "
+                             L"Software\\ByteSieveTest\\ (now %ls)\n",
+                     settings_reg_key());
+            finish_self_test(1);
+            return;
+        }
+        g_app.dry_load = 1; /* 페이지를 오가도 사용자 시스템을 조회하지 않는다 */
+        rc = g_app.self_test == SELF_TEST_THEME ? verify_theme() : verify_settings();
+        settings_delete_test_key();
+        finish_self_test(rc);
         return;
     }
     SetTimer(g_app.hwnd, TIMER_SELF_TEST, SELF_TEST_TIMEOUT_MS, NULL);
@@ -958,6 +1272,10 @@ static void start_self_test(const wchar_t *target, const wchar_t *cleanup_target
  *                                         최소 창 크기에서 문구가 잘리지 않는지 검증하고 종료
  *   bytesieve-gui --self-test-nav         사이드바 키보드·마우스 이동과 페이지 전환을 검증하고 종료
  *                                         (페이지 조회는 세기만 하고 실제로 하지 않음)
+ *   bytesieve-gui --self-test-theme       테마를 바꿔 가며 컨트롤 색·저장 값을 검증하고 종료
+ *                                         (BYTESIEVE_SETTINGS_KEY 가 Software\ByteSieveTest\ 아래여야 함)
+ *   bytesieve-gui --self-test-settings    [설정]에서 언어 저장·자동 저장 끄고 켜기를 검증하고 종료
+ *                                         (위 키 + 테스트용 BYTESIEVE_HISTORY_DIR, BYTESIEVE_LANG 없음)
  *
  * 다른 자체 검사는 화면 문구를 한국어로 확인하므로 표시 언어를 한국어로 고정한다.
  */
@@ -1002,6 +1320,16 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmd, int show)
     }
     ui_lang_set(lang);
 
+    /* 테마: 평소와 테마·설정 자체 검사는 저장된 설정, 다른 자체 검사는 화면 색을 고정하려고 밝게. */
+    if (g_app.self_test == SELF_TEST_NONE || g_app.self_test == SELF_TEST_THEME ||
+        g_app.self_test == SELF_TEST_SETTINGS) {
+        g_app.theme_mode = settings_load_theme();
+    } else {
+        g_app.theme_mode = THEME_MODE_LIGHT;
+    }
+    theme_set_dark(settings_theme_is_dark(g_app.theme_mode, settings_system_dark(),
+                                          settings_high_contrast()));
+
     SetProcessDPIAware();
     screen = GetDC(NULL);
     g_app.dpi = GetDeviceCaps(screen, LOGPIXELSY);
@@ -1020,6 +1348,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmd, int show)
     monitor_panel_register(inst);
     cleaner_panel_register(inst);
     booster_panel_register(inst);
+    settings_panel_register(inst);
     treemap_view_register(inst);
 
     memset(&wc, 0, sizeof(wc));
@@ -1040,6 +1369,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmd, int show)
     }
     /* Windows 11 이면 둥근 모서리·Mica 제목 표시줄(지원하지 않으면 그대로). */
     theme_apply_frame(g_app.hwnd);
+    /* 밝게·어둡게를 모든 컨트롤에 적용한다(어두운 제목 표시줄 포함). */
+    apply_theme();
     /* 자체 검사는 화면에 띄우지 않고(컨트롤은 그대로 동작) 진행한다. */
     ShowWindow(g_app.hwnd, g_app.self_test != SELF_TEST_NONE ? SW_HIDE : show);
     UpdateWindow(g_app.hwnd);

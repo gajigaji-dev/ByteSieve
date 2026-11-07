@@ -928,6 +928,11 @@ static LRESULT CALLBACK panel_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_CREATE:
         panel_create_controls(p);
         return 0;
+    case WM_CTLCOLOREDIT:
+    case WM_CTLCOLORLISTBOX:
+    case WM_CTLCOLORBTN:
+        /* 입력 칸·콤보 상자 목록(어둡게일 때 SURFACE 색). */
+        return theme_ctlcolor(hwnd, msg, wp, lp);
     case WM_CTLCOLORSTATIC:
         /* 정적 글자·체크 상자 배경을 창 배경색(theme BG)에 맞춘다. */
         return theme_ctlcolor_static((HDC)wp);

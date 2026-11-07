@@ -10,6 +10,7 @@
 #include <wchar.h>
 
 #include "cleanup_rules.h"
+#include "gui_theme.h"
 #include "gui_treemap.h"
 #include "size_format.h"
 #include "treemap.h"
@@ -545,8 +546,8 @@ static void draw_strip(const TreemapView *t, HDC dc)
     int right = r.right - tscale(t, 6), sw = t->line_h - tscale(t, 4);
     size_t i;
 
-    fill(dc, &r, GetSysColor(COLOR_BTNFACE));
-    SetTextColor(dc, GetSysColor(COLOR_BTNTEXT));
+    fill(dc, &r, THEME_COLOR_FACE);
+    SetTextColor(dc, THEME_COLOR_TEXT);
     if (t->color == TREEMAP_COLOR_CLEANUP) {
         /* 범례는 오른쪽부터 채운다. */
         for (i = sizeof(legend) / sizeof(legend[0]); i-- > 0;) {
@@ -614,11 +615,11 @@ static void paint(TreemapView *t, HDC dc, const RECT *client)
     int old_mode = SetBkMode(dc, TRANSPARENT);
     HGDIOBJ old_font = SelectObject(dc, t->font);
 
-    fill(dc, client, GetSysColor(COLOR_WINDOW));
+    fill(dc, client, THEME_COLOR_SURFACE);
     draw_strip(t, dc);
     if (t->model == NULL || t->model->len == 0 || t->len == 0) {
         RECT r = t->map;
-        SetTextColor(dc, GetSysColor(COLOR_GRAYTEXT));
+        SetTextColor(dc, THEME_COLOR_TEXT_2ND);
         DrawTextW(dc,
                   t->model == NULL || t->model->len == 0
                       ? L"스캔하면 폴더 용량을 사각형 크기로 보여 줍니다."

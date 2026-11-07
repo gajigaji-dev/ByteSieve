@@ -15,20 +15,23 @@ static const NavRow k_rows[] = {
     {NAV_ROW_HEADER, NAV_GROUP_SYSTEM, NAV_PAGE_COUNT},
     {NAV_ROW_PAGE, NAV_GROUP_SYSTEM, NAV_PAGE_MONITOR},
     {NAV_ROW_PAGE, NAV_GROUP_SYSTEM, NAV_PAGE_BOOSTER},
+    {NAV_ROW_PAGE, NAV_GROUP_FOOTER, NAV_PAGE_SETTINGS},
 };
 
 #define ROW_COUNT (sizeof(k_rows) / sizeof(k_rows[0]))
 
 static const UiText k_page_text[NAV_PAGE_COUNT] = {
     UI_T_NAV_SCAN,  UI_T_NAV_DRIVES,     UI_T_NAV_CLEANUP, UI_T_NAV_CLEANER,
-    UI_T_NAV_CACHE, UI_T_NAV_QUARANTINE, UI_T_NAV_MONITOR, UI_T_NAV_BOOSTER};
+    UI_T_NAV_CACHE, UI_T_NAV_QUARANTINE, UI_T_NAV_MONITOR, UI_T_NAV_BOOSTER,
+    UI_T_NAV_SETTINGS};
 
 static const UiText k_group_text[NAV_GROUP_COUNT] = {
     UI_T_GROUP_ANALYSIS, UI_T_GROUP_CLEANUP, UI_T_GROUP_CACHE, UI_T_GROUP_QUARANTINE,
-    UI_T_GROUP_SYSTEM};
+    UI_T_GROUP_SYSTEM, UI_T_COUNT};
 
 static const wchar_t *const k_page_name[NAV_PAGE_COUNT] = {
-    L"scan", L"drives", L"cleanup", L"cleaner", L"cache", L"quarantine", L"monitor", L"booster"};
+    L"scan", L"drives", L"cleanup", L"cleaner", L"cache", L"quarantine", L"monitor", L"booster",
+    L"settings"};
 
 size_t nav_row_count(void)
 {
@@ -62,6 +65,11 @@ NavGroup nav_page_group(NavPage page)
 UiText nav_page_text(NavPage page)
 {
     return (unsigned)page < (unsigned)NAV_PAGE_COUNT ? k_page_text[page] : UI_T_COUNT;
+}
+
+int nav_group_has_header(NavGroup group)
+{
+    return (unsigned)group < (unsigned)NAV_GROUP_FOOTER;
 }
 
 UiText nav_group_text(NavGroup group)
@@ -136,8 +144,16 @@ int nav_row_span(const NavMetrics *m, size_t index, int *y0, int *y1)
     y = m->top;
     for (i = 0; i <= index; i++) {
         int h = k_rows[i].kind == NAV_ROW_HEADER ? m->header_h : m->item_h;
-        if (k_rows[i].kind == NAV_ROW_HEADER && i > 0) {
+        int group_start = i > 0 && k_rows[i].group != k_rows[i - 1].group;
+        if (group_start) {
             y += m->group_gap;
+        }
+        if (group_start && k_rows[i].group == NAV_GROUP_FOOTER && m->bottom > 0) {
+            /* footer 는 아래 끝에 붙인다(원래 자리보다 위로는 올리지 않음). */
+            int footer_h = (int)(ROW_COUNT - i) * m->item_h;
+            if (m->bottom - footer_h > y) {
+                y = m->bottom - footer_h;
+            }
         }
         if (i == index) {
             if (y0 != NULL) {
@@ -155,11 +171,16 @@ int nav_row_span(const NavMetrics *m, size_t index, int *y0, int *y1)
 
 int nav_total_height(const NavMetrics *m)
 {
-    int y1 = m != NULL ? m->top : 0;
+    NavMetrics natural;
+    int y1;
 
-    if (m != NULL && ROW_COUNT > 0) {
-        nav_row_span(m, ROW_COUNT - 1, NULL, &y1);
+    if (m == NULL) {
+        return 0;
     }
+    natural = *m;
+    natural.bottom = 0;
+    y1 = natural.top;
+    nav_row_span(&natural, ROW_COUNT - 1, NULL, &y1);
     return y1;
 }
 

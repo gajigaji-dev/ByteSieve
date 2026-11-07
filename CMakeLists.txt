@@ -177,22 +177,31 @@ target_include_directories(bytesieve_nav PUBLIC src)
 target_link_libraries(bytesieve_nav PUBLIC bytesieve_ui_lang)
 bytesieve_configure(bytesieve_nav)
 
+# GUI 설정(테마·표시 언어) 저장·해석: HKCU\Software\ByteSieve 의 Theme·Language 값, 시스템 앱 모드·고대비.
+# 창과 무관하다(테스트는 BYTESIEVE_SETTINGS_KEY 로 테스트 키를 쓴다).
+add_library(bytesieve_settings STATIC src/app_settings.c)
+target_include_directories(bytesieve_settings PUBLIC src)
+target_link_libraries(bytesieve_settings PUBLIC bytesieve_ui_lang advapi32 user32)
+bytesieve_configure(bytesieve_settings)
+
 # Win32 GUI: 폴더 스캔 페이지(진행률 표시줄, 폴더 트리, 용량 순위), 드라이브 대시보드 페이지,
 # 프로젝트 정리 페이지(개발 캐시·빌드 결과물·임시·로그 탐지, 선택 항목 휴지통 이동),
 # 격리 폴더 페이지(휴지통 없는 드라이브에서 격리한 항목의 복원·영구 삭제),
 # 모니터 페이지(RAM·CPU 실시간 사용률 막대·그래프).
 # gui_main: 창 골격(사이드바·페이지 제목·페이지 전환)과 자체 검사 진행만 맡는다.
 # gui_nav: 왼쪽 사이드바(목적별 메뉴, 직접 그림). gui_scan: 폴더 스캔 페이지 패널.
-# gui_theme: Windows 11 창 외곽(DWM), 색 토큰, 언어별 UI 글꼴, 글자 폭에 맞춘 컨트롤 크기.
+# gui_theme: Windows 11 창 외곽(DWM), 밝게·어둡게 색 토큰과 다크 모드 적용(uxtheme), 언어별 UI 글꼴,
+# 글자 폭에 맞춘 컨트롤 크기. gui_settings: 설정 페이지(테마·표시 언어·스캔 기록).
 # 시스템 정리·개발 캐시 페이지(gui_cleaner 패널 둘, 분석 범위만 다름)·프로젝트 정리(gui_cleanup)·부스터(gui_booster).
 add_executable(bytesieve-gui WIN32 src/gui_main.c src/gui_nav.c src/gui_scan.c src/gui_theme.c
                src/gui_drives.c src/gui_cleanup.c src/gui_quarantine.c src/gui_monitor.c
-               src/gui_treemap.c src/gui_cleaner.c src/gui_booster.c)
+               src/gui_treemap.c src/gui_cleaner.c src/gui_booster.c src/gui_settings.c)
 target_link_libraries(bytesieve-gui PRIVATE bytesieve_job bytesieve_history bytesieve_export
-                      bytesieve_treemap bytesieve_ui_lang bytesieve_nav bytesieve_cleaner bytesieve_booster
+                      bytesieve_treemap bytesieve_ui_lang bytesieve_nav bytesieve_settings
+                      bytesieve_cleaner bytesieve_booster
                       bytesieve_drive bytesieve_format bytesieve_cleanup_job
                       bytesieve_cleanup_trash bytesieve_dev_cache bytesieve_sysmon comctl32
-                      comdlg32 shell32 ole32 dwmapi)
+                      comdlg32 shell32 ole32 dwmapi uxtheme)
 bytesieve_configure(bytesieve-gui)
 
 # 대용량 폴더 스캔의 실행 시간·메모리 측정 도구.
@@ -420,6 +429,11 @@ target_link_libraries(test_nav_model PRIVATE bytesieve_nav)
 bytesieve_configure(test_nav_model)
 add_test(NAME nav_model COMMAND test_nav_model)
 
+add_executable(test_app_settings tests/test_app_settings.c)
+target_link_libraries(test_app_settings PRIVATE bytesieve_settings)
+bytesieve_configure(test_app_settings)
+add_test(NAME app_settings COMMAND test_app_settings)
+
 add_executable(test_treemap tests/test_treemap.c)
 target_link_libraries(test_treemap PRIVATE bytesieve_treemap)
 bytesieve_configure(test_treemap)
@@ -538,7 +552,26 @@ set_tests_properties(gui_cleaner gui_booster PROPERTIES TIMEOUT 120)
 # 조회가 한 번만 일어나는지 확인한다(조회는 세기만 하고 실제로 하지 않아 사용자 시스템을 읽지 않음).
 add_test(NAME gui_nav COMMAND bytesieve-gui --self-test-nav)
 set_tests_properties(gui_nav PROPERTIES PASS_REGULAR_EXPRESSION
-                     "nav: scan drives cleanup cleaner cache quarantine monitor booster")
+                     "nav: scan drives cleanup cleaner cache quarantine monitor booster settings")
+# 다크 모드: 테스트 레지스트리 키(사용자 설정은 건드리지 않음, 끝나면 지움)에서 시스템 따르기(밝게) → 어둡게 →
+# 시스템 따르기(시스템 어둡게·밝게로 바뀜) → 밝게 고정을 거치며 목록·트리·입력 칸·창 배경 색과 저장 값을 확인한다.
+add_test(NAME gui_theme
+         COMMAND ${CMAKE_COMMAND} -E env --unset=BYTESIEVE_LANG
+                 "BYTESIEVE_SETTINGS_KEY=Software\\ByteSieveTest\\gui_theme"
+                 BYTESIEVE_SYSTEM_THEME=light
+                 BYTESIEVE_HISTORY_DIR=${CMAKE_CURRENT_BINARY_DIR}/gui_theme_history
+                 $<TARGET_FILE:bytesieve-gui> --self-test-theme)
+set_tests_properties(gui_theme PROPERTIES PASS_REGULAR_EXPRESSION
+                     "theme: light dark system-dark system-light light-fixed")
+# 설정 페이지: 표시 언어 저장(다음 실행 언어, 지금 화면은 그대로)과 자동 저장 끄고 켜기(폴더 스캔 페이지·
+# 설정 파일과 일치)를 테스트 레지스트리 키·테스트 기록 폴더에서 확인한다.
+add_test(NAME gui_settings
+         COMMAND ${CMAKE_COMMAND} -E env --unset=BYTESIEVE_LANG
+                 "BYTESIEVE_SETTINGS_KEY=Software\\ByteSieveTest\\gui_settings"
+                 BYTESIEVE_HISTORY_DIR=${CMAKE_CURRENT_BINARY_DIR}/gui_settings_history
+                 $<TARGET_FILE:bytesieve-gui> --self-test-settings)
+set_tests_properties(gui_settings PROPERTIES PASS_REGULAR_EXPRESSION
+                     "settings: language ja ko system, autosave")
 # 표시 언어: 언어마다 창을 만들어 번역 문구·언어별 글꼴, 최소 창 크기에서 사이드바·단추 문구가 잘리지 않고
 # 페이지 패널 안에 있는지 확인한다(문구가 긴 언어에서 배치가 깨지지 않게).
 foreach(lang ko en ja zh-Hans)
