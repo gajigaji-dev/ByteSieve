@@ -25,7 +25,8 @@ CLI(`disk-scanner`)와 Win32 GUI(`bytesieve-gui`)를 제공합니다.
 | JSON Lines 출력 | 다른 도구가 읽을 수 있는 UTF-8 이벤트 스트림(`--jsonl`) |
 | Git 기반 프로젝트 분석 | 정리 후보를 Git 저장소(없으면 폴더)별로 묶고 브랜치·마지막 커밋·파일 마지막 수정 시각을 확인해 휴면 프로젝트(기본 90일, 바꿀 수 있음)를 자동 판정. 커밋하지 않은 변경·원격에 올리지 않은 커밋을 경고하고, 미커밋 변경이 있는 프로젝트의 후보는 [모두 선택]·CLI 기본 선택에서 뺌. 후보마다 lockfile 기반 복구 가능성(같은 버전 재설치·버전이 바뀔 수 있음·빌드하면 다시 생김·다시 생기지 않음) 표시. git.exe를 읽기 전용으로 실행하고(없으면 `.git` 직접 읽기) 외부 라이브러리 없음 |
 | CLI 정리 | `disk-scanner find <dir>`로 프로젝트 정리 후보를 크기순으로 찾고(읽기 전용), `disk-scanner clean project <dir>` / `clean system`으로 정리. GUI 두 정리 탭과 같은 탐지·정리 계획·실행 코드를 사용. `clean`은 기본 `--dry-run`(계획과 예상 결과만)이고 `--execute`면 확인 후 휴지통·격리 폴더로 옮김(스크립트는 `--yes`, 대화형이 아니면 `--yes` 없이 거부). 공용 개발 캐시는 `--include`로 직접 지정해야 하고, 휴지통 비우기(영구 삭제)는 CLI에서 지원하지 않음. `--json`(문서 하나)·`--jsonl`(이벤트) 출력, 종료 코드 0 완료·1 일부·2 오류 |
-| 시스템 정리 | 사용자 임시 파일(`%TEMP%`)·Windows 오류 보고서·휴지통·브라우저(Chrome·Edge·Firefox) 캐시와 공용 개발 캐시(npm·pip·Gradle·Cargo·NuGet, 환경 변수·설정 파일까지 확인한 위치와 그 근거 표시)를 한 목록에서 분석해 대상별 실제 확보 용량을 보여 주고, 고른 대상만 정리. 설정한 캐시 위치가 링크·캐시 구조가 아니면 이유와 함께 정리하지 않음. 휴지통 외에는 기존 안전 장치를 거쳐 휴지통(없는 드라이브는 격리 폴더)으로 옮기며, 최근 24시간 안에 바뀐 임시 파일·실행 중인 브라우저의 캐시는 건너뜀. 휴지통 비우기(영구 삭제)는 직접 고르고 따로 한 번 더 확인해야 함. 개발 도구 캐시도 [모두 선택]에 들어가지 않아 직접 골라야 하며, 오프라인 빌드가 안 되는 캐시는 주의로 표시 |
+| 개발 환경 분석 | 공용 개발 캐시 15종(npm·pip·Gradle·Cargo·NuGet·pnpm·Yarn v1/Berry·Maven·Go 모듈/빌드·Conda)의 위치(환경 변수·설정 파일)·용량·실제 확보, WSL2·Docker Desktop 가상 디스크(`.vhdx`)의 크기·실제 점유와 줄이는 명령 안내(정리하지 않음), 분석할 때마다 캐시·가상 디스크 용량을 기록해 직전 기록보다 늘어난·줄어든 용량 표시(`disk-scanner devenv`, GUI [시스템 정리]의 증감 열) |
+| 시스템 정리 | 사용자 임시 파일(`%TEMP%`)·Windows 오류 보고서·휴지통·브라우저(Chrome·Edge·Firefox) 캐시와 공용 개발 캐시(npm·pip·Gradle·Cargo·NuGet·pnpm·Yarn·Maven·Go·Conda, 환경 변수·설정 파일까지 확인한 위치와 그 근거 표시)를 한 목록에서 분석해 대상별 실제 확보 용량을 보여 주고, 고른 대상만 정리. 설정한 캐시 위치가 링크·캐시 구조가 아니면 이유와 함께 정리하지 않음. 휴지통 외에는 기존 안전 장치를 거쳐 휴지통(없는 드라이브는 격리 폴더)으로 옮기며, 최근 24시간 안에 바뀐 임시 파일·실행 중인 브라우저의 캐시는 건너뜀. 휴지통 비우기(영구 삭제)는 직접 고르고 따로 한 번 더 확인해야 함. 개발 도구 캐시도 [모두 선택]에 들어가지 않아 직접 골라야 하며, 오프라인 빌드가 안 되는 캐시는 주의로 표시 |
 | Booster | 시작 프로그램 켜기/끄기(작업 관리자와 같은 방식, 등록은 지우지 않아 되돌릴 수 있음), 전체·프로세스별 CPU·메모리 사용량, 앱/백그라운드 구분과 고른 프로세스 끝내기(시스템·Windows 구성 요소·ByteSieve 자신은 보호, PID 재사용 확인) |
 | 표시 언어·Windows 11 모양 | GUI를 한국어·영어·일본어·중국어 간체로 표시(환경 변수 → 설치 언어 → Windows 표시 언어 순, 언어별 글꼴, 문구 길이에 맞춘 단추 폭). 지금은 탭 이름과 폴더 스캔 탭 컨트롤까지 번역. Windows 11에서 둥근 창 모서리·Mica 제목 표시줄 |
 
@@ -55,6 +56,9 @@ build\Debug\disk-scanner.exe find C:\Users\me\Projects
 build\Debug\disk-scanner.exe clean project C:\Users\me\Projects --dry-run
 build\Debug\disk-scanner.exe clean project C:\Users\me\Projects --category node_modules --execute
 build\Debug\disk-scanner.exe clean system --include npm,pip --json
+
+# 개발 환경 분석: 캐시·WSL/Docker 가상 디스크 용량과 지난 기록 대비 증감(읽기 전용)
+build\Debug\disk-scanner.exe devenv
 
 # GUI: 폴더를 지정하면 바로 스캔
 build\Debug\bytesieve-gui.exe C:\Users\me\Projects
@@ -97,7 +101,7 @@ GUI는 **폴더 스캔 / 드라이브 / 시스템 정리 / 프로젝트 정리 /
 ctest --test-dir build -C Debug --output-on-failure
 ```
 
-단위 테스트 27개, CLI·도구 검사 30개, GUI 자체 검사 18개(총 75개)가 등록되어 있습니다.
+단위 테스트 28개, CLI·도구 검사 31개, GUI 자체 검사 18개(총 77개)가 등록되어 있습니다.
 
 ## 문서
 
@@ -125,11 +129,12 @@ ByteSieve/
 │   ├── clean_plan                                    정리 계획: 탐지 결과 → 대상·선택 정책·요약 → 실행(GUI·CLI 공통)
 │   ├── project_info                                  Git 기반 프로젝트 분석(묶기·Git 상태·휴면·복구 가능성)
 │   ├── dev_cache                                     공용 개발 캐시 위치 탐지·용량 세기
+│   ├── vdisk, devenv_history                         WSL2·Docker 가상 디스크 찾기, 개발 캐시 증가 기록
 │   ├── quarantine                                    격리 폴더(이동·기록·복원·영구 삭제)
 │   ├── cleaner, booster                              시스템 정크 분석·정리, 시작 프로그램·프로세스 관리
 │   ├── drive, sysmon, path, size_format              드라이브·RAM/CPU 측정·경로·용량 표시
 │   ├── treemap                                       트리맵 배치(스퀘어리파이드, 순수 계산)
-│   ├── cli, cli_clean, jsonl, main.c                 CLI(disk-scanner, find·clean 명령 포함)
+│   ├── cli, cli_clean, cli_devenv, jsonl, main.c     CLI(disk-scanner, find·clean·devenv 명령 포함)
 │   ├── gui_main.c, gui_drives, gui_cleaner, gui_booster, gui_cleanup, gui_quarantine, gui_monitor, gui_treemap   GUI(bytesieve-gui)
 │   ├── gui_theme, ui_lang                            GUI 공통 모양(창 외곽·언어별 글꼴·글자 폭), 표시 언어·번역 문자열
 │   └── bench.c                                       성능 측정 도구(bytesieve-bench)
@@ -138,7 +143,7 @@ ByteSieve/
 
 ## 구현 상태와 향후 계획
 
-CLI 스캐너, JSON Lines 출력, Git 기반 프로젝트 분석(휴면 판정·미커밋/미푸시 경고·복구 가능성), CLI 정리 후보 찾기·정리 명령(`find`·`clean --dry-run`·`--execute`, JSON 문서 출력, GUI와 같은 정리 계획·실행 코드), GUI 일곱 탭, 시스템 정리(임시 파일·오류 보고서·휴지통·브라우저 캐시·공용 개발 캐시(npm·pip·Gradle·Cargo·NuGet) 분석·정리), 프로젝트 정리(정리 후보 탐지·휴지통 이동), 실제 확보 용량(할당 크기·하드 링크 반영), Booster(시작 프로그램·프로세스 관리, CPU·메모리 사용량), 휴지통 없는 드라이브의 격리 폴더(복원·영구 삭제), 디스크 사용량 분석, 트리맵 시각화, 드라이브별 BitLocker 암호화 상태 표시, 정밀 스캔(하드 링크 중복 보정), 폴더별 변화 추적(자동 저장 설정·기록 삭제 포함), 스캔 결과 CSV·HTML 내보내기, 병렬 스캔(미리 읽기 작업 수 제한으로 메모리 절감), GUI 표시 언어 기반(한국어·영어·일본어·중국어 간체, 탭 이름과 폴더 스캔 탭 컨트롤)과 Windows 11 창 외곽이 구현되어 있습니다.
+CLI 스캐너, JSON Lines 출력, 개발 환경 분석(공용 캐시 15종·WSL2/Docker 가상 디스크·증가 기록), Git 기반 프로젝트 분석(휴면 판정·미커밋/미푸시 경고·복구 가능성), CLI 정리 후보 찾기·정리 명령(`find`·`clean --dry-run`·`--execute`, JSON 문서 출력, GUI와 같은 정리 계획·실행 코드), GUI 일곱 탭, 시스템 정리(임시 파일·오류 보고서·휴지통·브라우저 캐시·공용 개발 캐시(npm·pip·Gradle·Cargo·NuGet) 분석·정리), 프로젝트 정리(정리 후보 탐지·휴지통 이동), 실제 확보 용량(할당 크기·하드 링크 반영), Booster(시작 프로그램·프로세스 관리, CPU·메모리 사용량), 휴지통 없는 드라이브의 격리 폴더(복원·영구 삭제), 디스크 사용량 분석, 트리맵 시각화, 드라이브별 BitLocker 암호화 상태 표시, 정밀 스캔(하드 링크 중복 보정), 폴더별 변화 추적(자동 저장 설정·기록 삭제 포함), 스캔 결과 CSV·HTML 내보내기, 병렬 스캔(미리 읽기 작업 수 제한으로 메모리 절감), GUI 표시 언어 기반(한국어·영어·일본어·중국어 간체, 탭 이름과 폴더 스캔 탭 컨트롤)과 Windows 11 창 외곽이 구현되어 있습니다.
 
 ### 향후 개선 계획(미구현)
 
@@ -156,6 +161,8 @@ CLI 스캐너, JSON Lines 출력, Git 기반 프로젝트 분석(휴면 판정·
   (정리 명령 `clean --jsonl`은 출력함)
 - CLI 정리 보강: 격리 폴더 목록·복원·영구 삭제(`clean quarantine`), 진행률 표시, 정리 결과를 변화 추적 기록과 연결,
   `find`의 크기·마지막 수정 기준 거르기(`--min-size`·`--older-than`)와 정렬 선택
+- 개발 환경 분석 보강: 가상 디스크 안의 실제 사용량(배포판 안 `df`)과 줄일 수 있는 양 추정, 증가 기록 그래프(GUI),
+  Bun·Deno·Poetry·uv·Bazel 캐시, Docker 이미지·빌드 캐시 크기(`docker system df`), 기록 삭제에 개발 캐시 기록 포함
 - 프로젝트 분석 보강: 휴면 프로젝트의 후보만 고르는 선택(`--dormant-only`, GUI 필터), 프로젝트 단위 목록 보기(GUI 그룹),
   휴면 기준 일수를 GUI에서 바꾸기, 원격 정보가 오래됐을 때(`git fetch` 전) 알림, Mercurial 등 다른 버전 관리 도구
 - 설치 경로 보호 확대: 레지스트리·`AppData`에 없는 임의 위치(예: `D:\tools`에 압축을 푼 VS Code 포터블)의 개발 도구도 보호 경로로 인식

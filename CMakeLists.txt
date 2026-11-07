@@ -109,11 +109,24 @@ target_include_directories(bytesieve_dev_cache PUBLIC src)
 target_link_libraries(bytesieve_dev_cache PUBLIC bytesieve_cleanup_trash shell32 ole32)
 bytesieve_configure(bytesieve_dev_cache)
 
+# WSL2·Docker 가상 디스크(.vhdx) 찾기(레지스트리 Lxss·Docker Desktop 기본 위치). 읽기 전용.
+add_library(bytesieve_vdisk STATIC src/vdisk.c)
+target_include_directories(bytesieve_vdisk PUBLIC src)
+target_link_libraries(bytesieve_vdisk PUBLIC bytesieve_path advapi32 shell32 ole32)
+bytesieve_configure(bytesieve_vdisk)
+
+# 개발 캐시·가상 디스크 용량 기록(증가 추적, 원자적 저장).
+add_library(bytesieve_devhist STATIC src/devenv_history.c)
+target_include_directories(bytesieve_devhist PUBLIC src)
+target_link_libraries(bytesieve_devhist PUBLIC bytesieve_path)
+bytesieve_configure(bytesieve_devhist)
+
 # Cleaner: 사용자 임시 파일·Windows 오류 보고서·휴지통·브라우저 캐시·공용 개발 캐시 분석과,
 # 고른 대상만 정리(휴지통 비우기 외에는 cleanup_trash 의 안전 장치로 휴지통·격리 폴더로).
 add_library(bytesieve_cleaner STATIC src/cleaner.c)
 target_include_directories(bytesieve_cleaner PUBLIC src)
 target_link_libraries(bytesieve_cleaner PUBLIC bytesieve_plan bytesieve_cleanup_trash bytesieve_dev_cache
+                      bytesieve_vdisk bytesieve_devhist
                       bytesieve_scanner shell32 ole32)
 bytesieve_configure(bytesieve_cleaner)
 
@@ -180,10 +193,10 @@ target_link_libraries(bytesieve-bench PRIVATE bytesieve_model bytesieve_cleanup 
 bytesieve_configure(bytesieve-bench)
 
 # disk-scanner clean: GUI 정리 탭과 같은 탐지(cleanup_job·cleaner)·계획(clean_plan)·실행을 쓰는 CLI.
-add_library(bytesieve_cli_clean STATIC src/cli_clean.c)
+add_library(bytesieve_cli_clean STATIC src/cli_clean.c src/cli_devenv.c)
 target_include_directories(bytesieve_cli_clean PUBLIC src)
 target_link_libraries(bytesieve_cli_clean PUBLIC bytesieve_plan bytesieve_cleaner bytesieve_cleanup_job
-                      bytesieve_jsonl bytesieve_format bytesieve_cli ole32)
+                      bytesieve_jsonl bytesieve_format bytesieve_cli bytesieve_history ole32)
 bytesieve_configure(bytesieve_cli_clean)
 
 add_executable(disk-scanner src/main.c)
@@ -284,6 +297,10 @@ add_test(NAME cli_track
 add_test(NAME cli_find
          COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:disk-scanner> -DMODE=find
                  -DFIXTURE=${CMAKE_CURRENT_BINARY_DIR}/cli_find_fixture
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_clean_check.cmake)
+add_test(NAME cli_devenv
+         COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:disk-scanner> -DMODE=devenv
+                 -DFIXTURE=${CMAKE_CURRENT_BINARY_DIR}/cli_devenv_fixture
                  -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_clean_check.cmake)
 add_test(NAME cli_clean_project
          COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:disk-scanner> -DMODE=project
@@ -404,6 +421,11 @@ add_executable(test_cli_clean tests/test_cli_clean.c)
 target_link_libraries(test_cli_clean PRIVATE bytesieve_cli_clean)
 bytesieve_configure(test_cli_clean)
 add_test(NAME cli_clean COMMAND test_cli_clean)
+
+add_executable(test_devenv tests/test_devenv.c)
+target_link_libraries(test_devenv PRIVATE bytesieve_cleaner)
+bytesieve_configure(test_devenv)
+add_test(NAME devenv COMMAND test_devenv)
 
 add_executable(test_project tests/test_project.c)
 target_link_libraries(test_project PRIVATE bytesieve_project)

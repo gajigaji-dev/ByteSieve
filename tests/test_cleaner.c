@@ -202,6 +202,16 @@ static void build_fixture(void)
     set_env(L"CARGO_HOME", NULL);
     set_env(L"NUGET_PACKAGES", NULL);
     set_env(L"NUGET_HTTP_CACHE_PATH", NULL);
+    set_env(L"npm_config_store_dir", NULL);
+    set_env(L"YARN_CACHE_FOLDER", NULL);
+    set_env(L"YARN_GLOBAL_FOLDER", NULL);
+    set_env(L"GOMODCACHE", NULL);
+    set_env(L"GOPATH", NULL);
+    set_env(L"GOCACHE", NULL);
+    set_env(L"GOENV", NULL);
+    set_env(L"CONDA_PKGS_DIRS", NULL);
+    /* 실제 WSL 배포판(레지스트리)을 보지 않게 비어 있는 키를 가리킨다. */
+    SetEnvironmentVariableW(L"BYTESIEVE_WSL_KEY", L"Software\\ByteSieveTest\\no-wsl");
     SetEnvironmentVariableW(L"BYTESIEVE_QUARANTINE_ROOT", g_root);
 }
 

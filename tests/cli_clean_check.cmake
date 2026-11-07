@@ -1,6 +1,6 @@
 # disk-scanner find·clean 검사(GUI 정리 탭과 같은 탐지·계획·실행을 쓰는 CLI).
 #
-#   cmake -DEXE=<disk-scanner> -DFIXTURE=<빈 폴더로 만들 경로> -DMODE=find|project|system -P cli_clean_check.cmake
+#   cmake -DEXE=<disk-scanner> -DFIXTURE=<빈 폴더로 만들 경로> -DMODE=find|project|system|devenv -P cli_clean_check.cmake
 #
 # 옮기기는 BYTESIEVE_QUARANTINE_ROOT 를 픽스처로 두어 실제 휴지통이 아니라 픽스처의 격리 폴더
 # (.bytesieve-trash)로 가게 한다. system 은 TEMP·TMP·LOCALAPPDATA·USERPROFILE·APPDATA 도 픽스처로 돌리고
@@ -379,6 +379,9 @@ elseif(MODE STREQUAL "system")
     set(env_args --unset=npm_config_cache --unset=NPM_CONFIG_USERCONFIG --unset=PIP_CACHE_DIR
                  --unset=PIP_CONFIG_FILE --unset=GRADLE_USER_HOME --unset=CARGO_HOME
                  --unset=NUGET_PACKAGES --unset=NUGET_HTTP_CACHE_PATH
+                 --unset=npm_config_store_dir --unset=YARN_CACHE_FOLDER --unset=YARN_GLOBAL_FOLDER
+                 --unset=GOMODCACHE --unset=GOPATH --unset=GOCACHE --unset=GOENV
+                 --unset=CONDA_PKGS_DIRS "BYTESIEVE_WSL_KEY=Software\\ByteSieveTest\\no-wsl"
                  "TEMP=${native_temp}" "TMP=${native_temp}" "USERPROFILE=${native_home}"
                  "LOCALAPPDATA=${native_local}" "APPDATA=${native_roaming}"
                  "BYTESIEVE_QUARANTINE_ROOT=${native_fixture}" "BYTESIEVE_GIT=none")
@@ -422,6 +425,100 @@ elseif(MODE STREQUAL "system")
     expect_exists("local/Google/Chrome/User Data/Default/Cache" TRUE)
     expect_exists("home/.gradle/wrapper/dists" TRUE)
     expect_exists(".bytesieve-trash" TRUE)
+elseif(MODE STREQUAL "devenv")
+    # 개발 환경 분석(읽기 전용)과 증가 기록. 사용자 폴더·기록 폴더를 픽스처로, WSL 레지스트리는 빈 키로.
+    file(WRITE "${FIXTURE}/local/npm-cache/_cacache/index-v5/a" "${fivek}")
+    file(WRITE "${FIXTURE}/local/Yarn/Cache/v6/npm-x/b" "${hundred}")
+    file(WRITE "${FIXTURE}/home/go/pkg/mod/cache/download/c" "${hundred}")
+    file(WRITE "${FIXTURE}/local/Docker/wsl/disk/docker_data.vhdx" "${fivek}")
+    file(MAKE_DIRECTORY "${FIXTURE}/roaming" "${FIXTURE}/temp")
+    foreach(d temp home local roaming hist)
+        file(TO_NATIVE_PATH "${FIXTURE}/${d}" native_${d})
+    endforeach()
+    set(env_args --unset=npm_config_cache --unset=NPM_CONFIG_USERCONFIG --unset=PIP_CACHE_DIR
+                 --unset=PIP_CONFIG_FILE --unset=GRADLE_USER_HOME --unset=CARGO_HOME
+                 --unset=NUGET_PACKAGES --unset=NUGET_HTTP_CACHE_PATH
+                 --unset=npm_config_store_dir --unset=YARN_CACHE_FOLDER --unset=YARN_GLOBAL_FOLDER
+                 --unset=GOMODCACHE --unset=GOPATH --unset=GOCACHE --unset=GOENV
+                 --unset=CONDA_PKGS_DIRS "BYTESIEVE_WSL_KEY=Software\\ByteSieveTest\\no-wsl"
+                 "TEMP=${native_temp}" "TMP=${native_temp}" "USERPROFILE=${native_home}"
+                 "LOCALAPPDATA=${native_local}" "APPDATA=${native_roaming}"
+                 "BYTESIEVE_HISTORY_DIR=${native_hist}")
+
+    # 1. 첫 실행: 모두 첫 기록, Docker 가상 디스크, 기록 저장
+    run(out rc devenv --json)
+    expect_rc(rc 0 "devenv first")
+    expect_json("${out_stdout}" "devenv" "devenv first" command)
+    expect_json("${out_stdout}" "ON" "devenv first" history recorded)
+    expect_json("${out_stdout}" "0" "devenv first" history previous_records)
+    expect_json("${out_stdout}" "docker" "devenv first" vdisks 0 kind)
+    expect_json("${out_stdout}" "5000" "devenv first" vdisks 0 size)
+    expect_json_type("${out_stdout}" "NULL" "devenv first" vdisks 0 change)
+    string(JSON n_caches LENGTH "${out_stdout}" caches)
+    math(EXPR last "${n_caches} - 1")
+    set(seen "")
+    foreach(i RANGE ${last})
+        string(JSON cid GET "${out_stdout}" caches ${i} id)
+        string(JSON cstate GET "${out_stdout}" caches ${i} state)
+        if(cstate STREQUAL "ready")
+            list(APPEND seen ${cid})
+            expect_json_type("${out_stdout}" "NULL" "devenv first ${cid}" caches ${i} change)
+        endif()
+    endforeach()
+    foreach(want npm yarn go_mod)
+        if(NOT want IN_LIST seen)
+            message(SEND_ERROR "devenv first: ${want} cache not found (${seen})\n${out_stdout}")
+        endif()
+    endforeach()
+    expect_exists("hist/devenv-history.tsv" TRUE)
+
+    # 2. npm 캐시를 키운 뒤: 직전 기록보다 늘어난 만큼
+    file(WRITE "${FIXTURE}/local/npm-cache/_cacache/index-v5/b" "${fivek}${fivek}")
+    run(out rc devenv --json)
+    expect_rc(rc 0 "devenv second")
+    string(JSON n_caches LENGTH "${out_stdout}" caches)
+    math(EXPR last "${n_caches} - 1")
+    set(npm_change "")
+    foreach(i RANGE ${last})
+        string(JSON cid GET "${out_stdout}" caches ${i} id)
+        if(cid STREQUAL "npm")
+            string(JSON npm_change GET "${out_stdout}" caches ${i} change bytes)
+        elseif(cid STREQUAL "yarn")
+            expect_json("${out_stdout}" "0" "devenv second yarn" caches ${i} change bytes)
+        endif()
+    endforeach()
+    if(NOT npm_change STREQUAL "10000")
+        message(SEND_ERROR "devenv second: npm change is '${npm_change}', expected 10000\n${out_stdout}")
+    endif()
+    expect_json("${out_stdout}" "0" "devenv second" vdisks 0 change bytes)
+
+    # 3. --no-record: 비교만 하고 기록 파일은 그대로
+    file(STRINGS "${FIXTURE}/hist/devenv-history.tsv" before)
+    list(LENGTH before before_n)
+    run(out rc devenv --no-record)
+    expect_rc(rc 0 "devenv no-record")
+    expect_match(out "History: not recorded \\(--no-record\\)" "devenv no-record")
+    expect_match(out "How to shrink" "devenv shrink hint")
+    expect_match(out "npm +npm +[^\n]*\\+9\\.77 KiB|npm +npm +[^\n]*no change" "devenv text change")
+    file(STRINGS "${FIXTURE}/hist/devenv-history.tsv" after)
+    list(LENGTH after after_n)
+    if(NOT before_n EQUAL after_n)
+        message(SEND_ERROR "devenv --no-record changed the history (${before_n} -> ${after_n})")
+    endif()
+
+    # 4. JSON Lines, 인자 오류, 읽기 전용
+    run(out rc devenv --jsonl --no-record)
+    expect_rc(rc 0 "devenv jsonl")
+    expect_match(out "\"event\":\"devenv_cache\"[^\n]*\"id\":\"npm\"" "devenv jsonl cache")
+    expect_match(out "\"event\":\"devenv_vdisk\"[^\n]*\"kind\":\"docker\"" "devenv jsonl vdisk")
+    expect_match(out "\"event\":\"complete\"[^\n]*\"recorded\":false" "devenv jsonl complete")
+    run(out rc devenv --bogus)
+    expect_rc(rc 2 "devenv bad arg")
+    run(out rc devenv --json --jsonl)
+    expect_rc(rc 2 "devenv json+jsonl")
+    expect_exists("local/npm-cache/_cacache/index-v5/a" TRUE)
+    expect_exists("local/Docker/wsl/disk/docker_data.vhdx" TRUE)
+
 else()
-    message(FATAL_ERROR "MODE must be find, project or system")
+    message(FATAL_ERROR "MODE must be find, project, system or devenv")
 endif()

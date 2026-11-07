@@ -146,11 +146,24 @@ $env:BYTESIEVE_LANG = "ja"; build\Debug\bytesieve-gui.exe
 | Gradle | 의존성·빌드 캐시 / 래퍼 배포판 | `%USERPROFILE%\.gradle\caches` / `\wrapper\dists` |
 | Cargo | 레지스트리 캐시 / git 의존성 | `%USERPROFILE%\.cargo\registry` / `\git` |
 | NuGet | 전역 패키지 / HTTP 캐시 | `%USERPROFILE%\.nuget\packages` / `%LOCALAPPDATA%\NuGet\v3-cache`(또는 `http-cache`) |
+| pnpm | 패키지 저장소 | `%LOCALAPPDATA%\pnpm\store` |
+| Yarn | 패키지 캐시(v1) / 전역 캐시(Berry) | `%LOCALAPPDATA%\Yarn\Cache` / `%LOCALAPPDATA%\Yarn\Berry\cache` |
+| Maven | 로컬 저장소(주의) | `%USERPROFILE%\.m2\repository` |
+| Go | 모듈 캐시 / 빌드 캐시 | `%USERPROFILE%\go\pkg\mod` / `%LOCALAPPDATA%\go-build` |
+| Conda | 패키지 캐시(주의) | `%USERPROFILE%\.conda\pkgs`(또는 `miniconda3`·`anaconda3`·`miniforge3`·`mambaforge`의 `pkgs`) |
+
+**가상 디스크(WSL·Docker)** 분류에는 WSL 배포판과 Docker Desktop의 `.vhdx`가 "분석만(정리하지 않음)" 행으로 나옵니다. 행을 고르면 실제 점유와
+줄이는 명령(`wsl --shutdown` 뒤 `Optimize-VHD`/`diskpart compact vdisk`)이 아래 칸에 나옵니다. 체크할 수 없습니다.
+
+**증감** 열: 개발 캐시·가상 디스크는 분석할 때마다 용량을 기록 폴더의 `devenv-history.tsv`에 남기고([스캔 기록 자동 저장]이 켜져 있을 때),
+직전 기록보다 늘어난·줄어든 용량을 "+1.20 GiB (7일 전보다)"처럼 보여 줍니다. 처음이면 "첫 기록"입니다.
 
 - 목록 열: 대상, 분류, **실제 확보**, 파일 크기, 파일 수, 상태, 제외, 위치, 위치 근거. 행을 고르면 아래 칸에 정리하면 어떻게 되는지와
   주의 사항, 위치 근거, 하드 링크로 빠진 용량이 나옵니다.
 - **위치 근거**(개발 도구 캐시): 환경 변수(`npm_config_cache`, `PIP_CACHE_DIR`, `GRADLE_USER_HOME`, `CARGO_HOME`, `NUGET_PACKAGES`,
-  `NUGET_HTTP_CACHE_PATH`)와 설정 파일(`.npmrc`의 `cache=`, `pip.ini`의 `cache-dir`, `NuGet.Config`의 `globalPackagesFolder`)을 먼저 보고,
+  `NUGET_HTTP_CACHE_PATH`, `npm_config_store_dir`, `YARN_CACHE_FOLDER`, `YARN_GLOBAL_FOLDER`, `GOMODCACHE`, `GOPATH`, `GOCACHE`, `CONDA_PKGS_DIRS`)와
+  설정 파일(`.npmrc`의 `cache=`·`store-dir`, `pip.ini`의 `cache-dir`, `NuGet.Config`의 `globalPackagesFolder`, `.m2\settings.xml`의 `localRepository`,
+  `%APPDATA%\go\env`)을 먼저 보고,
   없으면 기본 위치를 씁니다. 어디서 정했는지(`기본 위치`, `환경 변수 …`, `설정 파일 …`)를 보여 줍니다.
 - **상태**: 정리 가능 / 정리 가능 · 주의 / 정리 가능 · 영구 삭제(휴지통) / 정리할 것 없음 / 없음(설치하지 않음) /
   프로그램 실행 중(브라우저가 실행 중이면 그 캐시는 정리하지 않음) / 보호·확인 불가로 정리 안 함 / 조회 실패.

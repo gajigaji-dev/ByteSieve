@@ -47,6 +47,13 @@ typedef enum {
     DEV_CACHE_CARGO_GIT,      /* Cargo git 의존성 */
     DEV_CACHE_NUGET_PACKAGES, /* NuGet 전역 패키지 폴더 */
     DEV_CACHE_NUGET_HTTP,     /* NuGet HTTP 캐시 */
+    DEV_CACHE_PNPM,           /* pnpm 패키지 저장소(store) */
+    DEV_CACHE_YARN,           /* Yarn v1 패키지 캐시 */
+    DEV_CACHE_YARN_BERRY,     /* Yarn 2+(Berry) 전역 캐시 */
+    DEV_CACHE_MAVEN,          /* Maven 로컬 저장소(.m2\repository) */
+    DEV_CACHE_GO_MOD,         /* Go 모듈 캐시(GOMODCACHE) */
+    DEV_CACHE_GO_BUILD,       /* Go 빌드 캐시(GOCACHE) */
+    DEV_CACHE_CONDA,          /* Conda 패키지 캐시(pkgs) */
     DEV_CACHE_KIND_COUNT
 } DevCacheKind;
 

@@ -87,10 +87,18 @@ file(TO_NATIVE_PATH "${FIXTURE}/home" native_home)
 file(TO_NATIVE_PATH "${FIXTURE}/local" native_local)
 file(TO_NATIVE_PATH "${FIXTURE}/roaming" native_roaming)
 file(TO_NATIVE_PATH "${FIXTURE}/mydocs" native_docs)
+# 증가 기록: 기록 폴더를 픽스처로 두고 npm 캐시의 예전 기록(1바이트, 2022년)을 미리 넣는다.
+file(TO_NATIVE_PATH "${FIXTURE}/hist" native_hist)
+file(WRITE "${FIXTURE}/hist/devenv-history.tsv"
+     "# bytesieve devenv history v1\n133000000000000000\tnpm\t1\t${native_local}\\npm-cache\n")
 execute_process(COMMAND ${CMAKE_COMMAND} -E env
+                        "BYTESIEVE_HISTORY_DIR=${native_hist}"
                         --unset=npm_config_cache --unset=NPM_CONFIG_USERCONFIG
                         --unset=PIP_CACHE_DIR --unset=PIP_CONFIG_FILE --unset=GRADLE_USER_HOME
                         --unset=CARGO_HOME --unset=NUGET_PACKAGES
+                        --unset=npm_config_store_dir --unset=YARN_CACHE_FOLDER --unset=YARN_GLOBAL_FOLDER
+                        --unset=GOMODCACHE --unset=GOPATH --unset=GOCACHE --unset=GOENV
+                        --unset=CONDA_PKGS_DIRS "BYTESIEVE_WSL_KEY=Software\\ByteSieveTest\\no-wsl"
                         "NUGET_HTTP_CACHE_PATH=${native_docs}"
                         "TEMP=${native_temp}" "TMP=${native_temp}"
                         "USERPROFILE=${native_home}" "LOCALAPPDATA=${native_local}"
@@ -148,6 +156,18 @@ foreach(kept "temp/fresh.txt" "local/Google/Chrome/User Data/Default/Preferences
         message(SEND_ERROR "${kept} should have been kept")
     endif()
 endforeach()
+# 증가 기록: npm 은 100바이트 - 예전 1바이트 = +99, 처음 보는 캐시는 "첫 기록". 기록 파일에 지금 값이 더해진다.
+if(NOT out MATCHES "growth: npm = 99")
+    message(SEND_ERROR "npm growth against the seeded record missing:\n${out}")
+endif()
+if(NOT out MATCHES "growth: pip = first")
+    message(SEND_ERROR "first record for pip missing:\n${out}")
+endif()
+file(STRINGS "${FIXTURE}/hist/devenv-history.tsv" hist_lines)
+list(LENGTH hist_lines hist_count)
+if(hist_count LESS 6)
+    message(SEND_ERROR "devenv history was not updated (${hist_count} lines)")
+endif()
 if(NOT IS_DIRECTORY "${FIXTURE}/.bytesieve-trash")
     message(SEND_ERROR "quarantine folder was not created in the fixture")
 endif()
