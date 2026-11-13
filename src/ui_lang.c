@@ -429,6 +429,232 @@ static const wchar_t *const k_text[UI_T_COUNT][UI_LANG_COUNT] = {
                             L"エクスプローラーで開く(&O)", L"在文件资源管理器中打开(&O)"},
     [UI_T_MAP_MENU_COPY] = {L"경로 복사(&C)", L"&Copy path", L"パスのコピー(&C)", L"复制路径(&C)"},
     [UI_T_MAP_MENU_COLOR] = {L"색 구분(&L)", L"Co&lor by", L"色分け(&L)", L"颜色区分(&L)"},
+
+    /* ---- 격리 폴더: 단추·열 머리글·안내 ---- */
+    [UI_T_Q_REFRESH] = {L"새로 고침", L"Refresh", L"最新の情報に更新", L"刷新"},
+    [UI_T_Q_RESTORE] = {L"복원(&R)", L"&Restore", L"復元(&R)", L"恢复(&R)"},
+    [UI_T_Q_PURGE] = {L"영구 삭제(&P)...", L"&Permanently delete...", L"完全に削除(&P)...",
+                      L"永久删除(&P)..."},
+    [UI_T_Q_CANCEL] = {L"취소", L"Cancel", L"キャンセル", L"取消"},
+    [UI_T_Q_OPEN] = {L"격리 폴더 열기", L"Open quarantine folder", L"隔離フォルダーを開く",
+                     L"打开隔离文件夹"},
+    [UI_T_Q_INFO] = {L"휴지통이 없는 드라이브(USB 등)에서 정리한 항목을 같은 드라이브의 "
+                     L"격리 폴더(.bytesieve-trash)에 보관합니다. 복원은 덮어쓰지 않으며, "
+                     L"영구 삭제한 항목은 복구할 수 없습니다.",
+                     L"Items cleaned up on drives without a Recycle Bin (such as USB drives) are kept in the "
+                     L"quarantine folder (.bytesieve-trash) on the same drive. Restoring never overwrites, "
+                     L"and permanently deleted items can't be recovered.",
+                     L"ごみ箱のないドライブ（USB など）で整理した項目は、同じドライブの隔離フォルダー"
+                     L"（.bytesieve-trash）に保管します。復元時に上書きはせず、完全に削除した項目は"
+                     L"元に戻せません。",
+                     L"在没有回收站的驱动器（如 USB）上清理的项目会保存在同一驱动器的隔离文件夹"
+                     L"（.bytesieve-trash）中。恢复时不会覆盖，永久删除的项目无法恢复。"},
+    [UI_T_Q_COL_STATE] = {L"상태", L"Status", L"状態", L"状态"},
+    [UI_T_Q_COL_SIZE] = {L"용량", L"Size", L"サイズ", L"大小"},
+    [UI_T_Q_COL_ORIGINAL] = {L"원래 위치", L"Original location", L"元の場所", L"原始位置"},
+    [UI_T_Q_COL_TIME] = {L"격리한 시각", L"Quarantined", L"隔離した日時", L"隔离时间"},
+    [UI_T_Q_COL_LOCATION] = {L"격리 위치", L"Quarantine location", L"隔離場所", L"隔离位置"},
+    [UI_T_Q_COL_RESULT] = {L"결과", L"Result", L"結果", L"结果"},
+    [UI_T_Q_STATE_OK] = {L"격리됨", L"Quarantined", L"隔離済み", L"已隔离"},
+    [UI_T_Q_STATE_MISSING] = {L"기록만 있음(파일 없음)", L"Record only (file missing)",
+                              L"記録のみ（ファイルなし）", L"仅有记录（文件不存在）"},
+    [UI_T_Q_STATE_ORPHAN] = {L"기록 없음(원래 위치 모름)", L"No record (original location unknown)",
+                             L"記録なし（元の場所が不明）", L"无记录（原始位置未知）"},
+    [UI_T_Q_UNKNOWN] = {L"(알 수 없음)", L"(unknown)", L"（不明）", L"（未知）"},
+    [UI_T_Q_SUMMARY] = {L"격리 항목 %u개 · %ls", L"%u quarantined items · %ls",
+                        L"隔離項目 %u 個 · %ls", L"隔离项目 %u 个 · %ls"},
+    [UI_T_Q_SUMMARY_CHECK] = {L"격리 항목 %u개 · %ls   /   확인 필요 %u개",
+                              L"%u quarantined items · %ls   /   %u need attention",
+                              L"隔離項目 %u 個 · %ls   /   要確認 %u 個",
+                              L"隔离项目 %u 个 · %ls   /   需要确认 %u 个"},
+
+    /* ---- 격리 폴더: 상태 줄 ---- */
+    [UI_T_Q_UNREADABLE] = {L"격리 폴더를 읽지 못한 드라이브가 %u개 있습니다(링크로 바뀌었거나 접근 거부).",
+                           L"Couldn't read the quarantine folder on %u drives (it became a link, or "
+                           L"access was denied).",
+                           L"隔離フォルダーを読み取れなかったドライブが %u 個あります（リンクに変わったか、"
+                           L"アクセスが拒否されました）。",
+                           L"有 %u 个驱动器的隔离文件夹无法读取（已变为链接或访问被拒绝）。"},
+    [UI_T_Q_SELECT_ITEMS] = {L"복원하거나 영구 삭제할 항목을 선택하세요.",
+                             L"Select items to restore or permanently delete.",
+                             L"復元または完全に削除する項目を選んでください。",
+                             L"请选择要恢复或永久删除的项目。"},
+    [UI_T_Q_EMPTY] = {L"격리 폴더에 항목이 없습니다.", L"There are no items in the quarantine folder.",
+                      L"隔離フォルダーに項目はありません。", L"隔离文件夹中没有项目。"},
+    [UI_T_Q_SELECT_RESTORE] = {L"복원할 항목을 목록에서 선택하세요.",
+                               L"Select the items to restore from the list.",
+                               L"復元する項目を一覧から選んでください。", L"请从列表中选择要恢复的项目。"},
+    [UI_T_Q_RESTORED] = {L"복원 완료: 성공 %u개 · 같은 이름이 있어 건너뜀 %u개 · 실패 %u개 · 복원할 수 없음 %u개",
+                         L"Restore finished: succeeded %u · skipped (same name exists) %u · failed %u · "
+                         L"can't be restored %u",
+                         L"復元完了: 成功 %u 個 · 同じ名前があるためスキップ %u 個 · 失敗 %u 個 · "
+                         L"復元できない %u 個",
+                         L"恢复完成：成功 %u 个 · 因同名而跳过 %u 个 · 失败 %u 个 · 无法恢复 %u 个"},
+    [UI_T_Q_SELECT_PURGE] = {L"영구 삭제할 항목을 목록에서 선택하세요.",
+                             L"Select the items to permanently delete from the list.",
+                             L"完全に削除する項目を一覧から選んでください。",
+                             L"请从列表中选择要永久删除的项目。"},
+    [UI_T_Q_PURGE_CANCELLED] = {L"영구 삭제를 취소했습니다. 아무것도 바뀌지 않았습니다.",
+                                L"Permanent deletion was cancelled. Nothing was changed.",
+                                L"完全な削除をキャンセルしました。何も変更されていません。",
+                                L"已取消永久删除。没有任何更改。"},
+    [UI_T_Q_PURGE_NO_MEMORY] = {L"영구 삭제를 시작하지 못했습니다(메모리 부족).",
+                                L"Couldn't start permanent deletion (out of memory).",
+                                L"完全な削除を開始できませんでした（メモリ不足）。",
+                                L"无法开始永久删除（内存不足）。"},
+    [UI_T_Q_PURGE_NO_THREAD] = {L"영구 삭제를 시작하지 못했습니다(스레드 생성 실패).",
+                                L"Couldn't start permanent deletion (couldn't create a thread).",
+                                L"完全な削除を開始できませんでした（スレッドを作成できません）。",
+                                L"无法开始永久删除（无法创建线程）。"},
+    [UI_T_Q_PURGING] = {L"영구 삭제하는 중... 항목 %u/%u · 지운 파일·폴더 %llu개(%ls) · %ls",
+                        L"Permanently deleting... item %u/%u · deleted files and folders %llu (%ls) · %ls",
+                        L"完全に削除しています... 項目 %u/%u · 削除したファイル・フォルダー %llu 個（%ls） · %ls",
+                        L"正在永久删除... 项目 %u/%u · 已删除的文件和文件夹 %llu 个（%ls） · %ls"},
+    [UI_T_Q_STOPPING] = {L"영구 삭제를 멈추는 중... 지우고 있던 파일까지만 지우고, 남은 "
+                         L"파일은 격리 폴더에 그대로 둡니다.",
+                         L"Stopping permanent deletion... Only the file being deleted is finished; the "
+                         L"remaining files stay in the quarantine folder.",
+                         L"完全な削除を停止しています... 削除中のファイルまでを削除し、残りのファイルは"
+                         L"隔離フォルダーにそのまま残します。",
+                         L"正在停止永久删除... 只删除完正在删除的文件，其余文件保留在隔离文件夹中。"},
+    [UI_T_Q_PURGE_STOPPED] = {L"영구 삭제 취소: 성공 %u개 · 취소 %u개(남은 항목은 격리 폴더에 그대로) · "
+                              L"실패 %u개",
+                              L"Permanent deletion cancelled: succeeded %u · cancelled %u (remaining items "
+                              L"stay in the quarantine folder) · failed %u",
+                              L"完全な削除をキャンセル: 成功 %u 個 · キャンセル %u 個（残りの項目は隔離"
+                              L"フォルダーにそのまま） · 失敗 %u 個",
+                              L"永久删除已取消：成功 %u 个 · 取消 %u 个（其余项目保留在隔离文件夹中） · "
+                              L"失败 %u 个"},
+    [UI_T_Q_PURGED] = {L"영구 삭제 완료: 성공 %u개 · 실패 %u개",
+                       L"Permanent deletion finished: succeeded %u · failed %u",
+                       L"完全な削除が完了: 成功 %u 個 · 失敗 %u 個",
+                       L"永久删除完成：成功 %u 个 · 失败 %u 个"},
+
+    /* ---- 격리 폴더: 결과 열 ---- */
+    [UI_T_Q_HEAD_RESTORE_FAILED] = {L"복원하지 못함", L"Couldn't restore", L"復元できません",
+                                    L"无法恢复"},
+    [UI_T_Q_HEAD_ALT_FAILED] = {L"다른 이름으로 복원하지 못함", L"Couldn't restore under another name",
+                                L"別の名前で復元できません", L"无法以其他名称恢复"},
+    [UI_T_Q_HEAD_PURGE_FAILED] = {L"영구 삭제하지 못함", L"Couldn't permanently delete",
+                                  L"完全に削除できません", L"无法永久删除"},
+    [UI_T_Q_NOTE_NO_ORIGIN] = {L"복원할 수 없음: 원래 위치 기록이 없습니다. [격리 폴더 열기]로 "
+                               L"직접 확인하세요.",
+                               L"Can't restore: there's no record of the original location. Check it "
+                               L"yourself with [Open quarantine folder].",
+                               L"復元できません: 元の場所の記録がありません。[隔離フォルダーを開く] で"
+                               L"直接確認してください。",
+                               L"无法恢复：没有原始位置的记录。请通过 [打开隔离文件夹] 自行确认。"},
+    [UI_T_Q_NOTE_NO_FILE] = {L"복원할 수 없음: 격리된 파일이 없습니다(기록만 남음).",
+                             L"Can't restore: the quarantined file is missing (only the record remains).",
+                             L"復元できません: 隔離したファイルがありません（記録のみ残っています）。",
+                             L"无法恢复：隔离的文件不存在（仅剩记录）。"},
+    [UI_T_Q_NOTE_SKIPPED] = {L"건너뜀: 원래 위치에 같은 이름이 있음(덮어쓰지 않음). 기존 항목을 옮긴 뒤 "
+                             L"다시 복원하세요.",
+                             L"Skipped: an item with the same name exists at the original location (not "
+                             L"overwritten). Move the existing item, then restore again.",
+                             L"スキップ: 元の場所に同じ名前があります（上書きしません）。既存の項目を移動"
+                             L"してから、もう一度復元してください。",
+                             L"已跳过：原始位置存在同名项目（不覆盖）。请移走现有项目后再恢复。"},
+    [UI_T_Q_NOTE_CANCEL_PARTIAL] = {L"취소함: 일부 파일만 지웠습니다. 남은 파일과 기록은 격리 폴더에 "
+                                    L"그대로 있습니다.",
+                                    L"Cancelled: only some files were deleted. The remaining files and "
+                                    L"the record stay in the quarantine folder.",
+                                    L"キャンセル: 一部のファイルのみ削除しました。残りのファイルと記録は"
+                                    L"隔離フォルダーにそのまま残っています。",
+                                    L"已取消：只删除了部分文件。其余文件和记录保留在隔离文件夹中。"},
+    [UI_T_Q_NOTE_CANCEL_NONE] = {L"취소함: 지우지 않았습니다.", L"Cancelled: nothing was deleted.",
+                                 L"キャンセル: 削除していません。", L"已取消：未删除。"},
+    [UI_T_Q_ST_OK] = {L"완료", L"Done", L"完了", L"完成"},
+    [UI_T_Q_ST_MISSING] = {L"항목이 없음", L"Item not found", L"項目がありません", L"项目不存在"},
+    [UI_T_Q_ST_CONFLICT] = {L"같은 이름이 이미 있음", L"An item with the same name already exists",
+                            L"同じ名前がすでにあります", L"已存在同名项目"},
+    [UI_T_Q_ST_ACCESS_DENIED] = {L"접근 거부(권한 부족·쓰기 금지·사용 중일 수 있음)",
+                                 L"Access denied (no permission, write-protected, or in use)",
+                                 L"アクセス拒否（権限不足・書き込み禁止・使用中の可能性）",
+                                 L"访问被拒绝（可能没有权限、写保护或正在使用）"},
+    [UI_T_Q_ST_IN_USE] = {L"다른 프로그램이 사용 중", L"In use by another program",
+                          L"別のプログラムが使用中", L"其他程序正在使用"},
+    [UI_T_Q_ST_NO_SPACE] = {L"디스크 공간 부족", L"Not enough disk space", L"ディスクの空き容量不足",
+                            L"磁盘空间不足"},
+    [UI_T_Q_ST_BAD_STORE] = {L"격리 폴더를 쓸 수 없음(링크·파일이거나 만들 수 없음)",
+                             L"Can't use the quarantine folder (it's a link or file, or can't be created)",
+                             L"隔離フォルダーを使用できません（リンク・ファイルであるか、作成できません）",
+                             L"无法使用隔离文件夹（是链接或文件，或无法创建）"},
+    [UI_T_Q_ST_OTHER_VOLUME] = {L"다른 드라이브라 옮길 수 없음", L"Can't move to a different drive",
+                                L"別のドライブのため移動できません", L"位于其他驱动器，无法移动"},
+    [UI_T_Q_ST_FAILED] = {L"실패", L"Failed", L"失敗", L"失败"},
+    [UI_T_Q_ST_CANCELLED] = {L"취소함", L"Cancelled", L"キャンセル", L"已取消"},
+
+    /* ---- 격리 폴더: 확인·결과 창 ---- */
+    [UI_T_Q_MORE] = {L"... 외 %u개", L"... and %u more", L"... ほか %u 個", L"... 另外 %u 个"},
+    [UI_T_Q_CONFLICT_TITLE] = {L"같은 이름이 있음", L"Same name exists", L"同じ名前があります",
+                               L"存在同名项目"},
+    [UI_T_Q_CONFLICT_HEAD] = {L"원래 위치에 같은 이름의 항목이 이미 있어 %u개를 복원하지 않았습니다. 기존 "
+                              L"항목은 덮어쓰지 않았습니다.\n\n",
+                              L"%u items weren't restored because items with the same name already exist "
+                              L"at the original location. The existing items weren't overwritten.\n\n",
+                              L"元の場所に同じ名前の項目がすでにあるため、%u 個を復元しませんでした。既存の"
+                              L"項目は上書きしていません。\n\n",
+                              L"由于原始位置已存在同名项目，%u 个项目未恢复。现有项目未被覆盖。\n\n"},
+    [UI_T_Q_CONFLICT_TAIL] = {L"\n[예]: '이름%ls'처럼 다른 이름으로 같은 폴더에 복원합니다.\n"
+                              L"[아니요]: 격리 폴더에 그대로 둡니다. 원래 위치의 항목을 옮기거나 이름을 바꾼 "
+                              L"뒤 다시 [복원]을 누르면 원래 이름으로 복원됩니다.",
+                              L"\n[Yes]: Restore to the same folder under a different name, such as "
+                              L"'name%ls'.\n"
+                              L"[No]: Keep them in the quarantine folder. Move or rename the item at the "
+                              L"original location, then select [Restore] again to restore with the original "
+                              L"name.",
+                              L"\n[はい]: '名前%ls' のように別の名前で同じフォルダーに復元します。\n"
+                              L"[いいえ]: 隔離フォルダーにそのまま残します。元の場所の項目を移動するか名前を"
+                              L"変更してから、もう一度 [復元] を押すと元の名前で復元されます。",
+                              L"\n[是]：以 '名称%ls' 这样的其他名称恢复到同一文件夹。\n"
+                              L"[否]：保留在隔离文件夹中。移动或重命名原始位置的项目后，再次点击 [恢复] "
+                              L"即可以原名称恢复。"},
+    [UI_T_Q_RESTORE_RESULT_TITLE] = {L"복원 결과", L"Restore results", L"復元の結果", L"恢复结果"},
+    [UI_T_Q_RESTORE_RESULT_HEAD] = {L"일부 항목을 복원하지 못했습니다. 이 항목들은 격리 "
+                                    L"폴더에 그대로 남아 있습니다.",
+                                    L"Some items couldn't be restored. They stay in the quarantine folder.",
+                                    L"一部の項目を復元できませんでした。これらの項目は隔離フォルダーに"
+                                    L"そのまま残っています。",
+                                    L"部分项目无法恢复。这些项目仍保留在隔离文件夹中。"},
+    [UI_T_Q_PURGE_TITLE] = {L"영구 삭제", L"Permanently delete", L"完全に削除", L"永久删除"},
+    [UI_T_Q_PURGE_CONFIRM_HEAD] = {L"선택한 %u개 항목을 영구 삭제합니다.\n기록된 용량: %ls\n\n",
+                                   L"%u selected items will be permanently deleted.\nRecorded size: %ls\n\n",
+                                   L"選択した %u 個の項目を完全に削除します。\n記録されたサイズ: %ls\n\n",
+                                   L"将永久删除所选的 %u 个项目。\n记录的大小：%ls\n\n"},
+    [UI_T_Q_PURGE_CONFIRM_WARN] = {L"\n영구 삭제한 항목은 휴지통을 거치지 않으며 ByteSieve나 Windows에서 "
+                                   L"복구할 수 없습니다.\n",
+                                   L"\nPermanently deleted items don't go to the Recycle Bin and can't be "
+                                   L"recovered with ByteSieve or Windows.\n",
+                                   L"\n完全に削除した項目はごみ箱を経由せず、ByteSieve や Windows で元に"
+                                   L"戻すことはできません。\n",
+                                   L"\n永久删除的项目不会进入回收站，也无法通过 ByteSieve 或 Windows 恢复。\n"},
+    [UI_T_Q_PURGE_CONFIRM_ORPHANS] = {L"\n주의: 기록이 없는 항목 %u개는 원래 위치를 알 수 없으며, 격리 폴더 안의 "
+                                      L"그 항목이 통째로 지워집니다.\n",
+                                      L"\nCaution: the original location of %u items without a record is "
+                                      L"unknown, and those items in the quarantine folder are deleted "
+                                      L"entirely.\n",
+                                      L"\n注意: 記録のない項目 %u 個は元の場所が不明で、隔離フォルダー内の"
+                                      L"その項目がまるごと削除されます。\n",
+                                      L"\n注意：%u 个无记录项目的原始位置未知，隔离文件夹中的这些项目将被"
+                                      L"整个删除。\n"},
+    [UI_T_Q_PURGE_CONFIRM_ASK] = {L"\n계속할까요?", L"\nDo you want to continue?", L"\n続行しますか？",
+                                  L"\n要继续吗？"},
+    [UI_T_Q_PURGE_FINAL_TITLE] = {L"영구 삭제 - 마지막 확인", L"Permanently delete - final confirmation",
+                                  L"完全に削除 - 最終確認", L"永久删除 - 最终确认"},
+    [UI_T_Q_PURGE_FINAL] = {L"정말로 %u개 항목(%ls)을 영구 삭제할까요?\n\n이 작업은 되돌릴 수 없습니다.",
+                            L"Permanently delete %u items (%ls)?\n\nThis can't be undone.",
+                            L"本当に %u 個の項目（%ls）を完全に削除しますか？\n\nこの操作は元に戻せません。",
+                            L"确定要永久删除 %u 个项目（%ls）吗？\n\n此操作无法撤消。"},
+    [UI_T_Q_PURGE_RESULT_TITLE] = {L"영구 삭제 결과", L"Permanent deletion results", L"完全な削除の結果",
+                                   L"永久删除结果"},
+    [UI_T_Q_PURGE_RESULT_HEAD] = {L"일부 항목을 영구 삭제하지 못했습니다. 지우지 못한 파일은 격리 폴더에 "
+                                  L"남아 있습니다.",
+                                  L"Some items couldn't be permanently deleted. Files that weren't deleted "
+                                  L"remain in the quarantine folder.",
+                                  L"一部の項目を完全に削除できませんでした。削除できなかったファイルは"
+                                  L"隔離フォルダーに残っています。",
+                                  L"部分项目无法永久删除。未删除的文件仍保留在隔离文件夹中。"},
 };
 
 static const wchar_t *const k_lang_name[UI_LANG_COUNT] = {L"ko", L"en", L"ja", L"zh-Hans"};
@@ -544,6 +770,20 @@ UiLang ui_lang_from_langid(unsigned short langid)
         return UI_LANG_EN;
     default:
         return UI_LANG_EN;
+    }
+}
+
+unsigned short ui_lang_langid(UiLang lang)
+{
+    switch (lang) {
+    case UI_LANG_KO:
+        return MAKELANGID(LANG_KOREAN, SUBLANG_KOREAN);
+    case UI_LANG_JA:
+        return MAKELANGID(LANG_JAPANESE, SUBLANG_JAPANESE_JAPAN);
+    case UI_LANG_ZH_HANS:
+        return MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED);
+    default:
+        return MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US);
     }
 }
 

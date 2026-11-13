@@ -15,6 +15,7 @@
 #include "path.h"
 #include "quarantine.h"
 #include "size_format.h"
+#include "ui_lang.h"
 
 #define QUARANTINE_PANEL_CLASS L"ByteSieveQuarantinePanel"
 #define WM_APP_PURGE_DONE (WM_APP + 1)
@@ -49,6 +50,29 @@ typedef struct {
 } PanelParams;
 
 /*
+ * 결과 열 메모. 문장을 저장하지 않고 무엇이었는지만 기억해 두었다가 그릴 때 지금 언어로 만든다(note_text).
+ * result 면 "머리말: 상태 - 시스템 설명", 아니면 text 문구 하나.
+ */
+typedef struct {
+    int set;              /* 0 이면 메모 없음 */
+    UiText text;          /* 문구 또는 머리말 */
+    int result;
+    QuarantineStatus st;  /* result 일 때 */
+    uint32_t code;        /* result 일 때 Windows 오류(0 이면 시스템 설명 없음) */
+} QNote;
+
+/* 상태 줄에 보인 내용의 종류(언어를 바꾸면 render_status 가 새 언어로 다시 쓴다). */
+typedef enum {
+    Q_STATUS_TEXT,   /* 인자 없는 문구(status_text, UI_T_COUNT 면 빈 줄) */
+    Q_STATUS_COUNTS, /* %u 인자들을 넣는 문구(status_text, status_n) */
+    Q_STATUS_PURGING /* 영구 삭제 진행(작업에서 읽음) */
+} QStatusKind;
+
+/* 다른 이름으로 복원할 때 붙는 접미사. quarantine_alternate_path 가 만드는 파일 이름 글자라 번역하지 않는다
+ * (quarantine_panel_verify 가 core 결과와 같은지 확인). */
+#define RESTORED_SUFFIX L" (복원됨)"
+
+/*
  * 영구 삭제 작업(스레드가 끝날 때까지 entries 는 바뀌지 않는다). 진행 값은 작업 스레드가
  * 쓰고 UI 스레드가 읽는다. 취소는 지우고 있던 파일까지만 지우고 멈춘다.
  */
@@ -80,19 +104,27 @@ typedef struct {
 
     wchar_t *root; /* NULL 이면 모든 드라이브 */
     QuarantineList entries;
-    wchar_t **notes; /* 항목별 마지막 작업 결과(entries.len 개, NULL 가능) */
+    QNote *notes; /* 항목별 마지막 작업 결과(entries.len 개, NULL 가능) */
     size_t unreadable; /* 읽지 못한 드라이브 수 */
     size_t conflicts;  /* 마지막 복원에서 같은 이름 때문에 건너뛴 수 */
 
+    /* 단추 폭(지금 글꼴로 잰 문구 폭, 예전 고정 폭이 최소): 새로 고침·복원·영구 삭제·취소·열기 */
+    int w_refresh, w_restore, w_purge, w_cancel, w_open;
+
+    /* 상태 줄(render_status) */
+    QStatusKind status_kind;
+    UiText status_text;
+    unsigned status_n[4];
+
     PurgeJob *job;
 
-    wchar_t cell[MAX_PATH + 64]; /* LVN_GETDISPINFO 용 */
+    wchar_t cell[MAX_PATH + 512]; /* LVN_GETDISPINFO 용 */
 } QuarantinePanel;
 
 /* 작업 결과를 목록을 다시 읽은 뒤에도 붙이려고 항목 폴더 경로로 기억한다. */
 typedef struct {
     wchar_t *entry;
-    wchar_t *note;
+    QNote note;
 } PendingNote;
 
 static QuarantinePanel *panel_of(HWND hwnd)
@@ -111,12 +143,23 @@ static const wchar_t *state_label(QuarantineEntryState state)
 {
     switch (state) {
     case QUARANTINE_ENTRY_OK:
-        return L"격리됨";
+        return ui_text(UI_T_Q_STATE_OK);
     case QUARANTINE_ENTRY_MISSING:
-        return L"기록만 있음(파일 없음)";
+        return ui_text(UI_T_Q_STATE_MISSING);
     default:
-        return L"기록 없음(원래 위치 모름)";
+        return ui_text(UI_T_Q_STATE_ORPHAN);
     }
+}
+
+/* 작업 결과 문구(QuarantineStatus 순서). 분류는 core 의 quarantine_status_text 와 같다. */
+static const UiText k_status_text[QUARANTINE_STATUS_COUNT] = {
+    UI_T_Q_ST_OK,       UI_T_Q_ST_MISSING,  UI_T_Q_ST_CONFLICT,     UI_T_Q_ST_ACCESS_DENIED,
+    UI_T_Q_ST_IN_USE,   UI_T_Q_ST_NO_SPACE, UI_T_Q_ST_BAD_STORE,    UI_T_Q_ST_OTHER_VOLUME,
+    UI_T_Q_ST_FAILED,   UI_T_Q_ST_CANCELLED};
+
+static const wchar_t *status_text(QuarantineStatus st)
+{
+    return (unsigned)st < (unsigned)QUARANTINE_STATUS_COUNT ? ui_text(k_status_text[st]) : L"";
 }
 
 static void time_text(uint64_t ft, wchar_t *buf, size_t len)
@@ -136,18 +179,55 @@ static void time_text(uint64_t ft, wchar_t *buf, size_t len)
     }
 }
 
-/* 결과 설명: "복원하지 못함: 접근 거부 ... (시스템 설명)". */
-static wchar_t *result_note(const wchar_t *head, QuarantineStatus st, uint32_t code)
+/* 결과 메모: "머리말: 상태 - 시스템 설명"(그릴 때 note_text 가 문장을 만든다). */
+static QNote result_note(UiText head, QuarantineStatus st, uint32_t code)
 {
-    wchar_t why[160], *buf = malloc(512 * sizeof(*buf));
+    QNote n;
+
+    memset(&n, 0, sizeof(n));
+    n.set = 1;
+    n.text = head;
+    n.result = 1;
+    n.st = st;
+    n.code = code;
+    return n;
+}
+
+static QNote text_note(UiText id)
+{
+    QNote n;
+
+    memset(&n, 0, sizeof(n));
+    n.set = 1;
+    n.text = id;
+    return n;
+}
+
+/*
+ * 메모를 지금 언어로 buf 에 쓴다: "복원하지 못함: 접근 거부 ... - (시스템 설명)". 시스템 설명은 앱 언어로
+ * 먼저 찾고 그 언어 리소스가 없으면 Windows 기본 언어로 쓴다. with_system 이 0 이면 시스템 설명을 뺀다
+ * (자체 검사가 번역 문구만 확인할 때).
+ */
+static void note_text(const QNote *note, int with_system, wchar_t *buf, size_t len)
+{
+    wchar_t why[160];
     DWORD n = 0;
 
-    if (buf == NULL) {
-        return NULL;
+    buf[0] = L'\0';
+    if (note == NULL || !note->set) {
+        return;
     }
-    if (code != 0 && st != QUARANTINE_CONFLICT) {
-        n = FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, code,
-                           0, why, 160, NULL);
+    if (!note->result) {
+        swprintf(buf, len, L"%ls", ui_text(note->text));
+        return;
+    }
+    if (with_system && note->code != 0 && note->st != QUARANTINE_CONFLICT) {
+        n = FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, note->code,
+                           ui_lang_langid(ui_lang_current()), why, 160, NULL);
+        if (n == 0) {
+            n = FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL,
+                               note->code, 0, why, 160, NULL);
+        }
     }
     while (n > 0 && (why[n - 1] == L'\r' || why[n - 1] == L'\n' || why[n - 1] == L'.' ||
                      why[n - 1] == L' ')) {
@@ -155,24 +235,88 @@ static wchar_t *result_note(const wchar_t *head, QuarantineStatus st, uint32_t c
     }
     why[n] = L'\0';
     if (n > 0) {
-        swprintf(buf, 512, L"%ls: %ls - %ls", head, quarantine_status_text(st), why);
+        swprintf(buf, len, L"%ls: %ls - %ls", ui_text(note->text), status_text(note->st), why);
     } else {
-        swprintf(buf, 512, L"%ls: %ls", head, quarantine_status_text(st));
+        swprintf(buf, len, L"%ls: %ls", ui_text(note->text), status_text(note->st));
     }
-    return buf;
+}
+
+/* ---- 상태 줄 ---- */
+
+/* 영구 삭제 진행 문구(Q_STATUS_PURGING). 작업이 없으면 빈 문자열. */
+static void purge_text(const QuarantinePanel *p, wchar_t *buf, size_t len)
+{
+    const PurgeJob *job = p->job;
+    const QuarantineEntry *e;
+    wchar_t size[32];
+    size_t current, done;
+
+    buf[0] = L'\0';
+    if (job == NULL || job->count == 0) {
+        return;
+    }
+    done = (size_t)job->done;
+    current = (size_t)job->current;
+    e = &job->entries[job->rows[current < job->count ? current : job->count - 1]];
+    format_size((uint64_t)job->bytes, size, 32);
+    swprintf(buf, len, ui_text(UI_T_Q_PURGING),
+             (unsigned)(done < job->count ? done + 1 : job->count), (unsigned)job->count,
+             (unsigned long long)job->removed, size, e->original != NULL ? e->original : e->item);
+}
+
+/* 상태 줄 문구를 기억해 둔 종류·값과 지금 언어로 만든다. */
+static void status_line(const QuarantinePanel *p, wchar_t *buf, size_t len)
+{
+    buf[0] = L'\0';
+    switch (p->status_kind) {
+    case Q_STATUS_TEXT:
+        if (p->status_text < UI_T_COUNT) {
+            swprintf(buf, len, L"%ls", ui_text(p->status_text));
+        }
+        break;
+    case Q_STATUS_COUNTS:
+        /* 문구마다 쓰는 %u 수가 다르다(남는 인자는 쓰이지 않음). */
+        swprintf(buf, len, ui_text(p->status_text), p->status_n[0], p->status_n[1], p->status_n[2],
+                 p->status_n[3]);
+        break;
+    case Q_STATUS_PURGING:
+        purge_text(p, buf, len);
+        break;
+    }
+}
+
+static void render_status(QuarantinePanel *p)
+{
+    wchar_t text[MAX_PATH + 512];
+
+    status_line(p, text, sizeof(text) / sizeof(text[0]));
+    SetWindowTextW(p->status, text);
+}
+
+/* 인자 없는 문구를 상태 줄에 보인다(UI_T_COUNT 면 비운다). */
+static void show_text(QuarantinePanel *p, UiText id)
+{
+    p->status_kind = Q_STATUS_TEXT;
+    p->status_text = id;
+    render_status(p);
+}
+
+/* %u 인자(최대 4개)를 넣는 문구를 상태 줄에 보인다. */
+static void show_counts(QuarantinePanel *p, UiText id, size_t a, size_t b, size_t c, size_t d)
+{
+    p->status_kind = Q_STATUS_COUNTS;
+    p->status_text = id;
+    p->status_n[0] = (unsigned)a;
+    p->status_n[1] = (unsigned)b;
+    p->status_n[2] = (unsigned)c;
+    p->status_n[3] = (unsigned)d;
+    render_status(p);
 }
 
 /* ---- 목록 ---- */
 
 static void free_notes(QuarantinePanel *p)
 {
-    size_t i;
-
-    if (p->notes != NULL) {
-        for (i = 0; i < p->entries.len; i++) {
-            free(p->notes[i]);
-        }
-    }
     free(p->notes);
     p->notes = NULL;
 }
@@ -209,12 +353,10 @@ static void update_summary(QuarantinePanel *p)
     }
     format_size(bytes, size, 32);
     if (other > 0) {
-        swprintf(text, sizeof(text) / sizeof(text[0]),
-                 L"격리 항목 %u개 · %ls   /   확인 필요 %u개", (unsigned)ok, size,
-                 (unsigned)other);
+        swprintf(text, sizeof(text) / sizeof(text[0]), ui_text(UI_T_Q_SUMMARY_CHECK), (unsigned)ok,
+                 size, (unsigned)other);
     } else {
-        swprintf(text, sizeof(text) / sizeof(text[0]), L"격리 항목 %u개 · %ls", (unsigned)ok,
-                 size);
+        swprintf(text, sizeof(text) / sizeof(text[0]), ui_text(UI_T_Q_SUMMARY), (unsigned)ok, size);
     }
     SetWindowTextW(p->summary, text);
 }
@@ -237,9 +379,9 @@ static void reload(QuarantinePanel *p, PendingNote *pending, size_t pending_len)
     }
     for (k = 0; k < pending_len && p->notes != NULL; k++) {
         for (i = 0; i < p->entries.len; i++) {
-            if (pending[k].note != NULL && _wcsicmp(p->entries.items[i].entry, pending[k].entry) == 0) {
+            if (pending[k].note.set && pending[k].entry != NULL &&
+                _wcsicmp(p->entries.items[i].entry, pending[k].entry) == 0) {
                 p->notes[i] = pending[k].note;
-                pending[k].note = NULL;
                 break;
             }
         }
@@ -259,7 +401,6 @@ static void free_pending(PendingNote *pending, size_t len)
     }
     for (i = 0; i < len; i++) {
         free(pending[i].entry);
-        free(pending[i].note);
     }
     free(pending);
 }
@@ -287,7 +428,7 @@ static size_t *selected_rows(const QuarantinePanel *p, size_t *count)
 
 /* ---- 복원 ---- */
 
-static void show_text(QuarantinePanel *p, const wchar_t *text, const wchar_t *title, UINT icon)
+static void show_box(QuarantinePanel *p, const wchar_t *text, const wchar_t *title, UINT icon)
 {
     MessageBoxW(GetAncestor(p->hwnd, GA_ROOT), text, title, MB_OK | icon);
 }
@@ -305,54 +446,50 @@ static int ask_alternate(QuarantinePanel *p, const size_t *rows, size_t count)
     if (text == NULL) {
         return 0;
     }
-    n = swprintf(text, cap,
-                 L"원래 위치에 같은 이름의 항목이 이미 있어 %u개를 복원하지 않았습니다. 기존 "
-                 L"항목은 덮어쓰지 않았습니다.\n\n",
-                 (unsigned)count);
+    n = swprintf(text, cap, ui_text(UI_T_Q_CONFLICT_HEAD), (unsigned)count);
     used = n > 0 ? (size_t)n : 0;
     for (i = 0; i < count && i < CONFIRM_LIST_MAX; i++) {
         n = swprintf(text + used, cap - used, L"%ls\n", p->entries.items[rows[i]].restore);
         used += n > 0 ? (size_t)n : 0;
     }
     if (count > CONFIRM_LIST_MAX) {
-        n = swprintf(text + used, cap - used, L"... 외 %u개\n",
-                     (unsigned)(count - CONFIRM_LIST_MAX));
+        n = swprintf(text + used, cap - used, ui_text(UI_T_Q_MORE), (unsigned)(count - CONFIRM_LIST_MAX));
+        used += n > 0 ? (size_t)n : 0;
+        n = swprintf(text + used, cap - used, L"\n");
         used += n > 0 ? (size_t)n : 0;
     }
-    swprintf(text + used, cap - used,
-             L"\n[예]: '이름 (복원됨)'처럼 다른 이름으로 같은 폴더에 복원합니다.\n"
-             L"[아니요]: 격리 폴더에 그대로 둡니다. 원래 위치의 항목을 옮기거나 이름을 바꾼 "
-             L"뒤 다시 [복원]을 누르면 원래 이름으로 복원됩니다.");
-    answer = MessageBoxW(GetAncestor(p->hwnd, GA_ROOT), text, L"같은 이름이 있음",
+    swprintf(text + used, cap - used, ui_text(UI_T_Q_CONFLICT_TAIL), RESTORED_SUFFIX);
+    answer = MessageBoxW(GetAncestor(p->hwnd, GA_ROOT), text, ui_text(UI_T_Q_CONFLICT_TITLE),
                          MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2);
     free(text);
     return answer == IDYES;
 }
 
-static void show_failures(QuarantinePanel *p, const wchar_t *title, const wchar_t *head,
-                          PendingNote *pending, size_t len, size_t failed)
+static void show_failures(QuarantinePanel *p, UiText title, UiText head, PendingNote *pending,
+                          size_t len, size_t failed)
 {
     size_t cap = 1024 + (size_t)FAILURE_LIST_MAX * (MAX_PATH + 600), used = 0, i, shown = 0;
-    wchar_t *text = malloc(cap * sizeof(*text));
+    wchar_t *text = malloc(cap * sizeof(*text)), note[512];
     int n;
 
     if (text == NULL) {
         return;
     }
-    n = swprintf(text, cap, L"%ls\n\n", head);
+    n = swprintf(text, cap, L"%ls\n\n", ui_text(head));
     used = n > 0 ? (size_t)n : 0;
     for (i = 0; i < len && shown < FAILURE_LIST_MAX; i++) {
-        if (pending[i].note == NULL) {
+        if (!pending[i].note.set || pending[i].entry == NULL) {
             continue;
         }
-        n = swprintf(text + used, cap - used, L"%ls\n    %ls\n", pending[i].entry, pending[i].note);
+        note_text(&pending[i].note, 1, note, sizeof(note) / sizeof(note[0]));
+        n = swprintf(text + used, cap - used, L"%ls\n    %ls\n", pending[i].entry, note);
         used += n > 0 ? (size_t)n : 0;
         shown++;
     }
     if (failed > shown) {
-        swprintf(text + used, cap - used, L"... 외 %u개", (unsigned)(failed - shown));
+        swprintf(text + used, cap - used, ui_text(UI_T_Q_MORE), (unsigned)(failed - shown));
     }
-    show_text(p, text, title, MB_ICONWARNING);
+    show_box(p, text, ui_text(title), MB_ICONWARNING);
     free(text);
 }
 
@@ -362,7 +499,6 @@ size_t quarantine_panel_restore(HWND panel, int interactive)
     size_t count = 0, i, restored = 0, failed = 0, conflicts = 0, skipped = 0, pending_len = 0;
     size_t *rows, *conflict_rows = NULL;
     PendingNote *pending = NULL;
-    wchar_t text[256];
 
     if (p == NULL || p->job != NULL) {
         return 0;
@@ -370,7 +506,7 @@ size_t quarantine_panel_restore(HWND panel, int interactive)
     rows = selected_rows(p, &count);
     if (rows == NULL || count == 0) {
         free(rows);
-        SetWindowTextW(p->status, L"복원할 항목을 목록에서 선택하세요.");
+        show_text(p, UI_T_Q_SELECT_RESTORE);
         return 0;
     }
     conflict_rows = malloc(count * sizeof(*conflict_rows));
@@ -389,11 +525,8 @@ size_t quarantine_panel_restore(HWND panel, int interactive)
         if (e->state != QUARANTINE_ENTRY_OK) {
             /* 기록이 없거나 파일이 없는 항목은 복원할 수 없다(그대로 둔다). */
             pending[pending_len].entry = path_dup(e->entry);
-            pending[pending_len++].note =
-                path_dup(e->state == QUARANTINE_ENTRY_ORPHAN
-                             ? L"복원할 수 없음: 원래 위치 기록이 없습니다. [격리 폴더 열기]로 "
-                               L"직접 확인하세요."
-                             : L"복원할 수 없음: 격리된 파일이 없습니다(기록만 남음).");
+            pending[pending_len++].note = text_note(
+                e->state == QUARANTINE_ENTRY_ORPHAN ? UI_T_Q_NOTE_NO_ORIGIN : UI_T_Q_NOTE_NO_FILE);
             skipped++;
             continue;
         }
@@ -404,7 +537,7 @@ size_t quarantine_panel_restore(HWND panel, int interactive)
             conflict_rows[conflicts++] = rows[i];
         } else {
             pending[pending_len].entry = path_dup(e->entry);
-            pending[pending_len++].note = result_note(L"복원하지 못함", st, code);
+            pending[pending_len++].note = result_note(UI_T_Q_HEAD_RESTORE_FAILED, st, code);
             failed++;
         }
     }
@@ -422,7 +555,7 @@ size_t quarantine_panel_restore(HWND panel, int interactive)
                 restored++;
             } else {
                 pending[pending_len].entry = path_dup(e->entry);
-                pending[pending_len++].note = result_note(L"다른 이름으로 복원하지 못함", st, code);
+                pending[pending_len++].note = result_note(UI_T_Q_HEAD_ALT_FAILED, st, code);
                 failed++;
             }
         }
@@ -430,22 +563,16 @@ size_t quarantine_panel_restore(HWND panel, int interactive)
     }
     for (i = 0; i < conflicts; i++) {
         pending[pending_len].entry = path_dup(p->entries.items[conflict_rows[i]].entry);
-        pending[pending_len++].note =
-            path_dup(L"건너뜀: 원래 위치에 같은 이름이 있음(덮어쓰지 않음). 기존 항목을 옮긴 뒤 "
-                     L"다시 복원하세요.");
+        pending[pending_len++].note = text_note(UI_T_Q_NOTE_SKIPPED);
     }
     p->conflicts = conflicts;
 
-    swprintf(text, sizeof(text) / sizeof(text[0]),
-             L"복원 완료: 성공 %u개 · 같은 이름이 있어 건너뜀 %u개 · 실패 %u개 · 복원할 수 없음 %u개",
-             (unsigned)restored, (unsigned)conflicts, (unsigned)failed, (unsigned)skipped);
     if (interactive && failed > 0) {
-        show_failures(p, L"복원 결과", L"일부 항목을 복원하지 못했습니다. 이 항목들은 격리 "
-                                       L"폴더에 그대로 남아 있습니다.",
-                      pending, pending_len, failed + skipped);
+        show_failures(p, UI_T_Q_RESTORE_RESULT_TITLE, UI_T_Q_RESTORE_RESULT_HEAD, pending,
+                      pending_len, failed + skipped);
     }
     reload(p, pending, pending_len);
-    SetWindowTextW(p->status, text);
+    show_counts(p, UI_T_Q_RESTORED, restored, conflicts, failed, skipped);
     free_pending(pending, pending_len);
     free(conflict_rows);
     free(rows);
@@ -498,10 +625,8 @@ static unsigned __stdcall purge_thread(void *arg)
 static void update_purge_progress(QuarantinePanel *p)
 {
     PurgeJob *job = p->job;
-    const QuarantineEntry *e;
-    wchar_t text[MAX_PATH + 160], size[32];
     uint64_t bytes;
-    size_t current, done;
+    size_t done;
     int pos;
 
     if (job == NULL || job->cancel) {
@@ -509,7 +634,6 @@ static void update_purge_progress(QuarantinePanel *p)
     }
     bytes = (uint64_t)job->bytes;
     done = (size_t)job->done;
-    current = (size_t)job->current;
     pos = (int)(done * PROGRESS_RANGE / job->count);
     if (job->total_bytes > 0 && done < job->count) {
         int limit = (int)((done + 1) * PROGRESS_RANGE / job->count) - 1;
@@ -527,13 +651,8 @@ static void update_purge_progress(QuarantinePanel *p)
         p->progress_pos = pos;
         progress_set(p->progress, PROGRESS_RUNNING, pos, PROGRESS_RANGE);
     }
-    e = &job->entries[job->rows[current < job->count ? current : job->count - 1]];
-    format_size(bytes, size, 32);
-    swprintf(text, sizeof(text) / sizeof(text[0]),
-             L"영구 삭제하는 중... 항목 %u/%u · 지운 파일·폴더 %llu개(%ls) · %ls",
-             (unsigned)(done < job->count ? done + 1 : job->count), (unsigned)job->count,
-             (unsigned long long)job->removed, size, e->original != NULL ? e->original : e->item);
-    SetWindowTextW(p->status, text);
+    p->status_kind = Q_STATUS_PURGING;
+    render_status(p);
 }
 
 static void cancel_purge(QuarantinePanel *p)
@@ -543,8 +662,7 @@ static void cancel_purge(QuarantinePanel *p)
     }
     InterlockedExchange(&p->job->cancel, 1);
     update_buttons(p);
-    SetWindowTextW(p->status, L"영구 삭제를 멈추는 중... 지우고 있던 파일까지만 지우고, 남은 "
-                              L"파일은 격리 폴더에 그대로 둡니다.");
+    show_text(p, UI_T_Q_STOPPING);
 }
 
 static void job_free(PurgeJob *job)
@@ -574,8 +692,7 @@ static int confirm_purge(QuarantinePanel *p, const size_t *rows, size_t count)
         orphans += e->state == QUARANTINE_ENTRY_ORPHAN;
     }
     format_size(bytes, size, 32);
-    n = swprintf(text, cap, L"선택한 %u개 항목을 영구 삭제합니다.\n기록된 용량: %ls\n\n",
-                 (unsigned)count, size);
+    n = swprintf(text, cap, ui_text(UI_T_Q_PURGE_CONFIRM_HEAD), (unsigned)count, size);
     used = n > 0 ? (size_t)n : 0;
     for (i = 0; i < count && i < CONFIRM_LIST_MAX; i++) {
         const QuarantineEntry *e = &p->entries.items[rows[i]];
@@ -585,30 +702,24 @@ static int confirm_purge(QuarantinePanel *p, const size_t *rows, size_t count)
         used += n > 0 ? (size_t)n : 0;
     }
     if (count > CONFIRM_LIST_MAX) {
-        n = swprintf(text + used, cap - used, L"... 외 %u개\n",
-                     (unsigned)(count - CONFIRM_LIST_MAX));
+        n = swprintf(text + used, cap - used, ui_text(UI_T_Q_MORE), (unsigned)(count - CONFIRM_LIST_MAX));
+        used += n > 0 ? (size_t)n : 0;
+        n = swprintf(text + used, cap - used, L"\n");
         used += n > 0 ? (size_t)n : 0;
     }
-    n = swprintf(text + used, cap - used,
-                 L"\n영구 삭제한 항목은 휴지통을 거치지 않으며 ByteSieve나 Windows에서 "
-                 L"복구할 수 없습니다.\n");
+    n = swprintf(text + used, cap - used, L"%ls", ui_text(UI_T_Q_PURGE_CONFIRM_WARN));
     used += n > 0 ? (size_t)n : 0;
     if (orphans > 0) {
-        n = swprintf(text + used, cap - used,
-                     L"\n주의: 기록이 없는 항목 %u개는 원래 위치를 알 수 없으며, 격리 폴더 안의 "
-                     L"그 항목이 통째로 지워집니다.\n",
-                     (unsigned)orphans);
+        n = swprintf(text + used, cap - used, ui_text(UI_T_Q_PURGE_CONFIRM_ORPHANS), (unsigned)orphans);
         used += n > 0 ? (size_t)n : 0;
     }
-    swprintf(text + used, cap - used, L"\n계속할까요?");
-    answer = MessageBoxW(GetAncestor(p->hwnd, GA_ROOT), text, L"영구 삭제",
+    swprintf(text + used, cap - used, L"%ls", ui_text(UI_T_Q_PURGE_CONFIRM_ASK));
+    answer = MessageBoxW(GetAncestor(p->hwnd, GA_ROOT), text, ui_text(UI_T_Q_PURGE_TITLE),
                          MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
     if (answer == IDYES) {
         format_size(bytes, size, 32);
-        swprintf(text, cap,
-                 L"정말로 %u개 항목(%ls)을 영구 삭제할까요?\n\n이 작업은 되돌릴 수 없습니다.",
-                 (unsigned)count, size);
-        answer = MessageBoxW(GetAncestor(p->hwnd, GA_ROOT), text, L"영구 삭제 - 마지막 확인",
+        swprintf(text, cap, ui_text(UI_T_Q_PURGE_FINAL), (unsigned)count, size);
+        answer = MessageBoxW(GetAncestor(p->hwnd, GA_ROOT), text, ui_text(UI_T_Q_PURGE_FINAL_TITLE),
                              MB_YESNO | MB_ICONSTOP | MB_DEFBUTTON2);
     }
     free(text);
@@ -627,12 +738,12 @@ int quarantine_panel_purge(HWND panel, int confirm)
     rows = selected_rows(p, &count);
     if (rows == NULL || count == 0) {
         free(rows);
-        SetWindowTextW(p->status, L"영구 삭제할 항목을 목록에서 선택하세요.");
+        show_text(p, UI_T_Q_SELECT_PURGE);
         return 0;
     }
     if (confirm && !confirm_purge(p, rows, count)) {
         free(rows);
-        SetWindowTextW(p->status, L"영구 삭제를 취소했습니다. 아무것도 바뀌지 않았습니다.");
+        show_text(p, UI_T_Q_PURGE_CANCELLED);
         return 0;
     }
     job = calloc(1, sizeof(*job));
@@ -653,13 +764,13 @@ int quarantine_panel_purge(HWND panel, int confirm)
             free(rows);
         }
         job_free(job);
-        SetWindowTextW(p->status, L"영구 삭제를 시작하지 못했습니다(메모리 부족).");
+        show_text(p, UI_T_Q_PURGE_NO_MEMORY);
         return 0;
     }
     job->thread = (HANDLE)_beginthreadex(NULL, 0, purge_thread, job, 0, NULL);
     if (job->thread == NULL) {
         job_free(job);
-        SetWindowTextW(p->status, L"영구 삭제를 시작하지 못했습니다(스레드 생성 실패).");
+        show_text(p, UI_T_Q_PURGE_NO_THREAD);
         return 0;
     }
     p->job = job;
@@ -676,7 +787,6 @@ static void finish_purge(QuarantinePanel *p, int interactive)
     PurgeJob *job = p->job;
     PendingNote *pending;
     size_t i, done = 0, failed = 0, cancelled = 0, len = 0;
-    wchar_t text[256];
 
     if (job == NULL) {
         return;
@@ -696,28 +806,16 @@ static void finish_purge(QuarantinePanel *p, int interactive)
             failed++;
             if (pending != NULL) {
                 pending[len].entry = path_dup(job->entries[job->rows[i]].entry);
-                pending[len++].note = result_note(L"영구 삭제하지 못함", st, job->code[i]);
+                pending[len++].note = result_note(UI_T_Q_HEAD_PURGE_FAILED, st, job->code[i]);
             }
         }
     }
     for (i = 0; i < job->count && pending != NULL; i++) {
         if (job->status[i] == QUARANTINE_CANCELLED) {
             pending[len].entry = path_dup(job->entries[job->rows[i]].entry);
-            pending[len++].note =
-                path_dup(job->code[i] != 0
-                             ? L"취소함: 일부 파일만 지웠습니다. 남은 파일과 기록은 격리 폴더에 "
-                               L"그대로 있습니다."
-                             : L"취소함: 지우지 않았습니다.");
+            pending[len++].note = text_note(job->code[i] != 0 ? UI_T_Q_NOTE_CANCEL_PARTIAL
+                                                              : UI_T_Q_NOTE_CANCEL_NONE);
         }
-    }
-    if (cancelled > 0) {
-        swprintf(text, sizeof(text) / sizeof(text[0]),
-                 L"영구 삭제 취소: 성공 %u개 · 취소 %u개(남은 항목은 격리 폴더에 그대로) · "
-                 L"실패 %u개",
-                 (unsigned)done, (unsigned)cancelled, (unsigned)failed);
-    } else {
-        swprintf(text, sizeof(text) / sizeof(text[0]), L"영구 삭제 완료: 성공 %u개 · 실패 %u개",
-                 (unsigned)done, (unsigned)failed);
     }
     p->purge_finished = cancelled == 0;
     /* 일부라도 실패하면 빨간색, 취소하면 멈춘 자리에서 노란색(예전에는 0 으로 되돌려 사라져 보였다). */
@@ -726,14 +824,15 @@ static void finish_purge(QuarantinePanel *p, int interactive)
                  PROGRESS_RANGE);
     p->progress_pos = (int)SendMessageW(p->progress, PBM_GETPOS, 0, 0);
     if (interactive && failed > 0 && pending != NULL) {
-        show_failures(p, L"영구 삭제 결과",
-                      L"일부 항목을 영구 삭제하지 못했습니다. 지우지 못한 파일은 격리 폴더에 "
-                      L"남아 있습니다.",
-                      pending, failed, failed);
+        show_failures(p, UI_T_Q_PURGE_RESULT_TITLE, UI_T_Q_PURGE_RESULT_HEAD, pending, failed, failed);
     }
     job_free(job);
     reload(p, pending, len);
-    SetWindowTextW(p->status, text);
+    if (cancelled > 0) {
+        show_counts(p, UI_T_Q_PURGE_STOPPED, done, cancelled, failed, 0);
+    } else {
+        show_counts(p, UI_T_Q_PURGED, done, failed, 0, 0);
+    }
     free_pending(pending, len);
     SendMessageW(GetParent(p->hwnd), WM_COMMAND,
                  MAKEWPARAM(GetDlgCtrlID(p->hwnd), QPN_PURGED), (LPARAM)p->hwnd);
@@ -778,7 +877,7 @@ static void on_get_dispinfo(QuarantinePanel *p, NMLVDISPINFOW *di)
         di->item.pszText = p->cell;
         break;
     case COL_ORIGINAL:
-        di->item.pszText = e->restore != NULL ? e->restore : L"(알 수 없음)";
+        di->item.pszText = e->restore != NULL ? e->restore : (wchar_t *)ui_text(UI_T_Q_UNKNOWN);
         break;
     case COL_TIME:
         time_text(e->time, p->cell, cell_len);
@@ -788,7 +887,8 @@ static void on_get_dispinfo(QuarantinePanel *p, NMLVDISPINFOW *di)
         di->item.pszText = e->item != NULL ? e->item : e->entry;
         break;
     case COL_NOTE:
-        di->item.pszText = p->notes != NULL && p->notes[row] != NULL ? p->notes[row] : L"";
+        note_text(p->notes != NULL ? &p->notes[row] : NULL, 1, p->cell, cell_len);
+        di->item.pszText = p->cell;
         break;
     }
 }
@@ -798,23 +898,23 @@ static void on_get_dispinfo(QuarantinePanel *p, NMLVDISPINFOW *di)
 static void panel_layout(QuarantinePanel *p)
 {
     RECT rc;
-    int h = pscale(p, 24), bw = pscale(p, 84), wide = pscale(p, 120), gap = pscale(p, 6);
+    int h = pscale(p, 24), gap = pscale(p, 6);
     int w, y, x, list_h;
 
     GetClientRect(p->hwnd, &rc);
     w = rc.right - rc.left;
     y = 0;
     x = 0;
-    MoveWindow(p->refresh, x, y, bw, h, TRUE);
-    x += bw + gap;
-    MoveWindow(p->restore, x, y, bw, h, TRUE);
-    x += bw + gap;
-    MoveWindow(p->purge, x, y, wide, h, TRUE);
-    x += wide + gap;
-    MoveWindow(p->cancel, x, y, bw, h, TRUE);
-    x += bw + gap;
-    MoveWindow(p->open, x, y, wide, h, TRUE);
-    x += wide + gap * 2;
+    MoveWindow(p->refresh, x, y, p->w_refresh, h, TRUE);
+    x += p->w_refresh + gap;
+    MoveWindow(p->restore, x, y, p->w_restore, h, TRUE);
+    x += p->w_restore + gap;
+    MoveWindow(p->purge, x, y, p->w_purge, h, TRUE);
+    x += p->w_purge + gap;
+    MoveWindow(p->cancel, x, y, p->w_cancel, h, TRUE);
+    x += p->w_cancel + gap;
+    MoveWindow(p->open, x, y, p->w_open, h, TRUE);
+    x += p->w_open + gap * 2;
     MoveWindow(p->summary, x, y + pscale(p, 4), w - x > 0 ? w - x : 0, pscale(p, 20), TRUE);
     y += h + gap;
     MoveWindow(p->progress, 0, y, w, pscale(p, 16), TRUE);
@@ -836,37 +936,64 @@ static HWND panel_child(QuarantinePanel *p, const wchar_t *cls, const wchar_t *t
     return h;
 }
 
+/* 목록 열: 머리글 문구, 96 DPI 기준 기본 폭(머리글이 더 길면 넓힌다), 정렬. */
+static const struct {
+    UiText title;
+    int width;
+    int fmt;
+} k_cols[COL_COUNT] = {
+    {UI_T_Q_COL_STATE, 150, LVCFMT_LEFT},    {UI_T_Q_COL_SIZE, 90, LVCFMT_RIGHT},
+    {UI_T_Q_COL_ORIGINAL, 360, LVCFMT_LEFT}, {UI_T_Q_COL_TIME, 140, LVCFMT_LEFT},
+    {UI_T_Q_COL_LOCATION, 300, LVCFMT_LEFT}, {UI_T_Q_COL_RESULT, 300, LVCFMT_LEFT},
+};
+
+/* 단추와 문구(왼쪽부터). */
+static void button_texts(QuarantinePanel *p, HWND *h, UiText *t)
+{
+    h[0] = p->refresh, t[0] = UI_T_Q_REFRESH;
+    h[1] = p->restore, t[1] = UI_T_Q_RESTORE;
+    h[2] = p->purge, t[2] = UI_T_Q_PURGE;
+    h[3] = p->cancel, t[3] = UI_T_Q_CANCEL;
+    h[4] = p->open, t[4] = UI_T_Q_OPEN;
+}
+
+/* 열 폭: 기본 폭과, 머리글 문구가 잘리지 않는 폭 중 큰 값. */
+static int column_width(QuarantinePanel *p, int col)
+{
+    int need = theme_text_width(p->list, p->font, ui_text(k_cols[col].title)) + pscale(p, 16);
+    return pscale(p, k_cols[col].width) > need ? pscale(p, k_cols[col].width) : need;
+}
+
+/* 단추 폭: 예전 고정 폭(84·120)을 최소로 두고(한국어 화면은 그대로), 지금 글꼴로 잰 문구가 더 길면 넓힌다. */
+static void measure_buttons(QuarantinePanel *p)
+{
+    p->w_refresh = theme_button_width(p->hwnd, p->font, ui_text(UI_T_Q_REFRESH), p->dpi, pscale(p, 84));
+    p->w_restore = theme_button_width(p->hwnd, p->font, ui_text(UI_T_Q_RESTORE), p->dpi, pscale(p, 84));
+    p->w_purge = theme_button_width(p->hwnd, p->font, ui_text(UI_T_Q_PURGE), p->dpi, pscale(p, 120));
+    p->w_cancel = theme_button_width(p->hwnd, p->font, ui_text(UI_T_Q_CANCEL), p->dpi, pscale(p, 84));
+    p->w_open = theme_button_width(p->hwnd, p->font, ui_text(UI_T_Q_OPEN), p->dpi, pscale(p, 120));
+}
+
 static void panel_create_controls(QuarantinePanel *p)
 {
-    static const struct {
-        const wchar_t *title;
-        int width;
-        int fmt;
-    } cols[COL_COUNT] = {
-        {L"상태", 150, LVCFMT_LEFT},     {L"용량", 90, LVCFMT_RIGHT},
-        {L"원래 위치", 360, LVCFMT_LEFT}, {L"격리한 시각", 140, LVCFMT_LEFT},
-        {L"격리 위치", 300, LVCFMT_LEFT}, {L"결과", 300, LVCFMT_LEFT},
-    };
     size_t i;
 
-    p->refresh = panel_child(p, L"BUTTON", L"새로 고침", BS_PUSHBUTTON | WS_TABSTOP, 0,
+    p->refresh = panel_child(p, L"BUTTON", ui_text(UI_T_Q_REFRESH), BS_PUSHBUTTON | WS_TABSTOP, 0,
                              IDC_Q_REFRESH);
-    p->restore = panel_child(p, L"BUTTON", L"복원(&R)", BS_PUSHBUTTON | WS_TABSTOP, 0,
+    p->restore = panel_child(p, L"BUTTON", ui_text(UI_T_Q_RESTORE), BS_PUSHBUTTON | WS_TABSTOP, 0,
                              IDC_Q_RESTORE);
-    p->purge = panel_child(p, L"BUTTON", L"영구 삭제(&P)...", BS_PUSHBUTTON | WS_TABSTOP, 0,
+    p->purge = panel_child(p, L"BUTTON", ui_text(UI_T_Q_PURGE), BS_PUSHBUTTON | WS_TABSTOP, 0,
                            IDC_Q_PURGE);
-    p->cancel = panel_child(p, L"BUTTON", L"취소", BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_Q_CANCEL);
-    p->open = panel_child(p, L"BUTTON", L"격리 폴더 열기", BS_PUSHBUTTON | WS_TABSTOP, 0,
+    p->cancel = panel_child(p, L"BUTTON", ui_text(UI_T_Q_CANCEL), BS_PUSHBUTTON | WS_TABSTOP, 0,
+                            IDC_Q_CANCEL);
+    p->open = panel_child(p, L"BUTTON", ui_text(UI_T_Q_OPEN), BS_PUSHBUTTON | WS_TABSTOP, 0,
                           IDC_Q_OPEN);
     p->summary = panel_child(p, L"STATIC", L"", SS_LEFTNOWORDWRAP | SS_ENDELLIPSIS, 0,
                              IDC_Q_SUMMARY);
     p->progress = panel_child(p, PROGRESS_CLASSW, L"", PBS_SMOOTH, 0, IDC_Q_PROGRESS);
     SendMessageW(p->progress, PBM_SETRANGE32, 0, PROGRESS_RANGE);
-    p->info = panel_child(p, L"STATIC",
-                          L"휴지통이 없는 드라이브(USB 등)에서 정리한 항목을 같은 드라이브의 "
-                          L"격리 폴더(.bytesieve-trash)에 보관합니다. 복원은 덮어쓰지 않으며, "
-                          L"영구 삭제한 항목은 복구할 수 없습니다.",
-                          SS_LEFTNOWORDWRAP | SS_ENDELLIPSIS, 0, IDC_Q_INFO);
+    p->info = panel_child(p, L"STATIC", ui_text(UI_T_Q_INFO), SS_LEFTNOWORDWRAP | SS_ENDELLIPSIS, 0,
+                          IDC_Q_INFO);
     p->status = panel_child(p, L"STATIC", L"", SS_LEFTNOWORDWRAP | SS_ENDELLIPSIS, 0,
                             IDC_Q_STATUS);
     p->list = panel_child(p, WC_LISTVIEWW, L"",
@@ -877,11 +1004,12 @@ static void panel_create_controls(QuarantinePanel *p)
         LVCOLUMNW col;
         memset(&col, 0, sizeof(col));
         col.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_FMT;
-        col.pszText = (wchar_t *)cols[i].title;
-        col.cx = pscale(p, cols[i].width);
-        col.fmt = cols[i].fmt;
+        col.pszText = (wchar_t *)ui_text(k_cols[i].title);
+        col.cx = column_width(p, (int)i);
+        col.fmt = k_cols[i].fmt;
         SendMessageW(p->list, LVM_INSERTCOLUMNW, (WPARAM)i, (LPARAM)&col);
     }
+    measure_buttons(p);
     update_buttons(p);
 }
 
@@ -900,6 +1028,8 @@ static LRESULT CALLBACK panel_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         p->hwnd = hwnd;
         p->font = params->font;
         p->dpi = params->dpi;
+        p->status_kind = Q_STATUS_TEXT;
+        p->status_text = UI_T_COUNT; /* 처음에는 빈 상태 줄 */
         quarantine_list_init(&p->entries);
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)p);
         break;
@@ -1019,22 +1149,16 @@ HWND quarantine_panel_create(HWND parent, int id, HFONT font, int dpi)
 int quarantine_panel_refresh(HWND panel)
 {
     QuarantinePanel *p = panel_of(panel);
-    wchar_t text[128];
 
     if (p == NULL || p->job != NULL) {
         return 0;
     }
     reload(p, NULL, 0);
     if (p->unreadable > 0) {
-        swprintf(text, sizeof(text) / sizeof(text[0]),
-                 L"격리 폴더를 읽지 못한 드라이브가 %u개 있습니다(링크로 바뀌었거나 접근 거부).",
-                 (unsigned)p->unreadable);
+        show_counts(p, UI_T_Q_UNREADABLE, p->unreadable, 0, 0, 0);
     } else {
-        swprintf(text, sizeof(text) / sizeof(text[0]),
-                 p->entries.len > 0 ? L"복원하거나 영구 삭제할 항목을 선택하세요."
-                                    : L"격리 폴더에 항목이 없습니다.");
+        show_text(p, p->entries.len > 0 ? UI_T_Q_SELECT_ITEMS : UI_T_Q_EMPTY);
     }
-    SetWindowTextW(p->status, text);
     return 1;
 }
 
@@ -1076,6 +1200,59 @@ size_t quarantine_panel_conflicts(HWND panel)
     return p != NULL ? p->conflicts : 0;
 }
 
+void quarantine_panel_apply_language(HWND panel, HFONT font)
+{
+    QuarantinePanel *p = panel_of(panel);
+    HWND child, h[5];
+    UiText t[5];
+    int i;
+
+    if (p == NULL) {
+        return;
+    }
+    if (font != NULL) {
+        p->font = font;
+        for (child = GetWindow(p->hwnd, GW_CHILD); child != NULL; child = GetWindow(child, GW_HWNDNEXT)) {
+            SendMessageW(child, WM_SETFONT, (WPARAM)font, FALSE);
+        }
+    }
+    button_texts(p, h, t);
+    for (i = 0; i < 5; i++) {
+        SetWindowTextW(h[i], ui_text(t[i]));
+    }
+    SetWindowTextW(p->info, ui_text(UI_T_Q_INFO));
+    for (i = 0; i < COL_COUNT; i++) {
+        LVCOLUMNW col;
+        int need = column_width(p, i);
+        memset(&col, 0, sizeof(col));
+        col.mask = LVCF_TEXT;
+        col.pszText = (wchar_t *)ui_text(k_cols[i].title);
+        SendMessageW(p->list, LVM_SETCOLUMNW, (WPARAM)i, (LPARAM)&col);
+        /* 새 머리글이 잘리지 않게 넓힌다(사용자가 넓힌 폭은 줄이지 않음). */
+        if (ListView_GetColumnWidth(p->list, i) < need) {
+            ListView_SetColumnWidth(p->list, i, need);
+        }
+    }
+    measure_buttons(p);
+    update_summary(p);
+    render_status(p);
+    panel_layout(p);
+    /* 상태·결과 열은 그릴 때 지금 언어로 만든다(가상 목록). */
+    InvalidateRect(p->list, NULL, TRUE);
+    InvalidateRect(p->hwnd, NULL, TRUE);
+}
+
+int quarantine_panel_min_width(HWND panel)
+{
+    QuarantinePanel *p = panel_of(panel);
+
+    if (p == NULL) {
+        return 0;
+    }
+    /* 단추 다섯 개와 간격(요약은 남는 폭만 쓴다). */
+    return p->w_refresh + p->w_restore + p->w_purge + p->w_cancel + p->w_open + pscale(p, 6) * 4;
+}
+
 #define PANEL_CHECK(cond)                                                            \
     do {                                                                             \
         if (!(cond)) {                                                               \
@@ -1112,7 +1289,33 @@ int quarantine_panel_verify(HWND panel, size_t expect_rows, size_t expect_ok)
     }
     PANEL_CHECK(ok == expect_ok);
     GetWindowTextW(p->summary, buf, MAX_PATH + 64);
-    PANEL_CHECK(wcsncmp(buf, L"격리 항목 ", wcslen(L"격리 항목 ")) == 0);
+    {
+        /* 요약은 지금 언어의 "격리 항목 n개 · 용량"(확인 필요가 있으면 그 수까지) */
+        wchar_t want[MAX_PATH + 64], size[32];
+        uint64_t bytes = 0;
+        size_t other = 0;
+        for (i = 0; i < p->entries.len; i++) {
+            if (p->entries.items[i].state == QUARANTINE_ENTRY_OK) {
+                bytes += p->entries.items[i].bytes;
+            } else {
+                other++;
+            }
+        }
+        format_size(bytes, size, 32);
+        if (other > 0) {
+            swprintf(want, MAX_PATH + 64, ui_text(UI_T_Q_SUMMARY_CHECK), (unsigned)ok, size,
+                     (unsigned)other);
+        } else {
+            swprintf(want, MAX_PATH + 64, ui_text(UI_T_Q_SUMMARY), (unsigned)ok, size);
+        }
+        PANEL_CHECK(wcscmp(buf, want) == 0);
+    }
+    /* 확인 창이 보여 주는 다른 이름 접미사가 core 가 실제로 만드는 이름과 같다. */
+    {
+        wchar_t *alt = quarantine_alternate_path(L"Z:\\bytesieve-no-such-dir\\x.txt", 0);
+        PANEL_CHECK(alt != NULL && wcscmp(alt, L"Z:\\bytesieve-no-such-dir\\x" RESTORED_SUFFIX L".txt") == 0);
+        free(alt);
+    }
     PANEL_CHECK(IsWindowEnabled(p->open) == (p->entries.len > 0));
     PANEL_CHECK(!IsWindowEnabled(p->cancel));
     /* 영구 삭제가 끝났으면 진행바가 끝까지 찬다. */
@@ -1120,5 +1323,79 @@ int quarantine_panel_verify(HWND panel, size_t expect_rows, size_t expect_ok)
                 SendMessageW(p->progress, PBM_GETPOS, 0, 0) == PROGRESS_RANGE);
     PANEL_CHECK(!p->purge_finished || progress_state(p->progress) == PROGRESS_DONE ||
                 progress_state(p->progress) == PROGRESS_FAILED);
+    return failures;
+}
+
+/* 한글(가-힣)이 들어 있는지. */
+static int has_hangul(const wchar_t *s)
+{
+    for (; *s != L'\0'; s++) {
+        if (*s >= 0xAC00 && *s <= 0xD7A3) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int quarantine_panel_verify_lang(HWND panel)
+{
+    QuarantinePanel *p = panel_of(panel);
+    wchar_t buf[MAX_PATH + 512], want[MAX_PATH + 512];
+    HWND h[5];
+    UiText t[5];
+    RECT r;
+    size_t i;
+    int failures = 0, other = ui_lang_current() != UI_LANG_KO;
+
+    PANEL_CHECK(p != NULL);
+    if (p == NULL) {
+        return failures;
+    }
+    /* 단추: 지금 언어 문구이고 잘리지 않는다 */
+    button_texts(p, h, t);
+    for (i = 0; i < 5; i++) {
+        GetWindowTextW(h[i], buf, (int)(sizeof(buf) / sizeof(buf[0])));
+        PANEL_CHECK(wcscmp(buf, ui_text(t[i])) == 0);
+        GetWindowRect(h[i], &r);
+        PANEL_CHECK(r.right - r.left >= theme_button_width(p->hwnd, p->font, buf, p->dpi, 0));
+    }
+    GetWindowTextW(p->info, buf, (int)(sizeof(buf) / sizeof(buf[0])));
+    PANEL_CHECK(wcscmp(buf, ui_text(UI_T_Q_INFO)) == 0);
+    /* 열 머리글: 지금 언어이고 잘리지 않는다 */
+    for (i = 0; i < COL_COUNT; i++) {
+        LVCOLUMNW col;
+        memset(&col, 0, sizeof(col));
+        col.mask = LVCF_TEXT;
+        col.pszText = buf;
+        col.cchTextMax = (int)(sizeof(buf) / sizeof(buf[0]));
+        buf[0] = L'\0';
+        SendMessageW(p->list, LVM_GETCOLUMNW, (WPARAM)i, (LPARAM)&col);
+        PANEL_CHECK(wcscmp(buf, ui_text(k_cols[i].title)) == 0);
+        PANEL_CHECK(ListView_GetColumnWidth(p->list, (int)i) > theme_text_width(p->list, p->font, buf));
+    }
+    /* 상태 줄: 기억해 둔 내용을 지금 언어로 쓴 것(영구 삭제 중에는 부르지 않음) */
+    PANEL_CHECK(p->job == NULL);
+    status_line(p, want, sizeof(want) / sizeof(want[0]));
+    GetWindowTextW(p->status, buf, (int)(sizeof(buf) / sizeof(buf[0])));
+    PANEL_CHECK(wcscmp(buf, want) == 0);
+    if (other) {
+        PANEL_CHECK(!has_hangul(buf));
+    }
+    /* 목록: 상태·결과 열이 지금 언어(결과 열의 Windows 오류 설명과 경로는 번역 대상이 아님) */
+    for (i = 0; i < p->entries.len; i++) {
+        ListView_GetItemText(p->list, (int)i, COL_STATE, buf, (int)(sizeof(buf) / sizeof(buf[0])));
+        PANEL_CHECK(wcscmp(buf, state_label(p->entries.items[i].state)) == 0);
+        ListView_GetItemText(p->list, (int)i, COL_NOTE, buf, (int)(sizeof(buf) / sizeof(buf[0])));
+        note_text(p->notes != NULL ? &p->notes[i] : NULL, 1, want, sizeof(want) / sizeof(want[0]));
+        PANEL_CHECK(wcscmp(buf, want) == 0);
+        if (other) {
+            note_text(p->notes != NULL ? &p->notes[i] : NULL, 0, want, sizeof(want) / sizeof(want[0]));
+            PANEL_CHECK(!has_hangul(want) && !has_hangul(state_label(p->entries.items[i].state)));
+        }
+    }
+    if (p->entries.len > 0) {
+        GetWindowTextW(p->summary, buf, (int)(sizeof(buf) / sizeof(buf[0])));
+        PANEL_CHECK(!other || !has_hangul(buf));
+    }
     return failures;
 }

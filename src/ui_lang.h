@@ -208,6 +208,78 @@ typedef enum {
     UI_T_MAP_MENU_COPY,
     UI_T_MAP_MENU_COLOR,
 
+    /* 격리 폴더: 단추·열 머리글·안내 */
+    UI_T_Q_REFRESH,
+    UI_T_Q_RESTORE,
+    UI_T_Q_PURGE,
+    UI_T_Q_CANCEL,
+    UI_T_Q_OPEN,
+    UI_T_Q_INFO,
+    UI_T_Q_COL_STATE,
+    UI_T_Q_COL_SIZE,
+    UI_T_Q_COL_ORIGINAL,
+    UI_T_Q_COL_TIME,
+    UI_T_Q_COL_LOCATION,
+    UI_T_Q_COL_RESULT,
+    UI_T_Q_STATE_OK,      /* 항목 상태(QuarantineEntryState) */
+    UI_T_Q_STATE_MISSING,
+    UI_T_Q_STATE_ORPHAN,
+    UI_T_Q_UNKNOWN,       /* 원래 위치를 모를 때 */
+    UI_T_Q_SUMMARY,       /* %u 격리 항목 수, %ls 용량 */
+    UI_T_Q_SUMMARY_CHECK, /* 위 + %u 확인 필요 수 */
+
+    /* 격리 폴더: 상태 줄 */
+    UI_T_Q_UNREADABLE,      /* %u: 읽지 못한 드라이브 수 */
+    UI_T_Q_SELECT_ITEMS,
+    UI_T_Q_EMPTY,
+    UI_T_Q_SELECT_RESTORE,
+    UI_T_Q_RESTORED,        /* %u 성공, %u 같은 이름 건너뜀, %u 실패, %u 복원할 수 없음 */
+    UI_T_Q_SELECT_PURGE,
+    UI_T_Q_PURGE_CANCELLED, /* 확인 창에서 취소 */
+    UI_T_Q_PURGE_NO_MEMORY,
+    UI_T_Q_PURGE_NO_THREAD,
+    UI_T_Q_PURGING,         /* %u 지금 항목, %u 전체, %llu 지운 수, %ls 지운 용량, %ls 경로 */
+    UI_T_Q_STOPPING,
+    UI_T_Q_PURGE_STOPPED,   /* %u 성공, %u 취소, %u 실패 */
+    UI_T_Q_PURGED,          /* %u 성공, %u 실패 */
+
+    /* 격리 폴더: 결과 열(항목별 메모) */
+    UI_T_Q_HEAD_RESTORE_FAILED, /* 결과 머리말("머리말: 상태 - 시스템 설명") */
+    UI_T_Q_HEAD_ALT_FAILED,
+    UI_T_Q_HEAD_PURGE_FAILED,
+    UI_T_Q_NOTE_NO_ORIGIN,
+    UI_T_Q_NOTE_NO_FILE,
+    UI_T_Q_NOTE_SKIPPED,
+    UI_T_Q_NOTE_CANCEL_PARTIAL,
+    UI_T_Q_NOTE_CANCEL_NONE,
+    UI_T_Q_ST_OK,           /* 작업 결과(QuarantineStatus 순서, quarantine_status_text 와 같은 분류) */
+    UI_T_Q_ST_MISSING,
+    UI_T_Q_ST_CONFLICT,
+    UI_T_Q_ST_ACCESS_DENIED,
+    UI_T_Q_ST_IN_USE,
+    UI_T_Q_ST_NO_SPACE,
+    UI_T_Q_ST_BAD_STORE,
+    UI_T_Q_ST_OTHER_VOLUME,
+    UI_T_Q_ST_FAILED,
+    UI_T_Q_ST_CANCELLED,
+
+    /* 격리 폴더: 확인·결과 창 */
+    UI_T_Q_MORE,               /* %u: 목록에 다 싣지 못한 수 */
+    UI_T_Q_CONFLICT_TITLE,
+    UI_T_Q_CONFLICT_HEAD,      /* %u: 같은 이름 때문에 복원하지 않은 수 */
+    UI_T_Q_CONFLICT_TAIL,      /* %ls: 다른 이름 접미사(파일 이름이라 번역하지 않음, " (복원됨)") */
+    UI_T_Q_RESTORE_RESULT_TITLE,
+    UI_T_Q_RESTORE_RESULT_HEAD,
+    UI_T_Q_PURGE_TITLE,
+    UI_T_Q_PURGE_CONFIRM_HEAD,    /* %u 항목 수, %ls 기록된 용량 */
+    UI_T_Q_PURGE_CONFIRM_WARN,
+    UI_T_Q_PURGE_CONFIRM_ORPHANS, /* %u: 기록 없는 항목 수 */
+    UI_T_Q_PURGE_CONFIRM_ASK,
+    UI_T_Q_PURGE_FINAL_TITLE,
+    UI_T_Q_PURGE_FINAL,           /* %u 항목 수, %ls 용량 */
+    UI_T_Q_PURGE_RESULT_TITLE,
+    UI_T_Q_PURGE_RESULT_HEAD,
+
     UI_T_COUNT
 } UiText;
 
@@ -232,6 +304,12 @@ const wchar_t *ui_lang_native_name(UiLang lang);
 int ui_lang_from_tag(const wchar_t *tag, UiLang *out);
 /* Windows 언어 번호(LANGID)를 지원 언어로 바꾼다. 지원하지 않으면 UI_LANG_EN. */
 UiLang ui_lang_from_langid(unsigned short langid);
+/*
+ * 지원 언어의 Windows 언어 번호(LANGID): ko-KR, en-US, ja-JP, zh-CN. 범위 밖이면 en-US.
+ * Windows 가 만드는 글자(시스템 오류 설명 FormatMessage, 확인 창 단추)를 앱 언어에 맞출 때 쓴다.
+ * ui_lang_from_langid(ui_lang_langid(x)) == x.
+ */
+unsigned short ui_lang_langid(UiLang lang);
 
 /* 위 결정 순서대로 표시 언어를 정한다(값을 읽기만 하고 아무것도 쓰지 않는다).
  * 환경 변수·레지스트리 값이 없거나 해석할 수 없으면 다음 단계로 넘어간다. */

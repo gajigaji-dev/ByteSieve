@@ -65,4 +65,22 @@ int quarantine_panel_verify(HWND panel, size_t expect_rows, size_t expect_ok);
 /* 자체 검사: 마지막 복원에서 같은 이름 때문에 건너뛴 항목 수. */
 size_t quarantine_panel_conflicts(HWND panel);
 
+/*
+ * 표시 언어를 바꾼 뒤(ui_lang_set) 부른다. 단추·안내·열 머리글·요약·상태 줄을 지금 언어로 다시 쓰고, 글꼴을
+ * font 로 바꿔(NULL 이면 그대로) 문구 폭에 맞게 다시 배치한다. 목록의 상태·결과 열은 그릴 때 지금 언어로
+ * 만들므로 다시 그리기만 한다(항목별 결과는 문장이 아니라 결과 종류로 기억한다). 목록·고른 항목은 그대로다.
+ * 영구 삭제 중에 불러도 된다(진행 문구는 다음 알림부터 새 언어). 글꼴은 호출자가 소유한다.
+ */
+void quarantine_panel_apply_language(HWND panel, HFONT font);
+
+/* 단추 줄이 잘리지 않는 최소 폭(최소 창 크기에 쓴다). */
+int quarantine_panel_min_width(HWND panel);
+
+/*
+ * 자체 검사: 단추·안내·열 머리글이 지금 언어이고 잘리지 않는지, 상태 줄·상태 열·결과 열이 지금 언어로
+ * 쓰였는지(한국어가 아니면 번역 문구에 한글이 없는지, Windows 오류 설명·경로는 제외) 확인한다.
+ * 영구 삭제 중에는 부르지 않는다. 실패 수.
+ */
+int quarantine_panel_verify_lang(HWND panel);
+
 #endif /* BYTESIEVE_GUI_QUARANTINE_H */

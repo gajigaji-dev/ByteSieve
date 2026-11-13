@@ -163,6 +163,10 @@ static void min_window_size(int *cx, int *cy)
     if (settings_w > panel_w) {
         panel_w = settings_w;
     }
+    settings_w = quarantine_panel_min_width(g_app.pages[NAV_PAGE_QUARANTINE]);
+    if (settings_w > panel_w) {
+        panel_w = settings_w;
+    }
     need = nav_width() + 2 * scale(MAIN_MARGIN) + panel_w;
     AdjustWindowRectEx(&frame, WS_OVERLAPPEDWINDOW, FALSE, 0);
     need += frame.right - frame.left;
@@ -316,7 +320,16 @@ static HFONT create_ui_font(UiLang lang)
 }
 
 /*
- * 표시 언어를 실행 중에 바꾼다: 언어별 글꼴을 새로 만들어 번역된 화면(사이드바·제목·폴더 스캔·설정)의
+ * GUI 스레드의 UI 언어를 앱 언어로 맞춘다: Windows 가 그리는 확인 창 단추([예]/[아니요])·공용 대화 상자를
+ * 앱 문구와 같은 언어로 보이게 한다. 그 언어의 Windows 리소스가 없으면 Windows 가 기본 언어로 대신한다.
+ */
+static void apply_thread_ui_language(UiLang lang)
+{
+    SetThreadUILanguage(ui_lang_langid(lang));
+}
+
+/*
+ * 표시 언어를 실행 중에 바꾼다: 언어별 글꼴을 새로 만들어 번역된 화면(사이드바·제목·폴더 스캔·격리 폴더·설정)의
  * 문구와 글꼴을 다시 쓰고, 문구 길이에 맞게 최소 창 크기·배치를 다시 계산한다. 아직 번역하지 않은
  * 페이지는 문구가 그대로라 시작할 때의 글꼴(base_font)을 계속 쓴다. 같은 언어면 아무것도 하지 않는다.
  * 새 글꼴을 만들지 못하면 언어를 바꾸지 않는다.
@@ -335,6 +348,7 @@ static void apply_language(UiLang lang)
         return;
     }
     ui_lang_set(lang);
+    apply_thread_ui_language(lang);
     title_font = theme_create_title_font(font, g_app.dpi);
     g_app.font = font;
     g_app.title_font = title_font;
@@ -343,6 +357,7 @@ static void apply_language(UiLang lang)
     SendMessageW(g_app.title, WM_SETFONT, (WPARAM)(title_font != NULL ? title_font : font), FALSE);
     SetWindowTextW(g_app.title, ui_text(nav_page_text(g_app.page)));
     scan_panel_apply_language(g_app.pages[NAV_PAGE_SCAN], font);
+    quarantine_panel_apply_language(g_app.pages[NAV_PAGE_QUARANTINE], font);
     settings_panel_apply_language(g_app.pages[NAV_PAGE_SETTINGS], font);
     /* 이전 글꼴은 이제 번역된 화면이 쓰지 않는다(시작 글꼴은 번역하지 않은 페이지가 쓰므로 남긴다). */
     if (old_font != NULL && old_font != g_app.base_font) {
@@ -486,6 +501,22 @@ static int self_test_quarantine_step(void)
                  (unsigned)quarantine_panel_conflicts(q));
         return 0;
     }
+    /* 실행 중 언어 바꾸기: 복원 결과(상태 줄)와 같은 이름 때문에 건너뛴 항목의 결과 열이 새 언어로 다시
+     * 쓰이고 단추·열이 잘리지 않는지 en → ja → zh-Hans → ko 로 확인한다(한국어로 돌아와 이어 간다). */
+    {
+        static const UiLang order[] = {UI_LANG_EN, UI_LANG_JA, UI_LANG_ZH_HANS, UI_LANG_KO};
+        int failures = 0;
+        size_t i;
+        for (i = 0; i < sizeof(order) / sizeof(order[0]); i++) {
+            apply_language(order[i]);
+            failures += quarantine_panel_verify_lang(q);
+        }
+        if (page_exit(failures, NAV_PAGE_QUARANTINE) != 0 ||
+            page_exit(quarantine_panel_verify(q, 1, 1), NAV_PAGE_QUARANTINE) != 0) {
+            fwprintf(stderr, L"self-test failed: quarantine page after language switch\n");
+            return 0;
+        }
+    }
     return quarantine_panel_select_all(q) == 1 && quarantine_panel_purge(q, 0);
 }
 
@@ -551,6 +582,7 @@ static int check_lang(LOGFONTW *out_font, int *out_min_width)
         SELF_CHECK(settings.top >= item.bottom && settings.bottom <= nav.bottom);
     }
     failures += scan_panel_verify_lang(g_app.pages[NAV_PAGE_SCAN]);
+    failures += quarantine_panel_verify_lang(g_app.pages[NAV_PAGE_QUARANTINE]);
     failures += settings_panel_verify_lang(g_app.pages[NAV_PAGE_SETTINGS]);
     *out_font = lf;
     *out_min_width = cx;
@@ -1475,6 +1507,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmd, int show)
         lang = ui_lang_detect();
     }
     ui_lang_set(lang);
+    apply_thread_ui_language(lang);
 
     /* 테마: 평소와 테마·설정 자체 검사는 저장된 설정, 다른 자체 검사는 화면 색을 고정하려고 밝게. */
     if (g_app.self_test == SELF_TEST_NONE || g_app.self_test == SELF_TEST_THEME ||

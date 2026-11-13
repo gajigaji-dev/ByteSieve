@@ -187,6 +187,14 @@ static void test_langid(void)
           UI_LANG_EN);
     CHECK(ui_lang_from_langid(MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_HONGKONG)) == UI_LANG_EN);
     CHECK(ui_lang_from_langid(MAKELANGID(LANG_FRENCH, SUBLANG_FRENCH)) == UI_LANG_EN);
+    /* 앱 언어 → LANGID(Windows 가 만드는 글자를 맞출 때) → 다시 앱 언어 */
+    {
+        int lang;
+        for (lang = 0; lang < UI_LANG_COUNT; lang++) {
+            CHECK(ui_lang_from_langid(ui_lang_langid((UiLang)lang)) == (UiLang)lang);
+        }
+        CHECK(ui_lang_langid(UI_LANG_COUNT) == MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US));
+    }
     CHECK(ui_lang_from_langid(0) == UI_LANG_EN);
 }
 
