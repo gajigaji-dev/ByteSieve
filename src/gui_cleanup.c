@@ -14,9 +14,11 @@
 #include "cleanup_trash.h"
 #include "gui_cleanup.h"
 #include "gui_progress.h"
+#include "gui_status_text.h"
 #include "gui_theme.h"
 #include "quarantine.h"
 #include "size_format.h"
+#include "ui_lang.h"
 
 #define CLEANUP_PANEL_CLASS L"ByteSieveCleanupPanel"
 #define WM_APP_CLEANUP_PROGRESS (WM_APP + 1)
@@ -75,36 +77,53 @@ enum {
     COL_COUNT
 };
 
-/* 유형 필터 콤보 상자의 항목 순서와 비트. */
-static const struct {
-    const wchar_t *label;
+/*
+ * 필터 콤보 상자의 항목 순서와 비트. 이름은 번역 문구(text)이거나, 제품·도구 이름처럼 번역하지 않는
+ * 고정 글자(fixed, text 가 UI_T_COUNT 일 때)다.
+ */
+typedef struct {
+    UiText text;
+    const wchar_t *fixed;
     unsigned mask;
-} g_filters[] = {
-    {L"전체", CLEANUP_MASK_ALL},
-    {L"Node.js (node_modules)", CLEANUP_MASK(CLEANUP_NODE_MODULES)},
-    {L"빌드 결과물 (dist·build·target·bin·obj 등)", CLEANUP_MASK(CLEANUP_BUILD)},
-    {L"개발 캐시 (.cache·.next·__pycache__ 등)", CLEANUP_MASK(CLEANUP_CACHE)},
-    {L"임시 파일 (.tmp·.temp·*.tmp)", CLEANUP_MASK(CLEANUP_TEMP)},
-    {L"로그 (*.log)", CLEANUP_MASK(CLEANUP_LOG)},
+} FilterItem;
+
+static const FilterItem g_filters[] = {
+    {UI_T_C_ALL, NULL, CLEANUP_MASK_ALL},
+    {UI_T_COUNT, L"Node.js (node_modules)", CLEANUP_MASK(CLEANUP_NODE_MODULES)},
+    {UI_T_C_FILTER_BUILD, NULL, CLEANUP_MASK(CLEANUP_BUILD)},
+    {UI_T_C_FILTER_CACHE, NULL, CLEANUP_MASK(CLEANUP_CACHE)},
+    {UI_T_C_FILTER_TEMP, NULL, CLEANUP_MASK(CLEANUP_TEMP)},
+    {UI_T_C_FILTER_LOG, NULL, CLEANUP_MASK(CLEANUP_LOG)},
 };
 #define FILTER_COUNT (sizeof(g_filters) / sizeof(g_filters[0]))
 
 /* 개발 환경 필터 콤보 상자의 항목 순서와 비트. */
-static const struct {
-    const wchar_t *label;
-    unsigned mask;
-} g_eco_filters[] = {
-    {L"전체", CLEANUP_ECO_MASK_ALL},
-    {L"Node.js", CLEANUP_ECO_BIT(CLEANUP_ECO_NODE)},
-    {L"Python", CLEANUP_ECO_BIT(CLEANUP_ECO_PYTHON)},
-    {L"Rust", CLEANUP_ECO_BIT(CLEANUP_ECO_RUST)},
-    {L"Java·Kotlin", CLEANUP_ECO_BIT(CLEANUP_ECO_JAVA)},
-    {L".NET·Visual Studio", CLEANUP_ECO_BIT(CLEANUP_ECO_DOTNET)},
-    {L"C/C++", CLEANUP_ECO_BIT(CLEANUP_ECO_CPP)},
-    {L"Go", CLEANUP_ECO_BIT(CLEANUP_ECO_GO)},
-    {L"일반", CLEANUP_ECO_BIT(CLEANUP_ECO_GENERIC)},
+static const FilterItem g_eco_filters[] = {
+    {UI_T_C_ALL, NULL, CLEANUP_ECO_MASK_ALL},
+    {UI_T_COUNT, L"Node.js", CLEANUP_ECO_BIT(CLEANUP_ECO_NODE)},
+    {UI_T_COUNT, L"Python", CLEANUP_ECO_BIT(CLEANUP_ECO_PYTHON)},
+    {UI_T_COUNT, L"Rust", CLEANUP_ECO_BIT(CLEANUP_ECO_RUST)},
+    {UI_T_COUNT, L"Java·Kotlin", CLEANUP_ECO_BIT(CLEANUP_ECO_JAVA)},
+    {UI_T_COUNT, L".NET·Visual Studio", CLEANUP_ECO_BIT(CLEANUP_ECO_DOTNET)},
+    {UI_T_COUNT, L"C/C++", CLEANUP_ECO_BIT(CLEANUP_ECO_CPP)},
+    {UI_T_COUNT, L"Go", CLEANUP_ECO_BIT(CLEANUP_ECO_GO)},
+    {UI_T_C_ECO_GENERIC, NULL, CLEANUP_ECO_BIT(CLEANUP_ECO_GENERIC)},
 };
 #define ECO_FILTER_COUNT (sizeof(g_eco_filters) / sizeof(g_eco_filters[0]))
+
+static const wchar_t *filter_label(const FilterItem *f)
+{
+    return f->text < UI_T_COUNT ? ui_text(f->text) : f->fixed;
+}
+
+/* 상태 줄에 보인 내용의 종류(언어를 바꾸면 render_status 가 새 언어로 다시 쓴다). */
+typedef enum {
+    C_STATUS_TEXT,      /* 인자 없는 문구(status_text) */
+    C_STATUS_DETECTING, /* 탐지·프로젝트 분석 진행(작업에서 읽음) */
+    C_STATUS_DETECTED,  /* 탐지 결과(결과·detected·detect_ms) */
+    C_STATUS_TRASHING,  /* 휴지통 이동 진행(작업에서 읽음) */
+    C_STATUS_TRASHED    /* 휴지통 이동 결과(t_*) */
+} CStatusKind;
 
 /* CreateWindowExW 로 넘기는 생성 인자. */
 typedef struct {
@@ -145,7 +164,18 @@ typedef struct {
     int trash_interactive; /* 사용자가 시작했으면 실패 요약 창을 띄운다 */
     ULONGLONG trash_started;
 
-    wchar_t cell[256]; /* LVN_GETDISPINFO 용 */
+    /* 단추·이름표 폭(지금 글꼴로 잰 문구 폭, 예전 고정 폭이 최소) */
+    int w_browse, w_start, w_cancel, w_check_all, w_check_none, w_trash, w_label;
+
+    /* 상태 줄(render_status) */
+    CStatusKind status_kind;
+    UiText status_text;
+    ScanStatus detected;     /* C_STATUS_DETECTED */
+    uint64_t detect_ms;
+    size_t t_moved, t_failed, t_cancelled, t_quarantined; /* C_STATUS_TRASHED */
+    uint64_t t_bytes, t_elapsed_ms;
+
+    wchar_t cell[512]; /* LVN_GETDISPINFO 용 */
 } CleanupPanel;
 
 static CleanupPanel *panel_of(HWND hwnd)
@@ -164,13 +194,13 @@ static const wchar_t *category_label(CleanupCategory category)
     case CLEANUP_NODE_MODULES:
         return L"Node.js";
     case CLEANUP_BUILD:
-        return L"빌드 결과물";
+        return ui_text(UI_T_C_CAT_BUILD);
     case CLEANUP_CACHE:
-        return L"개발 캐시";
+        return ui_text(UI_T_C_CAT_CACHE);
     case CLEANUP_TEMP:
-        return L"임시 파일";
+        return ui_text(UI_T_C_CAT_TEMP);
     case CLEANUP_LOG:
-        return L"로그";
+        return ui_text(UI_T_C_CAT_LOG);
     default:
         return L"";
     }
@@ -194,7 +224,7 @@ static const wchar_t *eco_label(CleanupEco eco)
     case CLEANUP_ECO_GO:
         return L"Go";
     default:
-        return L"일반";
+        return ui_text(UI_T_C_ECO_GENERIC);
     }
 }
 
@@ -205,17 +235,18 @@ static void note_text(const CleanupItem *item, wchar_t *buf, size_t len)
 
     buf[0] = L'\0';
     if (item->flags & CLEANUP_ITEM_PROTECTED) {
-        used += (size_t)swprintf(buf + used, len - used, L"시스템 경로 · ");
+        used += (size_t)swprintf(buf + used, len - used, L"%ls · ", ui_text(UI_T_C_NOTE_SYSTEM));
     }
     if ((item->flags & CLEANUP_ITEM_DIR) && cleanup_needs_marker(item->category)) {
         used += (size_t)swprintf(buf + used, len - used, L"%ls · ",
-                                 (item->flags & CLEANUP_ITEM_CONFIRMED) ? L"확인됨" : L"추정");
+                                 ui_text((item->flags & CLEANUP_ITEM_CONFIRMED) ? UI_T_C_NOTE_CONFIRMED
+                                                                                : UI_T_C_NOTE_GUESSED));
     }
     if (item->flags & CLEANUP_ITEM_INCOMPLETE) {
-        used += (size_t)swprintf(buf + used, len - used, L"일부 누락 · ");
+        used += (size_t)swprintf(buf + used, len - used, L"%ls · ", ui_text(UI_T_C_NOTE_INCOMPLETE));
     }
     if ((item->flags & CLEANUP_ITEM_MEASURED) && item->shared_bytes > 0) {
-        used += (size_t)swprintf(buf + used, len - used, L"하드 링크 공유 · ");
+        used += (size_t)swprintf(buf + used, len - used, L"%ls · ", ui_text(UI_T_C_NOTE_SHARED));
     }
     /* 끝의 " · " 제거 */
     if (used >= 3) {
@@ -225,11 +256,17 @@ static void note_text(const CleanupItem *item, wchar_t *buf, size_t len)
 
 /* ---- 정리 상태 ---- */
 
-/* 실패 코드(HRESULT 또는 Windows 오류)의 시스템 설명. 없으면 빈 문자열. */
+/* 실패 코드(HRESULT 또는 Windows 오류)의 시스템 설명. 앱 언어로 먼저 찾고, 그 언어가 Windows 에 없으면
+ * Windows 기본 언어로. 없으면 빈 문자열. */
 static void error_text(uint32_t code, wchar_t *buf, size_t len)
 {
     DWORD n = FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL,
-                             code, 0, buf, (DWORD)len, NULL);
+                             code, ui_lang_langid(ui_lang_current()), buf, (DWORD)len, NULL);
+
+    if (n == 0) {
+        n = FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, code, 0,
+                           buf, (DWORD)len, NULL);
+    }
 
     /* 끝의 마침표·줄바꿈 제거 */
     while (n > 0 && (buf[n - 1] == L'\r' || buf[n - 1] == L'\n' || buf[n - 1] == L'.' ||
@@ -255,20 +292,20 @@ static void clean_text(const CleanPlanTarget *t, wchar_t *buf, size_t len)
     buf[0] = L'\0';
     if (o->status == CLEANUP_TRASH_FAILED) {
         error_text(o->code, why, 160);
-        swprintf(buf, len, L"실패: %ls (0x%08X)", why[0] ? why : L"이동하지 못함",
+        swprintf(buf, len, ui_text(UI_T_C_CLEAN_FAILED), why[0] ? why : ui_text(UI_T_C_CLEAN_MOVE_FAILED),
                  (unsigned)o->code);
     } else if (o->status == CLEANUP_TRASH_QUARANTINE_FAILED) {
         /* 휴지통을 쓸 수 없어 격리 폴더로 옮기려다 실패(권한 부족·사용 중·공간 부족 등). */
         error_text(o->code, why, 160);
-        swprintf(buf, len, L"실패: %ls - %ls (0x%08X)",
-                 cleanup_trash_status_text(CLEANUP_TRASH_QUARANTINE_FAILED),
-                 why[0] ? why : L"알 수 없는 오류", (unsigned)o->code);
+        swprintf(buf, len, ui_text(UI_T_C_CLEAN_QFAILED),
+                 gui_trash_status_text(CLEANUP_TRASH_QUARANTINE_FAILED),
+                 why[0] ? why : ui_text(UI_T_C_UNKNOWN_ERROR), (unsigned)o->code);
     } else if (cleanup_trash_is_denied(o->status) || o->status == CLEANUP_TRASH_NO_RECYCLE) {
-        swprintf(buf, len, L"건너뜀: %ls", cleanup_trash_status_text(o->status));
+        swprintf(buf, len, ui_text(UI_T_C_CLEAN_SKIPPED), gui_trash_status_text(o->status));
     } else if (o->status != CLEANUP_TRASH_PENDING) {
-        swprintf(buf, len, L"%ls", cleanup_trash_status_text(o->status));
+        swprintf(buf, len, L"%ls", gui_trash_status_text(o->status));
     } else if (t->deny != CLEANUP_TRASH_PENDING) {
-        swprintf(buf, len, L"보호: %ls", cleanup_trash_status_text(t->deny));
+        swprintf(buf, len, ui_text(UI_T_C_CLEAN_PROTECTED), gui_trash_status_text(t->deny));
     }
 }
 
@@ -348,7 +385,7 @@ static void activity_text(CleanupPanel *p, const CleanPlanTarget *t, wchar_t *bu
     }
     pi = &p->projects.items[t->project];
     if (pi->last_activity == 0) {
-        swprintf(buf, len, L"모름");
+        swprintf(buf, len, L"%ls", ui_text(UI_T_C_ACTIVITY_UNKNOWN));
         return;
     }
     u.dwLowDateTime = (DWORD)pi->last_activity;
@@ -356,8 +393,15 @@ static void activity_text(CleanupPanel *p, const CleanPlanTarget *t, wchar_t *bu
     if (!FileTimeToLocalFileTime(&u, &l) || !FileTimeToSystemTime(&l, &st)) {
         return;
     }
-    swprintf(buf, len, L"%04u-%02u-%02u · %u일 전%ls", st.wYear, st.wMonth, st.wDay, pi->age_days,
-             pi->dormant ? L" · 휴면" : L"");
+    {
+        wchar_t dormant[64];
+        dormant[0] = L'\0';
+        if (pi->dormant) {
+            swprintf(dormant, 64, L" · %ls", ui_text(UI_T_C_NOTE_DORMANT));
+        }
+        swprintf(buf, len, ui_text(UI_T_C_ACTIVITY), st.wYear, st.wMonth, st.wDay, pi->age_days,
+                 dormant);
+    }
 }
 
 static void recount_checked(CleanupPanel *p)
@@ -370,27 +414,31 @@ static void recount_checked(CleanupPanel *p)
     p->checked_reclaim = s.reclaim;
 }
 
-static void update_selection(CleanupPanel *p)
+/* 선택 줄 문구: 선택 수·실제 확보(옮긴 것이 있으면 옮긴 수·용량, 격리 폴더 수). */
+static void selection_text(const CleanupPanel *p, wchar_t *text, size_t len)
 {
-    wchar_t text[256], size[32], moved[32];
-    int busy = p->job != NULL || p->trash != NULL;
+    wchar_t size[32], moved[32];
 
     format_size(p->checked_reclaim, size, 32);
     if (p->moved_count > 0 && p->quarantined_count > 0) {
         format_size(p->moved_bytes, moved, 32);
-        swprintf(text, sizeof(text) / sizeof(text[0]),
-                 L"선택 %u개 · 실제 확보 %ls   /   휴지통으로 옮김 %u개 · %ls (격리 폴더 %u개)",
-                 (unsigned)p->checked_count, size, (unsigned)p->moved_count, moved,
-                 (unsigned)p->quarantined_count);
+        swprintf(text, len, ui_text(UI_T_C_SEL_MOVED_Q), (unsigned)p->checked_count, size,
+                 (unsigned)p->moved_count, moved, (unsigned)p->quarantined_count);
     } else if (p->moved_count > 0) {
         format_size(p->moved_bytes, moved, 32);
-        swprintf(text, sizeof(text) / sizeof(text[0]),
-                 L"선택 %u개 · 실제 확보 %ls   /   휴지통으로 옮김 %u개 · %ls",
-                 (unsigned)p->checked_count, size, (unsigned)p->moved_count, moved);
+        swprintf(text, len, ui_text(UI_T_C_SEL_MOVED), (unsigned)p->checked_count, size,
+                 (unsigned)p->moved_count, moved);
     } else {
-        swprintf(text, sizeof(text) / sizeof(text[0]), L"선택 %u개 · 실제 확보 %ls",
-                 (unsigned)p->checked_count, size);
+        swprintf(text, len, ui_text(UI_T_C_SEL), (unsigned)p->checked_count, size);
     }
+}
+
+static void update_selection(CleanupPanel *p)
+{
+    wchar_t text[256];
+    int busy = p->job != NULL || p->trash != NULL;
+
+    selection_text(p, text, sizeof(text) / sizeof(text[0]));
     SetWindowTextW(p->selection, p->has_plan ? text : L"");
     EnableWindow(p->check_all, !busy && p->has_plan);
     EnableWindow(p->check_none, !busy && p->checked_count > 0);
@@ -453,9 +501,8 @@ static void update_summary(CleanupPanel *p)
     format_size(p->view_bytes, shown, 32);
     format_size(p->result.total_bytes, total, 32);
     format_size(p->result.total_reclaim, reclaim, 32);
-    swprintf(text, sizeof(text) / sizeof(text[0]),
-             L"표시 %u개 · %ls   /   전체 %u개 · 실제 확보 %ls (파일 크기 %ls)",
-             (unsigned)p->view_len, shown, (unsigned)p->result.len, reclaim, total);
+    swprintf(text, sizeof(text) / sizeof(text[0]), ui_text(UI_T_C_SUMMARY), (unsigned)p->view_len,
+             shown, (unsigned)p->result.len, reclaim, total);
     SetWindowTextW(p->summary, text);
 }
 
@@ -486,15 +533,131 @@ static void apply_filter(CleanupPanel *p)
 
 static void set_warning(CleanupPanel *p)
 {
-    if (p->has_result && p->result.root_protected) {
-        SetWindowTextW(p->warn, L"경고: 시스템·프로그램 보호 경로 안입니다. 표시된 항목은 Windows나 "
-                                L"프로그램에 필요할 수 있어 휴지통으로 옮길 수 없습니다.");
-    } else {
-        SetWindowTextW(p->warn, L"탐지는 읽기 전용입니다. 체크한 항목만 확인을 거쳐 휴지통(없는 "
-                                L"드라이브는 격리 폴더)으로 옮기며 영구 삭제하지 않습니다. "
-                                L"시스템·중요 폴더는 보호합니다.");
-    }
+    SetWindowTextW(p->warn, ui_text(p->has_result && p->result.root_protected ? UI_T_C_WARN_PROTECTED
+                                                                              : UI_T_C_WARN_INFO));
     InvalidateRect(p->warn, NULL, TRUE);
+}
+
+/* ---- 상태 줄 ---- */
+
+/* 탐지·프로젝트 분석 진행 문구(C_STATUS_DETECTING). 작업이 없으면 빈 문자열. */
+static void detect_progress_text(CleanupPanel *p, wchar_t *buf, size_t len)
+{
+    CleanupJobSnapshot snap;
+    wchar_t size[32];
+
+    buf[0] = L'\0';
+    if (p->job == NULL) {
+        return;
+    }
+    cleanup_job_progress(p->job, &snap);
+    if (snap.analyzing_projects) {
+        swprintf(buf, len, ui_text(UI_T_C_GIT_PROGRESS), (unsigned)snap.projects_done,
+                 (unsigned)snap.projects_total, (unsigned)snap.progress.items);
+        return;
+    }
+    format_size(snap.progress.item_bytes, size, 32);
+    swprintf(buf, len, ui_text(UI_T_C_PROGRESS), (unsigned long long)snap.progress.dirs,
+             (unsigned long long)snap.progress.files, (unsigned)snap.progress.items, size,
+             (unsigned long long)snap.progress.errors, snap.current_dir);
+}
+
+/* 탐지 결과 문구(C_STATUS_DETECTED). */
+static void detected_text(CleanupPanel *p, wchar_t *buf, size_t len)
+{
+    const ScanReport *r = &p->result.report;
+    UiText head;
+
+    if (r->cancelled) {
+        head = UI_T_C_HEAD_CANCELLED;
+    } else if (p->detected == SCAN_COMPLETE) {
+        head = UI_T_SCAN_HEAD_DONE;
+    } else if (p->detected == SCAN_PARTIAL) {
+        head = UI_T_SCAN_HEAD_PARTIAL;
+    } else {
+        head = UI_T_C_HEAD_FAILED;
+    }
+    if (p->detected == SCAN_FATAL) {
+        const wchar_t *kind = r->errors_len > 0 ? scan_error_kind_name(r->errors[0].kind)
+                                                : L"other";
+        swprintf(buf, len, ui_text(UI_T_SCAN_FATAL), ui_text(head), kind);
+        return;
+    }
+    swprintf(buf, len, ui_text(UI_T_C_FINISHED), ui_text(head), (unsigned long long)r->dir_count,
+             (unsigned long long)r->file_count, (unsigned long long)r->error_count,
+             (unsigned long long)r->skipped_dir_count, (unsigned long long)r->excluded_dir_count,
+             (unsigned long long)r->reparse_count, (double)p->detect_ms / 1000.0);
+}
+
+/* 휴지통 이동 진행 문구(C_STATUS_TRASHING). 작업이 없으면 빈 문자열. */
+static void trash_progress_text(CleanupPanel *p, wchar_t *buf, size_t len)
+{
+    CleanPlanSnapshot snap;
+    wchar_t size[32];
+
+    buf[0] = L'\0';
+    if (p->trash == NULL) {
+        return;
+    }
+    clean_plan_run_progress(p->trash, &snap);
+    format_size(snap.moved_bytes, size, 32);
+    swprintf(buf, len, ui_text(UI_T_C_TRASH_PROGRESS), (unsigned)snap.done, (unsigned)snap.total,
+             (unsigned)snap.moved, size, (unsigned)snap.quarantined, (unsigned)snap.failed);
+}
+
+/* 상태 줄 문구를 기억해 둔 종류·값과 지금 언어로 만든다. */
+static void status_line(CleanupPanel *p, wchar_t *buf, size_t len)
+{
+    wchar_t size[32];
+
+    buf[0] = L'\0';
+    switch (p->status_kind) {
+    case C_STATUS_TEXT:
+        swprintf(buf, len, L"%ls", ui_text(p->status_text));
+        break;
+    case C_STATUS_DETECTING:
+        detect_progress_text(p, buf, len);
+        break;
+    case C_STATUS_DETECTED:
+        detected_text(p, buf, len);
+        break;
+    case C_STATUS_TRASHING:
+        trash_progress_text(p, buf, len);
+        break;
+    case C_STATUS_TRASHED:
+        format_size(p->t_bytes, size, 32);
+        if (p->t_quarantined > 0) {
+            swprintf(buf, len, ui_text(UI_T_C_TRASHED_Q), (unsigned)p->t_moved, size,
+                     (unsigned)p->t_failed, (unsigned)p->t_cancelled,
+                     (double)p->t_elapsed_ms / 1000.0, (unsigned)p->t_quarantined);
+        } else {
+            swprintf(buf, len, ui_text(UI_T_C_TRASHED), (unsigned)p->t_moved, size,
+                     (unsigned)p->t_failed, (unsigned)p->t_cancelled,
+                     (double)p->t_elapsed_ms / 1000.0);
+        }
+        break;
+    }
+}
+
+static void render_status(CleanupPanel *p)
+{
+    wchar_t text[CLEANUP_JOB_DIR_LEN + 512];
+
+    status_line(p, text, sizeof(text) / sizeof(text[0]));
+    SetWindowTextW(p->status, text);
+}
+
+static void show_status(CleanupPanel *p, CStatusKind kind)
+{
+    p->status_kind = kind;
+    render_status(p);
+}
+
+/* 인자 없는 문구를 상태 줄에 보인다. */
+static void show_text(CleanupPanel *p, UiText id)
+{
+    p->status_text = id;
+    show_status(p, C_STATUS_TEXT);
 }
 
 /* 탐지·휴지통 이동 중에는 다른 작업을 막고 [취소]만 켠다. */
@@ -520,7 +683,6 @@ static void on_job_notify(int finished, void *ctx)
 static void update_progress(CleanupPanel *p)
 {
     CleanupJobSnapshot snap;
-    wchar_t size[32], text[CLEANUP_JOB_DIR_LEN + 160];
     uint64_t done, all;
     int pos;
 
@@ -536,10 +698,7 @@ static void update_progress(CleanupPanel *p)
         if (progress_state(p->progress) != PROGRESS_BUSY) {
             progress_set(p->progress, PROGRESS_BUSY, 0, PROGRESS_RANGE);
         }
-        swprintf(text, sizeof(text) / sizeof(text[0]),
-                 L"프로젝트(Git) 분석 중... %u/%u · 후보 %u개", (unsigned)snap.projects_done,
-                 (unsigned)snap.projects_total, (unsigned)snap.progress.items);
-        SetWindowTextW(p->status, text);
+        show_status(p, C_STATUS_DETECTING);
         return;
     }
     /* 남은 폴더 수가 늘면 비율이 줄 수 있으므로 막대는 뒤로 가지 않게 한다. */
@@ -550,13 +709,7 @@ static void update_progress(CleanupPanel *p)
         p->progress_pos = pos;
         progress_set(p->progress, PROGRESS_RUNNING, pos, PROGRESS_RANGE);
     }
-    format_size(snap.progress.item_bytes, size, 32);
-    swprintf(text, sizeof(text) / sizeof(text[0]),
-             L"탐지 중... 폴더 %llu · 파일 %llu · 후보 %u개 · %ls · 오류 %llu  |  %ls",
-             (unsigned long long)snap.progress.dirs, (unsigned long long)snap.progress.files,
-             (unsigned)snap.progress.items, size, (unsigned long long)snap.progress.errors,
-             snap.current_dir);
-    SetWindowTextW(p->status, text);
+    show_status(p, C_STATUS_DETECTING);
 }
 
 static void finish_detect(CleanupPanel *p)
@@ -564,8 +717,6 @@ static void finish_detect(CleanupPanel *p)
     CleanupJobSnapshot snap;
     const ScanReport *r;
     ScanStatus status;
-    wchar_t text[512];
-    const wchar_t *head;
 
     if (p->job == NULL) {
         return;
@@ -576,33 +727,16 @@ static void finish_detect(CleanupPanel *p)
     p->has_result = 1;
     r = &p->result.report;
 
-    if (r->cancelled) {
-        head = L"취소됨(그때까지 찾은 결과)";
-    } else if (status == SCAN_COMPLETE) {
-        head = L"완료";
-    } else if (status == SCAN_PARTIAL) {
-        head = L"완료(일부 폴더를 읽지 못함)";
-    } else {
-        head = L"탐지 실패";
-    }
     if (status == SCAN_FATAL) {
-        const wchar_t *kind = r->errors_len > 0 ? scan_error_kind_name(r->errors[0].kind)
-                                                : L"other";
-        swprintf(text, sizeof(text) / sizeof(text[0]), L"%ls: 폴더를 열 수 없습니다 (%ls).",
-                 head, kind);
         progress_set(p->progress, PROGRESS_FAILED, 0, PROGRESS_RANGE);
     } else {
-        swprintf(text, sizeof(text) / sizeof(text[0]),
-                 L"%ls: 폴더 %llu · 파일 %llu · 오류 %llu · 건너뛴 폴더 %llu · "
-                 L"제외한 시스템 폴더 %llu · 링크 %llu · %.1f초",
-                 head, (unsigned long long)r->dir_count, (unsigned long long)r->file_count,
-                 (unsigned long long)r->error_count, (unsigned long long)r->skipped_dir_count,
-                 (unsigned long long)r->excluded_dir_count,
-                 (unsigned long long)r->reparse_count, (double)snap.elapsed_ms / 1000.0);
         progress_set(p->progress, r->cancelled ? PROGRESS_CANCELLED : PROGRESS_DONE, 0,
                      PROGRESS_RANGE);
     }
-    SetWindowTextW(p->status, text);
+    /* 결과 문구는 detected_text 가 지금 언어로 만든다. */
+    p->detected = status;
+    p->detect_ms = snap.elapsed_ms;
+    show_status(p, C_STATUS_DETECTED);
     build_states(p);
     set_busy(p, 0);
     set_warning(p);
@@ -623,7 +757,6 @@ static void on_trash_notify(int finished, void *ctx)
 static void update_trash_progress(CleanupPanel *p)
 {
     CleanPlanSnapshot snap;
-    wchar_t size[32], text[256];
 
     if (p->trash == NULL) {
         return;
@@ -636,12 +769,7 @@ static void update_trash_progress(CleanupPanel *p)
         progress_set(p->progress, PROGRESS_RUNNING, (int)(snap.done * PROGRESS_RANGE / snap.total),
                      PROGRESS_RANGE);
     }
-    format_size(snap.moved_bytes, size, 32);
-    swprintf(text, sizeof(text) / sizeof(text[0]),
-             L"휴지통으로 옮기는 중... %u/%u · 이동 %u개(%ls, 격리 폴더 %u개) · 실패 %u개",
-             (unsigned)snap.done, (unsigned)snap.total, (unsigned)snap.moved, size,
-             (unsigned)snap.quarantined, (unsigned)snap.failed);
-    SetWindowTextW(p->status, text);
+    show_status(p, C_STATUS_TRASHING);
 }
 
 /*
@@ -671,39 +799,30 @@ static int confirm_trash(CleanupPanel *p, const size_t *index, size_t count)
     } while (0)
 
     format_size(p->checked_reclaim, size, 32);
-    APPEND(L"선택한 %u개 항목을 Windows 휴지통으로 옮깁니다.\n실제 확보 용량: %ls"
-           L"(휴지통·격리 폴더를 비우면 확보)\n\n",
-           (unsigned)count, size);
+    APPEND(ui_text(UI_T_C_CONFIRM_HEAD), (unsigned)count, size);
     for (i = 0; i < count && i < CONFIRM_LIST_MAX; i++) {
         const CleanupItem *item = &p->result.items[index[i]];
         format_size(item->bytes, size, 32);
         APPEND(L"[%ls] %ls   %ls\n", category_label(item->category), size, item->path);
     }
     if (count > CONFIRM_LIST_MAX) {
-        APPEND(L"... 외 %u개\n", (unsigned)(count - CONFIRM_LIST_MAX));
+        APPEND(ui_text(UI_T_Q_MORE), (unsigned)(count - CONFIRM_LIST_MAX));
+        APPEND(L"\n");
     }
-    APPEND(L"\n영구 삭제하지 않으며 휴지통에서 복원할 수 있습니다. 옮기기 직전에 항목을 다시 "
-           L"확인해 바뀐 항목·보호 대상은 건너뜁니다.\n휴지통이 없는 드라이브(USB 등)이거나 "
-           L"휴지통에 넣을 수 없는 항목은 같은 드라이브의 격리 폴더(.bytesieve-trash)로 옮기며, "
-           L"[격리 폴더] 탭에서 복원하거나 영구 삭제할 수 있습니다.\n");
+    APPEND(L"%ls", ui_text(UI_T_C_CONFIRM_INFO));
     if (guessed > 0) {
-        APPEND(L"\n주의: '추정' 항목 %u개는 같은 폴더에 프로젝트 파일이 없어 빌드 결과물이 "
-               L"아닐 수 있습니다.\n",
-               (unsigned)guessed);
+        APPEND(ui_text(UI_T_C_CONFIRM_GUESSED), (unsigned)guessed);
     }
     if (sum.dirty > 0) {
-        APPEND(L"\n주의: %u개는 커밋하지 않은 변경이 있는(작업 중인) 프로젝트의 항목입니다.\n",
-               (unsigned)sum.dirty);
+        APPEND(ui_text(UI_T_C_CONFIRM_DIRTY), (unsigned)sum.dirty);
     }
     if (sum.unpushed > 0) {
-        APPEND(L"\n참고: %u개는 원격에 올리지 않은 커밋이 있는 프로젝트의 항목입니다(정리 항목만 "
-               L"옮기며 소스와 커밋은 그대로입니다).\n",
-               (unsigned)sum.unpushed);
+        APPEND(ui_text(UI_T_C_CONFIRM_UNPUSHED), (unsigned)sum.unpushed);
     }
-    APPEND(L"\n계속할까요?");
+    APPEND(L"%ls", ui_text(UI_T_Q_PURGE_CONFIRM_ASK));
 #undef APPEND
 
-    answer = MessageBoxW(GetAncestor(p->hwnd, GA_ROOT), text, L"휴지통으로 이동",
+    answer = MessageBoxW(GetAncestor(p->hwnd, GA_ROOT), text, ui_text(UI_T_C_TRASH_TITLE),
                          MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
     free(text);
     return answer == IDYES;
@@ -719,9 +838,7 @@ static void show_failures(CleanupPanel *p, size_t failed)
     if (text == NULL) {
         return;
     }
-    n = swprintf(text, cap, L"%u개 항목을 휴지통으로 옮기지 못했습니다. 이 항목들은 그대로 "
-                            L"남아 있습니다.\n\n",
-                 (unsigned)failed);
+    n = swprintf(text, cap, ui_text(UI_T_C_FAILURES_HEAD), (unsigned)failed);
     used = n > 0 ? (size_t)n : 0;
     for (i = 0; i < p->plan.len && shown < FAILURE_LIST_MAX; i++) {
         const CleanPlanTarget *t = &p->plan.items[i];
@@ -736,9 +853,10 @@ static void show_failures(CleanupPanel *p, size_t failed)
         shown++;
     }
     if (failed > shown) {
-        swprintf(text + used, cap - used, L"... 외 %u개", (unsigned)(failed - shown));
+        swprintf(text + used, cap - used, ui_text(UI_T_Q_MORE), (unsigned)(failed - shown));
     }
-    MessageBoxW(GetAncestor(p->hwnd, GA_ROOT), text, L"휴지통 이동 결과", MB_OK | MB_ICONWARNING);
+    MessageBoxW(GetAncestor(p->hwnd, GA_ROOT), text, ui_text(UI_T_C_FAILURES_TITLE),
+                MB_OK | MB_ICONWARNING);
     free(text);
 }
 
@@ -747,7 +865,6 @@ static void finish_trash(CleanupPanel *p)
     CleanPlanTotals totals;
     size_t i, moved, quarantined, failed, cancelled;
     uint64_t bytes;
-    wchar_t text[320], size[32];
     ULONGLONG elapsed;
 
     if (p->trash == NULL) {
@@ -771,20 +888,14 @@ static void finish_trash(CleanupPanel *p)
     p->quarantined_count += quarantined;
     recount_checked(p);
 
-    format_size(bytes, size, 32);
-    if (quarantined > 0) {
-        swprintf(text, sizeof(text) / sizeof(text[0]),
-                 L"휴지통으로 이동 완료: 성공 %u개(%ls 확보) · 실패 %u개 · 취소 %u개 · %.1f초"
-                 L"  |  휴지통이 없어 격리 폴더로 옮김 %u개([격리 폴더] 페이지에서 복원·영구 삭제)",
-                 (unsigned)moved, size, (unsigned)failed, (unsigned)cancelled,
-                 (double)elapsed / 1000.0, (unsigned)quarantined);
-    } else {
-        swprintf(text, sizeof(text) / sizeof(text[0]),
-                 L"휴지통으로 이동 완료: 성공 %u개(%ls 확보) · 실패 %u개 · 취소 %u개 · %.1f초",
-                 (unsigned)moved, size, (unsigned)failed, (unsigned)cancelled,
-                 (double)elapsed / 1000.0);
-    }
-    SetWindowTextW(p->status, text);
+    /* 결과 문구는 status_line 이 지금 언어로 만든다. */
+    p->t_moved = moved;
+    p->t_failed = failed;
+    p->t_cancelled = cancelled;
+    p->t_quarantined = quarantined;
+    p->t_bytes = bytes;
+    p->t_elapsed_ms = elapsed;
+    show_status(p, C_STATUS_TRASHED);
     /* 일부라도 실패하면 빨간색, 취소하면 멈춘 자리에서 노란색, 모두 옮기면 가득. */
     progress_set(p->progress,
                  failed > 0 ? PROGRESS_FAILED : cancelled > 0 ? PROGRESS_CANCELLED : PROGRESS_DONE, 0,
@@ -840,7 +951,7 @@ static void browse_folder(CleanupPanel *p)
 
     memset(&bi, 0, sizeof(bi));
     bi.hwndOwner = GetAncestor(p->hwnd, GA_ROOT);
-    bi.lpszTitle = L"정리 후보를 찾을 폴더를 선택하세요.";
+    bi.lpszTitle = ui_text(UI_T_C_BROWSE_TITLE);
     bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
     pidl = SHBrowseForFolderW(&bi);
     if (pidl == NULL) {
@@ -900,13 +1011,15 @@ static void on_get_dispinfo(CleanupPanel *p, NMLVDISPINFOW *di)
         break;
     case COL_NOTE: {
         const CleanPlanTarget *t = plan_at(p, p->view[row]);
-        note_text(item, p->cell, 128);
+        note_text(item, p->cell, 256);
         if (t != NULL && (t->flags & (CLEAN_PLAN_DIRTY | CLEAN_PLAN_UNPUSHED | CLEAN_PLAN_DORMANT))) {
             size_t n = wcslen(p->cell);
-            swprintf(p->cell + n, 256 - n, L"%ls%ls%ls%ls", n > 0 ? L" · " : L"",
-                     (t->flags & CLEAN_PLAN_DIRTY) ? L"미커밋 변경 " : L"",
-                     (t->flags & CLEAN_PLAN_UNPUSHED) ? L"미푸시 커밋 " : L"",
-                     (t->flags & CLEAN_PLAN_DORMANT) ? L"휴면" : L"");
+            swprintf(p->cell + n, 512 - n, L"%ls%ls%ls%ls%ls%ls", n > 0 ? L" · " : L"",
+                     (t->flags & CLEAN_PLAN_DIRTY) ? ui_text(UI_T_C_NOTE_DIRTY) : L"",
+                     (t->flags & CLEAN_PLAN_DIRTY) ? L" " : L"",
+                     (t->flags & CLEAN_PLAN_UNPUSHED) ? ui_text(UI_T_C_NOTE_UNPUSHED) : L"",
+                     (t->flags & CLEAN_PLAN_UNPUSHED) ? L" " : L"",
+                     (t->flags & CLEAN_PLAN_DORMANT) ? ui_text(UI_T_C_NOTE_DORMANT) : L"");
             n = wcslen(p->cell);
             while (n > 0 && p->cell[n - 1] == L' ') {
                 p->cell[--n] = L'\0';
@@ -918,22 +1031,22 @@ static void on_get_dispinfo(CleanupPanel *p, NMLVDISPINFOW *di)
     case COL_RECOVERY: {
         const CleanPlanTarget *t = plan_at(p, p->view[row]);
         di->item.pszText = (wchar_t *)(t != NULL && t->recovery >= 0
-                                           ? project_recovery_text((ProjectRecovery)t->recovery)
+                                           ? gui_recovery_text((ProjectRecovery)t->recovery)
                                            : L"");
         break;
     }
     case COL_PROJECT:
-        project_text(p, plan_at(p, p->view[row]), p->cell, 256);
+        project_text(p, plan_at(p, p->view[row]), p->cell, 512);
         di->item.pszText = p->cell;
         break;
     case COL_ACTIVITY:
-        activity_text(p, plan_at(p, p->view[row]), p->cell, 256);
+        activity_text(p, plan_at(p, p->view[row]), p->cell, 512);
         di->item.pszText = p->cell;
         break;
     case COL_CLEAN:
         p->cell[0] = L'\0';
         if (plan_at(p, p->view[row]) != NULL) {
-            clean_text(plan_at(p, p->view[row]), p->cell, 256);
+            clean_text(plan_at(p, p->view[row]), p->cell, 512);
         }
         di->item.pszText = p->cell;
         break;
@@ -945,23 +1058,25 @@ static void on_get_dispinfo(CleanupPanel *p, NMLVDISPINFOW *di)
 static void panel_layout(CleanupPanel *p)
 {
     RECT rc;
-    int h = pscale(p, 24), bw = pscale(p, 84), gap = pscale(p, 6);
-    int w, y, path_w, label_w = pscale(p, 40), combo_w = pscale(p, 260), list_h, sum_x;
+    int h = pscale(p, 24), gap = pscale(p, 6);
+    int w, y, x, path_w, label_w = p->w_label, combo_w = pscale(p, 260), list_h, sum_x;
     int eco_x, eco_w = pscale(p, 150);
-    int trash_w = pscale(p, 140);
 
     GetClientRect(p->hwnd, &rc);
     w = rc.right - rc.left;
 
     y = 0;
-    path_w = w - 3 * (bw + gap);
+    path_w = w - (p->w_browse + p->w_start + p->w_cancel + 3 * gap);
     if (path_w < pscale(p, 80)) {
         path_w = pscale(p, 80);
     }
     MoveWindow(p->path, 0, y, path_w, h, TRUE);
-    MoveWindow(p->browse, path_w + gap, y, bw, h, TRUE);
-    MoveWindow(p->start, path_w + gap + (bw + gap), y, bw, h, TRUE);
-    MoveWindow(p->cancel, path_w + gap + 2 * (bw + gap), y, bw, h, TRUE);
+    x = path_w + gap;
+    MoveWindow(p->browse, x, y, p->w_browse, h, TRUE);
+    x += p->w_browse + gap;
+    MoveWindow(p->start, x, y, p->w_start, h, TRUE);
+    x += p->w_start + gap;
+    MoveWindow(p->cancel, x, y, p->w_cancel, h, TRUE);
 
     y += h + gap;
     MoveWindow(p->progress, 0, y, w, pscale(p, 16), TRUE);
@@ -983,10 +1098,12 @@ static void panel_layout(CleanupPanel *p)
     y += h + gap;
 
     /* 선택 줄: [모두 선택] [선택 해제] [휴지통으로 이동...]  선택 n개 · 실제 확보 */
-    MoveWindow(p->check_all, 0, y, bw, h, TRUE);
-    MoveWindow(p->check_none, bw + gap, y, bw, h, TRUE);
-    MoveWindow(p->trash_btn, 2 * (bw + gap), y, trash_w, h, TRUE);
-    sum_x = 2 * (bw + gap) + trash_w + gap * 2;
+    MoveWindow(p->check_all, 0, y, p->w_check_all, h, TRUE);
+    x = p->w_check_all + gap;
+    MoveWindow(p->check_none, x, y, p->w_check_none, h, TRUE);
+    x += p->w_check_none + gap;
+    MoveWindow(p->trash_btn, x, y, p->w_trash, h, TRUE);
+    sum_x = x + p->w_trash + gap * 2;
     MoveWindow(p->selection, sum_x, y + pscale(p, 4), w - sum_x > 0 ? w - sum_x : 0,
                pscale(p, 20), TRUE);
     y += h + gap;
@@ -1004,67 +1121,120 @@ static HWND panel_child(CleanupPanel *p, const wchar_t *cls, const wchar_t *text
     return h;
 }
 
+/* 목록 열: 머리글 문구, 96 DPI 기준 기본 폭(머리글이 더 길면 넓힌다), 정렬. */
+static const struct {
+    UiText title;
+    int width;
+    int fmt;
+} k_cols[COL_COUNT] = {
+    {UI_T_C_COL_RECLAIM, 90, LVCFMT_RIGHT},  {UI_T_C_COL_SIZE, 90, LVCFMT_RIGHT},
+    {UI_T_C_COL_TYPE, 90, LVCFMT_LEFT},      {UI_T_C_COL_ECO, 90, LVCFMT_LEFT},
+    {UI_T_C_COL_PATH, 440, LVCFMT_LEFT},     {UI_T_COL_FILES, 80, LVCFMT_RIGHT},
+    {UI_T_C_COL_NOTE, 200, LVCFMT_LEFT},     {UI_T_C_COL_RECOVERY, 190, LVCFMT_LEFT},
+    {UI_T_C_COL_PROJECT, 160, LVCFMT_LEFT},  {UI_T_C_COL_ACTIVITY, 170, LVCFMT_LEFT},
+    {UI_T_C_COL_CLEAN, 220, LVCFMT_LEFT},
+};
+
+/* 단추·체크 상자가 아닌 이름표와 단추의 문구(왼쪽부터). */
+static void label_texts(CleanupPanel *p, HWND *h, UiText *t)
+{
+    h[0] = p->browse, t[0] = UI_T_SCAN_BROWSE;
+    h[1] = p->start, t[1] = UI_T_C_DETECT;
+    h[2] = p->cancel, t[2] = UI_T_SCAN_CANCEL;
+    h[3] = p->check_all, t[3] = UI_T_C_CHECK_ALL;
+    h[4] = p->check_none, t[4] = UI_T_C_CHECK_NONE;
+    h[5] = p->trash_btn, t[5] = UI_T_C_TRASH;
+    h[6] = p->filter_label, t[6] = UI_T_C_FILTER_LABEL;
+    h[7] = p->eco_label, t[7] = UI_T_C_ECO_LABEL;
+}
+#define LABEL_COUNT 8
+
+/* 열 폭: 기본 폭과, 머리글 문구가 잘리지 않는 폭 중 큰 값. */
+static int column_width(CleanupPanel *p, int col)
+{
+    int need = theme_text_width(p->list, p->font, ui_text(k_cols[col].title)) + pscale(p, 16);
+    return pscale(p, k_cols[col].width) > need ? pscale(p, k_cols[col].width) : need;
+}
+
+/* 단추·이름표 폭: 예전 고정 폭(단추 84·140, 이름표 40)을 최소로 두고(한국어 화면은 그대로), 지금 글꼴로 잰
+ * 문구가 더 길면 넓힌다. */
+static void measure_controls(CleanupPanel *p)
+{
+    int a, b;
+
+    p->w_browse = theme_button_width(p->hwnd, p->font, ui_text(UI_T_SCAN_BROWSE), p->dpi, pscale(p, 84));
+    p->w_start = theme_button_width(p->hwnd, p->font, ui_text(UI_T_C_DETECT), p->dpi, pscale(p, 84));
+    p->w_cancel = theme_button_width(p->hwnd, p->font, ui_text(UI_T_SCAN_CANCEL), p->dpi, pscale(p, 84));
+    p->w_check_all = theme_button_width(p->hwnd, p->font, ui_text(UI_T_C_CHECK_ALL), p->dpi, pscale(p, 84));
+    p->w_check_none =
+        theme_button_width(p->hwnd, p->font, ui_text(UI_T_C_CHECK_NONE), p->dpi, pscale(p, 84));
+    p->w_trash = theme_button_width(p->hwnd, p->font, ui_text(UI_T_C_TRASH), p->dpi, pscale(p, 140));
+    a = theme_text_width(p->hwnd, p->font, ui_text(UI_T_C_FILTER_LABEL)) + pscale(p, 6);
+    b = theme_text_width(p->hwnd, p->font, ui_text(UI_T_C_ECO_LABEL)) + pscale(p, 6);
+    p->w_label = a > b ? a : b;
+    if (p->w_label < pscale(p, 40)) {
+        p->w_label = pscale(p, 40);
+    }
+}
+
+/* 필터 콤보 상자에 지금 언어의 이름을 넣는다(고른 항목은 그대로). */
+static void fill_filters(CleanupPanel *p)
+{
+    LRESULT sel = SendMessageW(p->filter, CB_GETCURSEL, 0, 0), eco = SendMessageW(p->eco, CB_GETCURSEL, 0, 0);
+    size_t i;
+
+    SendMessageW(p->filter, CB_RESETCONTENT, 0, 0);
+    for (i = 0; i < FILTER_COUNT; i++) {
+        SendMessageW(p->filter, CB_ADDSTRING, 0, (LPARAM)filter_label(&g_filters[i]));
+    }
+    SendMessageW(p->filter, CB_SETCURSEL, sel >= 0 ? (WPARAM)sel : 0, 0);
+    SendMessageW(p->eco, CB_RESETCONTENT, 0, 0);
+    for (i = 0; i < ECO_FILTER_COUNT; i++) {
+        SendMessageW(p->eco, CB_ADDSTRING, 0, (LPARAM)filter_label(&g_eco_filters[i]));
+    }
+    SendMessageW(p->eco, CB_SETCURSEL, eco >= 0 ? (WPARAM)eco : 0, 0);
+}
+
 static void panel_create_controls(CleanupPanel *p)
 {
-    static const struct {
-        const wchar_t *title;
-        int width;
-        int fmt;
-    } cols[COL_COUNT] = {
-        {L"실제 확보", 90, LVCFMT_RIGHT},
-        {L"파일 크기", 90, LVCFMT_RIGHT},
-        {L"유형", 90, LVCFMT_LEFT},
-        {L"개발 환경", 90, LVCFMT_LEFT},
-        {L"경로", 440, LVCFMT_LEFT},
-        {L"파일 수", 80, LVCFMT_RIGHT},
-        {L"비고", 200, LVCFMT_LEFT},
-        {L"복구", 190, LVCFMT_LEFT},
-        {L"프로젝트", 160, LVCFMT_LEFT},
-        {L"마지막 활동", 170, LVCFMT_LEFT},
-        {L"정리", 220, LVCFMT_LEFT},
-    };
     size_t i;
 
     p->path = panel_child(p, L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE,
                           IDC_C_PATH);
-    p->browse = panel_child(p, L"BUTTON", L"찾아보기...", BS_PUSHBUTTON | WS_TABSTOP, 0,
+    p->browse = panel_child(p, L"BUTTON", ui_text(UI_T_SCAN_BROWSE), BS_PUSHBUTTON | WS_TABSTOP, 0,
                             IDC_C_BROWSE);
-    p->start = panel_child(p, L"BUTTON", L"탐지", BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_C_START);
-    p->cancel = panel_child(p, L"BUTTON", L"취소", BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_C_CANCEL);
+    p->start = panel_child(p, L"BUTTON", ui_text(UI_T_C_DETECT), BS_PUSHBUTTON | WS_TABSTOP, 0,
+                           IDC_C_START);
+    p->cancel = panel_child(p, L"BUTTON", ui_text(UI_T_SCAN_CANCEL), BS_PUSHBUTTON | WS_TABSTOP, 0,
+                            IDC_C_CANCEL);
     p->progress = panel_child(p, PROGRESS_CLASSW, L"", PBS_SMOOTH, 0, IDC_C_PROGRESS);
-    p->status = panel_child(p, L"STATIC", L"폴더를 선택하고 [탐지]를 누르세요.",
-                            SS_LEFTNOWORDWRAP | SS_PATHELLIPSIS, 0, IDC_C_STATUS);
+    p->status = panel_child(p, L"STATIC", ui_text(UI_T_C_READY), SS_LEFTNOWORDWRAP | SS_PATHELLIPSIS, 0,
+                            IDC_C_STATUS);
     p->warn = panel_child(p, L"STATIC", L"", SS_LEFTNOWORDWRAP | SS_ENDELLIPSIS, 0, IDC_C_WARN);
-    p->filter_label = panel_child(p, L"STATIC", L"유형:", SS_LEFT, 0, IDC_C_FILTER_LABEL);
+    p->filter_label = panel_child(p, L"STATIC", ui_text(UI_T_C_FILTER_LABEL), SS_LEFT, 0,
+                                  IDC_C_FILTER_LABEL);
     p->filter = panel_child(p, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 0,
                             IDC_C_FILTER);
-    p->eco_label = panel_child(p, L"STATIC", L"환경:", SS_LEFT, 0, IDC_C_ECO_LABEL);
+    p->eco_label = panel_child(p, L"STATIC", ui_text(UI_T_C_ECO_LABEL), SS_LEFT, 0, IDC_C_ECO_LABEL);
     p->eco = panel_child(p, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 0,
                          IDC_C_ECO);
     p->summary = panel_child(p, L"STATIC", L"", SS_LEFTNOWORDWRAP | SS_ENDELLIPSIS, 0,
                              IDC_C_SUMMARY);
-    p->check_all = panel_child(p, L"BUTTON", L"모두 선택", BS_PUSHBUTTON | WS_TABSTOP, 0,
+    p->check_all = panel_child(p, L"BUTTON", ui_text(UI_T_C_CHECK_ALL), BS_PUSHBUTTON | WS_TABSTOP, 0,
                                IDC_C_CHECK_ALL);
-    p->check_none = panel_child(p, L"BUTTON", L"선택 해제", BS_PUSHBUTTON | WS_TABSTOP, 0,
-                                IDC_C_CHECK_NONE);
-    p->trash_btn = panel_child(p, L"BUTTON", L"휴지통으로 이동(&D)...", BS_PUSHBUTTON | WS_TABSTOP,
-                           0, IDC_C_TRASH);
+    p->check_none = panel_child(p, L"BUTTON", ui_text(UI_T_C_CHECK_NONE), BS_PUSHBUTTON | WS_TABSTOP,
+                                0, IDC_C_CHECK_NONE);
+    p->trash_btn = panel_child(p, L"BUTTON", ui_text(UI_T_C_TRASH), BS_PUSHBUTTON | WS_TABSTOP, 0,
+                               IDC_C_TRASH);
     p->selection = panel_child(p, L"STATIC", L"", SS_LEFTNOWORDWRAP | SS_ENDELLIPSIS, 0,
                                IDC_C_SELECTION);
     p->list = panel_child(p, WC_LISTVIEWW, L"",
                           LVS_REPORT | LVS_OWNERDATA | LVS_SHOWSELALWAYS | WS_TABSTOP,
                           WS_EX_CLIENTEDGE, IDC_C_LIST);
 
-    SendMessageW(p->path, EM_SETCUEBANNER, TRUE, (LPARAM)L"정리 후보를 찾을 폴더 경로");
+    SendMessageW(p->path, EM_SETCUEBANNER, TRUE, (LPARAM)ui_text(UI_T_C_PATH_CUE));
     SendMessageW(p->progress, PBM_SETRANGE32, 0, PROGRESS_RANGE);
-    for (i = 0; i < FILTER_COUNT; i++) {
-        SendMessageW(p->filter, CB_ADDSTRING, 0, (LPARAM)g_filters[i].label);
-    }
-    SendMessageW(p->filter, CB_SETCURSEL, 0, 0);
-    for (i = 0; i < ECO_FILTER_COUNT; i++) {
-        SendMessageW(p->eco, CB_ADDSTRING, 0, (LPARAM)g_eco_filters[i].label);
-    }
-    SendMessageW(p->eco, CB_SETCURSEL, 0, 0);
+    fill_filters(p);
     /* 가상 목록이라 체크 상태는 패널이 갖고 LVN_GETDISPINFO 로 알려 준다. */
     ListView_SetExtendedListViewStyle(p->list, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER |
                                                    LVS_EX_CHECKBOXES);
@@ -1073,11 +1243,12 @@ static void panel_create_controls(CleanupPanel *p)
         LVCOLUMNW col;
         memset(&col, 0, sizeof(col));
         col.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_FMT;
-        col.pszText = (wchar_t *)cols[i].title;
-        col.cx = pscale(p, cols[i].width);
-        col.fmt = cols[i].fmt;
+        col.pszText = (wchar_t *)ui_text(k_cols[i].title);
+        col.cx = column_width(p, (int)i);
+        col.fmt = k_cols[i].fmt;
         SendMessageW(p->list, LVM_INSERTCOLUMNW, (WPARAM)i, (LPARAM)&col);
     }
+    measure_controls(p);
     set_busy(p, 0);
     set_warning(p);
 }
@@ -1097,6 +1268,8 @@ static LRESULT CALLBACK panel_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         p->hwnd = hwnd;
         p->font = params->font;
         p->dpi = params->dpi;
+        p->status_kind = C_STATUS_TEXT;
+        p->status_text = UI_T_C_READY;
         cleanup_result_init(&p->result);
         cleanup_guard_init(&p->guard);
         cleanup_guard_add_system(&p->guard);
@@ -1273,7 +1446,7 @@ int cleanup_panel_start(HWND panel, const wchar_t *root)
     GetWindowTextW(p->path, target, len + 1);
     if (target[0] == L'\0') {
         free(target);
-        SetWindowTextW(p->status, L"탐지할 폴더를 입력하거나 [찾아보기]로 선택하세요.");
+        show_text(p, UI_T_C_NEED_PATH);
         return 0;
     }
 
@@ -1299,11 +1472,11 @@ int cleanup_panel_start(HWND panel, const wchar_t *root)
     }
     free(target);
     if (p->job == NULL) {
-        SetWindowTextW(p->status, L"탐지를 시작하지 못했습니다(메모리 또는 스레드 생성 실패).");
+        show_text(p, UI_T_C_START_FAILED);
         return 0;
     }
     set_busy(p, 1);
-    SetWindowTextW(p->status, L"탐지 중...");
+    show_text(p, UI_T_C_DETECTING);
     return 1;
 }
 
@@ -1314,11 +1487,11 @@ void cleanup_panel_cancel(HWND panel)
     if (p != NULL && p->job != NULL) {
         cleanup_job_cancel(p->job);
         EnableWindow(p->cancel, FALSE);
-        SetWindowTextW(p->status, L"취소하는 중...");
+        show_text(p, UI_T_SCAN_CANCELLING);
     } else if (p != NULL && p->trash != NULL) {
         clean_plan_run_cancel(p->trash);
         EnableWindow(p->cancel, FALSE);
-        SetWindowTextW(p->status, L"취소하는 중... 옮기고 있던 항목은 끝까지 옮깁니다.");
+        show_text(p, UI_T_C_CANCELLING_TRASH);
     }
 }
 
@@ -1361,7 +1534,7 @@ int cleanup_panel_trash(HWND panel, int confirm)
         return 0;
     }
     if (p->checked_count == 0) {
-        SetWindowTextW(p->status, L"휴지통으로 옮길 항목을 목록에서 체크하세요.");
+        show_text(p, UI_T_C_NOTHING_CHECKED);
         return 0;
     }
     /* 확인 창에는 큰 항목부터 보인다(목록과 같은 순서). 다른 필터에서 체크한 항목도 포함한다.
@@ -1388,15 +1561,14 @@ int cleanup_panel_trash(HWND panel, int confirm)
     }
     if (confirm && !confirm_trash(p, index, n)) {
         free(index);
-        SetWindowTextW(p->status, L"휴지통 이동을 취소했습니다. 아무것도 바뀌지 않았습니다.");
+        show_text(p, UI_T_C_TRASH_CANCELLED);
         return 0;
     }
     free(index);
     memset(&ops, 0, sizeof(ops)); /* 프로젝트 정리에는 영구 삭제 대상이 없다 */
     p->trash = clean_plan_run_start(&p->plan, &ops, on_trash_notify, panel);
     if (p->trash == NULL) {
-        SetWindowTextW(p->status,
-                       L"휴지통 이동을 시작하지 못했습니다(메모리 또는 스레드 생성 실패).");
+        show_text(p, UI_T_C_TRASH_START_FAILED);
         return 0;
     }
     p->trash_count = n;
@@ -1408,6 +1580,66 @@ int cleanup_panel_trash(HWND panel, int confirm)
     return 1;
 }
 
+void cleanup_panel_apply_language(HWND panel, HFONT font)
+{
+    CleanupPanel *p = panel_of(panel);
+    HWND child, h[LABEL_COUNT];
+    UiText t[LABEL_COUNT];
+    int i;
+
+    if (p == NULL) {
+        return;
+    }
+    if (font != NULL) {
+        p->font = font;
+        for (child = GetWindow(p->hwnd, GW_CHILD); child != NULL; child = GetWindow(child, GW_HWNDNEXT)) {
+            SendMessageW(child, WM_SETFONT, (WPARAM)font, FALSE);
+        }
+    }
+    label_texts(p, h, t);
+    for (i = 0; i < LABEL_COUNT; i++) {
+        SetWindowTextW(h[i], ui_text(t[i]));
+    }
+    SendMessageW(p->path, EM_SETCUEBANNER, TRUE, (LPARAM)ui_text(UI_T_C_PATH_CUE));
+    fill_filters(p);
+    for (i = 0; i < COL_COUNT; i++) {
+        LVCOLUMNW col;
+        int need = column_width(p, i);
+        memset(&col, 0, sizeof(col));
+        col.mask = LVCF_TEXT;
+        col.pszText = (wchar_t *)ui_text(k_cols[i].title);
+        SendMessageW(p->list, LVM_SETCOLUMNW, (WPARAM)i, (LPARAM)&col);
+        /* 새 머리글이 잘리지 않게 넓힌다(사용자가 넓힌 폭은 줄이지 않음). */
+        if (ListView_GetColumnWidth(p->list, i) < need) {
+            ListView_SetColumnWidth(p->list, i, need);
+        }
+    }
+    measure_controls(p);
+    set_warning(p);
+    update_summary(p);
+    update_selection(p);
+    render_status(p);
+    panel_layout(p);
+    /* 목록 칸(유형·비고·복구·마지막 활동·정리)은 그릴 때 지금 언어로 만든다(가상 목록). */
+    InvalidateRect(p->list, NULL, TRUE);
+    InvalidateRect(p->hwnd, NULL, TRUE);
+}
+
+int cleanup_panel_min_width(HWND panel)
+{
+    CleanupPanel *p = panel_of(panel);
+    int gap, a, b;
+
+    if (p == NULL) {
+        return 0;
+    }
+    gap = pscale(p, 6);
+    /* 첫 줄: 경로 칸 최소(80) + 단추 셋. 선택 줄: 단추 셋(선택 문구는 남는 폭만 쓴다). */
+    a = pscale(p, 80) + p->w_browse + p->w_start + p->w_cancel + 3 * gap;
+    b = p->w_check_all + p->w_check_none + p->w_trash + 2 * gap;
+    return a > b ? a : b;
+}
+
 #define PANEL_CHECK(cond)                                                         \
     do {                                                                          \
         if (!(cond)) {                                                            \
@@ -1416,6 +1648,104 @@ int cleanup_panel_trash(HWND panel, int confirm)
             failures++;                                                           \
         }                                                                         \
     } while (0)
+
+/* 한글(가-힣)이 들어 있는지. */
+static int has_hangul(const wchar_t *s)
+{
+    for (; *s != L'\0'; s++) {
+        if (*s >= 0xAC00 && *s <= 0xD7A3) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int cleanup_panel_verify_lang(HWND panel)
+{
+    CleanupPanel *p = panel_of(panel);
+    wchar_t buf[CLEANUP_JOB_DIR_LEN + 512], want[CLEANUP_JOB_DIR_LEN + 512];
+    HWND h[LABEL_COUNT];
+    UiText t[LABEL_COUNT];
+    RECT r;
+    int failures = 0, i, rows, other = ui_lang_current() != UI_LANG_KO;
+    size_t f;
+
+    PANEL_CHECK(p != NULL);
+    if (p == NULL) {
+        return failures;
+    }
+    failures += gui_status_text_verify();
+    /* 단추·이름표: 지금 언어이고 잘리지 않는다 */
+    label_texts(p, h, t);
+    for (i = 0; i < LABEL_COUNT; i++) {
+        GetWindowTextW(h[i], buf, (int)(sizeof(buf) / sizeof(buf[0])));
+        PANEL_CHECK(wcscmp(buf, ui_text(t[i])) == 0);
+        GetWindowRect(h[i], &r);
+        PANEL_CHECK(r.right - r.left >= (i < 6 ? theme_button_width(p->hwnd, p->font, buf, p->dpi, 0)
+                                               : theme_text_width(p->hwnd, p->font, buf)));
+    }
+    /* 필터·열 머리글: 지금 언어 */
+    for (f = 0; f < FILTER_COUNT; f++) {
+        SendMessageW(p->filter, CB_GETLBTEXT, (WPARAM)f, (LPARAM)buf);
+        PANEL_CHECK(wcscmp(buf, filter_label(&g_filters[f])) == 0);
+    }
+    for (f = 0; f < ECO_FILTER_COUNT; f++) {
+        SendMessageW(p->eco, CB_GETLBTEXT, (WPARAM)f, (LPARAM)buf);
+        PANEL_CHECK(wcscmp(buf, filter_label(&g_eco_filters[f])) == 0);
+    }
+    for (i = 0; i < COL_COUNT; i++) {
+        LVCOLUMNW col;
+        memset(&col, 0, sizeof(col));
+        col.mask = LVCF_TEXT;
+        col.pszText = buf;
+        col.cchTextMax = (int)(sizeof(buf) / sizeof(buf[0]));
+        buf[0] = L'\0';
+        SendMessageW(p->list, LVM_GETCOLUMNW, (WPARAM)i, (LPARAM)&col);
+        PANEL_CHECK(wcscmp(buf, ui_text(k_cols[i].title)) == 0);
+        PANEL_CHECK(ListView_GetColumnWidth(p->list, i) > theme_text_width(p->list, p->font, buf));
+    }
+    /* 안내·요약·선택·상태 줄: 지금 언어로 다시 쓰였다(작업 중에는 부르지 않음) */
+    PANEL_CHECK(p->job == NULL && p->trash == NULL);
+    GetWindowTextW(p->warn, buf, (int)(sizeof(buf) / sizeof(buf[0])));
+    PANEL_CHECK(wcscmp(buf, ui_text(p->has_result && p->result.root_protected ? UI_T_C_WARN_PROTECTED
+                                                                              : UI_T_C_WARN_INFO)) == 0);
+    status_line(p, want, sizeof(want) / sizeof(want[0]));
+    GetWindowTextW(p->status, buf, (int)(sizeof(buf) / sizeof(buf[0])));
+    PANEL_CHECK(wcscmp(buf, want) == 0);
+    PANEL_CHECK(!other || !has_hangul(buf));
+    if (p->has_plan) {
+        selection_text(p, want, sizeof(want) / sizeof(want[0]));
+        GetWindowTextW(p->selection, buf, (int)(sizeof(buf) / sizeof(buf[0])));
+        PANEL_CHECK(wcscmp(buf, want) == 0 && (!other || !has_hangul(buf)));
+    }
+    if (p->has_result) {
+        GetWindowTextW(p->summary, buf, (int)(sizeof(buf) / sizeof(buf[0])));
+        PANEL_CHECK(!other || !has_hangul(buf));
+    }
+    /* 목록 칸: 번역 문구 칸(유형·환경·비고·복구·마지막 활동·정리)은 지금 언어(경로·프로젝트 이름·Windows 오류
+     * 설명은 번역 대상이 아님) */
+    rows = ListView_GetItemCount(p->list);
+    for (i = 0; i < rows; i++) {
+        static const int cols[] = {COL_TYPE, COL_ECO, COL_NOTE, COL_RECOVERY, COL_ACTIVITY};
+        size_t k;
+        for (k = 0; k < sizeof(cols) / sizeof(cols[0]); k++) {
+            ListView_GetItemText(p->list, i, cols[k], buf, (int)(sizeof(buf) / sizeof(buf[0])));
+            PANEL_CHECK(!other || !has_hangul(buf));
+        }
+        if (p->has_plan && (size_t)i < p->view_len) {
+            const CleanPlanTarget *pt = plan_at(p, p->view[i]);
+            const CleanupTrashOutcome *o = last_outcome(pt);
+            ListView_GetItemText(p->list, i, COL_CLEAN, buf, (int)(sizeof(buf) / sizeof(buf[0])));
+            clean_text(pt, want, sizeof(want) / sizeof(want[0]));
+            PANEL_CHECK(wcscmp(buf, want) == 0);
+            /* 실패 칸에는 Windows 오류 설명이 들어가므로 한글 검사에서 뺀다. */
+            if (other && o->status != CLEANUP_TRASH_FAILED && o->status != CLEANUP_TRASH_QUARANTINE_FAILED) {
+                PANEL_CHECK(!has_hangul(buf));
+            }
+        }
+    }
+    return failures;
+}
 
 /* 목록 칸의 글자를 읽는다(가상 목록이라 LVN_GETDISPINFO 를 거친다). */
 static void cell_text(const CleanupPanel *p, int row, int col, wchar_t *buf, int len)
@@ -1579,7 +1909,7 @@ int cleanup_panel_verify_trash(HWND panel, size_t expect_moved)
     CleanupPanel *p = panel_of(panel);
     int failures = 0;
     size_t i, allowed = 0, moved = 0;
-    wchar_t buf[256];
+    wchar_t buf[512], want[512];
 
     PANEL_CHECK(p != NULL && p->has_plan);
     if (p == NULL || !p->has_plan) {
@@ -1593,7 +1923,12 @@ int cleanup_panel_verify_trash(HWND panel, size_t expect_moved)
     PANEL_CHECK(p->checked_count == 0 && p->checked_bytes == 0);
     PANEL_CHECK(!IsWindowEnabled(p->trash_btn));
     GetWindowTextW(p->status, buf, 256);
-    PANEL_CHECK(wcsncmp(buf, L"휴지통으로 이동 완료: 성공 ", wcslen(L"휴지통으로 이동 완료: 성공 ")) == 0);
+    PANEL_CHECK(p->status_kind == C_STATUS_TRASHED);
+    status_line(p, want, sizeof(want) / sizeof(want[0]));
+    PANEL_CHECK(wcscmp(buf, want) == 0);
+    if (ui_lang_current() == UI_LANG_KO) {
+        PANEL_CHECK(wcsncmp(buf, L"휴지통으로 이동 완료: 성공 ", wcslen(L"휴지통으로 이동 완료: 성공 ")) == 0);
+    }
 
     /* 계획은 탐지 결과와 같은 순서이고, 보호 대상은 선택되지 않았다(옮긴 목록에 없다). */
     PANEL_CHECK(p->plan.len == p->result.len);
@@ -1638,16 +1973,21 @@ int cleanup_panel_verify_trash(HWND panel, size_t expect_moved)
 
     /* 정리 열: 옮긴 항목은 "휴지통으로 이동됨"·"격리 폴더로 이동됨", 보호 대상은 "보호: ..." */
     for (i = 0; i < p->view_len; i++) {
-        CleanupTrashStatus st = last_outcome(&p->plan.items[p->view[i]])->status;
-        ListView_GetItemText(p->list, (int)i, COL_CLEAN, buf, 256);
+        const CleanPlanTarget *t = &p->plan.items[p->view[i]];
+        CleanupTrashStatus st = last_outcome(t)->status;
+        ListView_GetItemText(p->list, (int)i, COL_CLEAN, buf, 512);
         if (st == CLEANUP_TRASH_MOVED || st == CLEANUP_TRASH_QUARANTINED) {
-            PANEL_CHECK(wcscmp(buf, cleanup_trash_status_text(st)) == 0);
+            PANEL_CHECK(wcscmp(buf, gui_trash_status_text(st)) == 0);
+            /* 한국어 화면은 core 문구와 같다. */
+            PANEL_CHECK(ui_lang_current() != UI_LANG_KO || wcscmp(buf, cleanup_trash_status_text(st)) == 0);
         } else {
-            PANEL_CHECK(wcsncmp(buf, L"보호: ", wcslen(L"보호: ")) == 0);
+            swprintf(want, 512, ui_text(UI_T_C_CLEAN_PROTECTED), gui_trash_status_text(t->deny));
+            PANEL_CHECK(wcscmp(buf, want) == 0);
         }
     }
-    GetWindowTextW(p->selection, buf, 256);
-    PANEL_CHECK(wcsstr(buf, L"휴지통으로 옮김") != NULL);
+    GetWindowTextW(p->selection, buf, 512);
+    selection_text(p, want, 512);
+    PANEL_CHECK(p->moved_count > 0 && wcscmp(buf, want) == 0);
     return failures;
 }
 

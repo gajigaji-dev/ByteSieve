@@ -212,11 +212,12 @@ bytesieve_configure(bytesieve_settings)
 # gui_nav: 왼쪽 사이드바(목적별 메뉴, 직접 그림). gui_scan: 폴더 스캔 페이지 패널.
 # gui_theme: Windows 11 창 외곽(DWM), 밝게·어둡게 색 토큰과 다크 모드 적용(uxtheme), 언어별 UI 글꼴,
 # 글자 폭에 맞춘 컨트롤 크기. gui_settings: 설정 페이지(테마·표시 언어·스캔 기록).
+# gui_status_text: core 상태 번호(휴지통 이동 결과·복구 가능성 등)를 지금 언어의 화면 문구로 연결.
 # 시스템 정리·개발 캐시 페이지(gui_cleaner 패널 둘, 분석 범위만 다름)·프로젝트 정리(gui_cleanup)·부스터(gui_booster).
 add_executable(bytesieve-gui WIN32 src/gui_main.c src/gui_nav.c src/gui_scan.c src/gui_theme.c
                src/gui_drives.c src/gui_cleanup.c src/gui_quarantine.c src/gui_monitor.c
                src/gui_treemap.c src/gui_cleaner.c src/gui_booster.c src/gui_settings.c
-               src/gui_progress.c)
+               src/gui_progress.c src/gui_status_text.c)
 target_link_libraries(bytesieve-gui PRIVATE bytesieve_job bytesieve_history bytesieve_export
                       bytesieve_treemap bytesieve_ui_lang bytesieve_nav bytesieve_settings
                       bytesieve_cleaner bytesieve_booster

@@ -76,4 +76,22 @@ size_t cleanup_panel_quarantined(HWND panel);
  */
 size_t cleanup_panel_restore_quarantined(HWND panel);
 
+/*
+ * 표시 언어를 바꾼 뒤(ui_lang_set) 부른다. 단추·이름표·입력 칸 안내·필터·열 머리글·안내·요약·선택·상태 줄을
+ * 지금 언어로 다시 쓰고, 글꼴을 font 로 바꿔(NULL 이면 그대로) 문구 폭에 맞게 다시 배치한다. 목록 칸은 그릴 때
+ * 지금 언어로 만들므로 다시 그리기만 한다. 탐지 결과·선택·고른 필터는 그대로다. 탐지·이동 중에 불러도 된다
+ * (진행 문구는 다음 알림부터 새 언어). 글꼴은 호출자가 소유한다.
+ */
+void cleanup_panel_apply_language(HWND panel, HFONT font);
+
+/* 단추 줄이 잘리지 않는 최소 폭(최소 창 크기에 쓴다). */
+int cleanup_panel_min_width(HWND panel);
+
+/*
+ * 자체 검사: 단추·이름표·필터·열 머리글이 지금 언어이고 잘리지 않는지, 안내·요약·선택·상태 줄과 목록의 번역
+ * 칸이 지금 언어로 쓰였는지(한국어가 아니면 한글이 없는지, 경로·프로젝트 이름·Windows 오류 설명은 제외),
+ * core 상태 문구 연결(gui_status_text_verify)이 맞는지 확인한다. 탐지·이동 중에는 부르지 않는다. 실패 수.
+ */
+int cleanup_panel_verify_lang(HWND panel);
+
 #endif /* BYTESIEVE_GUI_CLEANUP_H */

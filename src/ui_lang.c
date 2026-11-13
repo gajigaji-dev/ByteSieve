@@ -655,6 +655,272 @@ static const wchar_t *const k_text[UI_T_COUNT][UI_LANG_COUNT] = {
                                   L"一部の項目を完全に削除できませんでした。削除できなかったファイルは"
                                   L"隔離フォルダーに残っています。",
                                   L"部分项目无法永久删除。未删除的文件仍保留在隔离文件夹中。"},
+
+    /* ---- core 상태: 휴지통 이동 결과 ---- */
+    [UI_T_TRASH_MOVED] = {L"휴지통으로 이동됨", L"Moved to the Recycle Bin", L"ごみ箱に移動済み",
+                          L"已移到回收站"},
+    [UI_T_TRASH_QUARANTINED] = {L"격리 폴더로 이동됨", L"Moved to the quarantine folder",
+                                L"隔離フォルダーに移動済み", L"已移到隔离文件夹"},
+    [UI_T_TRASH_DENY_PATH] = {L"휴지통이 지원하지 않는 경로(네트워크·너무 긴 경로)",
+                              L"Path not supported by the Recycle Bin (network or too long)",
+                              L"ごみ箱が対応していないパス（ネットワーク・長すぎるパス）",
+                              L"回收站不支持的路径（网络或路径过长）"},
+    [UI_T_TRASH_DENY_OUTSIDE] = {L"탐지 경로 밖", L"Outside the scanned folder", L"検出したフォルダーの外",
+                                 L"在检测路径之外"},
+    [UI_T_TRASH_DENY_PROTECTED] = {L"시스템·프로그램 보호 경로", L"Protected system or program location",
+                                   L"システム・プログラムの保護された場所", L"系统或程序的受保护路径"},
+    [UI_T_TRASH_DENY_CRITICAL] = {L"중요 폴더이거나 그 상위", L"Important folder or one of its parents",
+                                  L"重要なフォルダーまたはその上位", L"重要文件夹或其上级"},
+    [UI_T_TRASH_DENY_INCOMPLETE] = {L"하위를 다 읽지 못한 항목", L"Contents couldn't be fully read",
+                                    L"下位をすべて読み取れなかった項目", L"未能完整读取子项的项目"},
+    [UI_T_TRASH_DENY_DRIVE] = {L"휴지통·격리 폴더를 쓸 수 없는 드라이브(네트워크·CD 등)",
+                               L"Drive without a Recycle Bin or quarantine folder (network, CD, etc.)",
+                               L"ごみ箱・隔離フォルダーを使えないドライブ（ネットワーク・CD など）",
+                               L"无法使用回收站或隔离文件夹的驱动器（网络、CD 等）"},
+    [UI_T_TRASH_MISSING] = {L"이미 없음", L"Already gone", L"すでにありません", L"已不存在"},
+    [UI_T_TRASH_CHANGED] = {L"탐지 후 바뀜(링크·종류·실제 위치)",
+                            L"Changed after detection (link, type, or actual location)",
+                            L"検出後に変更（リンク・種類・実際の場所）", L"检测后已更改（链接、类型或实际位置）"},
+    [UI_T_TRASH_NO_RECYCLE] = {L"휴지통에 넣을 수 없음(영구 삭제 방지)",
+                               L"Can't go to the Recycle Bin (prevents permanent deletion)",
+                               L"ごみ箱に入れられません（完全な削除を防止）", L"无法放入回收站（防止永久删除）"},
+    [UI_T_TRASH_FAILED] = {L"이동 실패", L"Move failed", L"移動に失敗", L"移动失败"},
+    [UI_T_TRASH_QUARANTINE_FAILED] = {L"격리 폴더로 옮기지 못함", L"Couldn't move to the quarantine folder",
+                                      L"隔離フォルダーに移動できません", L"无法移到隔离文件夹"},
+    [UI_T_TRASH_CANCELLED] = {L"취소됨", L"Cancelled", L"キャンセル済み", L"已取消"},
+    [UI_T_RECOVER_NONE] = {L"다시 생기지 않음", L"Won't be recreated", L"再作成されません", L"不会重新生成"},
+    [UI_T_RECOVER_REBUILD] = {L"빌드하면 다시 생김", L"Recreated by building", L"ビルドすると再作成",
+                              L"构建后会重新生成"},
+    [UI_T_RECOVER_LOCKED] = {L"lockfile로 같은 버전 재설치", L"Same versions reinstalled from the lockfile",
+                             L"lockfile で同じバージョンを再インストール", L"可按 lockfile 重新安装相同版本"},
+    [UI_T_RECOVER_UNLOCKED] = {L"재설치 가능(버전이 바뀔 수 있음)", L"Can be reinstalled (versions may change)",
+                               L"再インストール可能（バージョンが変わる場合あり）",
+                               L"可重新安装（版本可能会变化）"},
+
+    /* ---- 프로젝트 정리: 단추·입력 칸·필터·열 머리글 ---- */
+    [UI_T_C_DETECT] = {L"탐지", L"Detect", L"検出", L"检测"},
+    [UI_T_C_PATH_CUE] = {L"정리 후보를 찾을 폴더 경로", L"Folder path to search for cleanup candidates",
+                         L"整理候補を探すフォルダーのパス", L"要查找清理候选项的文件夹路径"},
+    [UI_T_C_READY] = {L"폴더를 선택하고 [탐지]를 누르세요.", L"Choose a folder and select [Detect].",
+                      L"フォルダーを選んで [検出] を押してください。", L"请选择文件夹，然后点击 [检测]。"},
+    [UI_T_C_FILTER_LABEL] = {L"유형:", L"Type:", L"種類:", L"类型："},
+    [UI_T_C_ECO_LABEL] = {L"환경:", L"Stack:", L"環境:", L"环境："},
+    [UI_T_C_CHECK_ALL] = {L"모두 선택", L"Select all", L"すべて選択", L"全选"},
+    [UI_T_C_CHECK_NONE] = {L"선택 해제", L"Clear selection", L"選択を解除", L"取消选择"},
+    [UI_T_C_TRASH] = {L"휴지통으로 이동(&D)...", L"&Move to Recycle Bin...", L"ごみ箱に移動(&D)...",
+                      L"移到回收站(&D)..."},
+    [UI_T_C_ALL] = {L"전체", L"All", L"すべて", L"全部"},
+    [UI_T_C_FILTER_BUILD] = {L"빌드 결과물 (dist·build·target·bin·obj 등)",
+                             L"Build output (dist, build, target, bin, obj, etc.)",
+                             L"ビルド成果物 (dist・build・target・bin・obj など)",
+                             L"构建产物 (dist、build、target、bin、obj 等)"},
+    [UI_T_C_FILTER_CACHE] = {L"개발 캐시 (.cache·.next·__pycache__ 등)",
+                             L"Dev caches (.cache, .next, __pycache__, etc.)",
+                             L"開発キャッシュ (.cache・.next・__pycache__ など)",
+                             L"开发缓存 (.cache、.next、__pycache__ 等)"},
+    [UI_T_C_FILTER_TEMP] = {L"임시 파일 (.tmp·.temp·*.tmp)", L"Temporary files (.tmp, .temp, *.tmp)",
+                            L"一時ファイル (.tmp・.temp・*.tmp)", L"临时文件 (.tmp、.temp、*.tmp)"},
+    [UI_T_C_FILTER_LOG] = {L"로그 (*.log)", L"Logs (*.log)", L"ログ (*.log)", L"日志 (*.log)"},
+    [UI_T_C_CAT_BUILD] = {L"빌드 결과물", L"Build output", L"ビルド成果物", L"构建产物"},
+    [UI_T_C_CAT_CACHE] = {L"개발 캐시", L"Dev cache", L"開発キャッシュ", L"开发缓存"},
+    [UI_T_C_CAT_TEMP] = {L"임시 파일", L"Temporary files", L"一時ファイル", L"临时文件"},
+    [UI_T_C_CAT_LOG] = {L"로그", L"Logs", L"ログ", L"日志"},
+    [UI_T_C_ECO_GENERIC] = {L"일반", L"General", L"一般", L"通用"},
+    [UI_T_C_COL_RECLAIM] = {L"실제 확보", L"Reclaimable", L"実際の解放量", L"实际释放"},
+    [UI_T_C_COL_SIZE] = {L"파일 크기", L"File size", L"ファイルサイズ", L"文件大小"},
+    [UI_T_C_COL_TYPE] = {L"유형", L"Type", L"種類", L"类型"},
+    [UI_T_C_COL_ECO] = {L"개발 환경", L"Stack", L"開発環境", L"开发环境"},
+    [UI_T_C_COL_PATH] = {L"경로", L"Path", L"パス", L"路径"},
+    [UI_T_C_COL_NOTE] = {L"비고", L"Notes", L"備考", L"备注"},
+    [UI_T_C_COL_RECOVERY] = {L"복구", L"Recovery", L"復旧", L"恢复"},
+    [UI_T_C_COL_PROJECT] = {L"프로젝트", L"Project", L"プロジェクト", L"项目"},
+    [UI_T_C_COL_ACTIVITY] = {L"마지막 활동", L"Last activity", L"最終アクティビティ", L"最近活动"},
+    [UI_T_C_COL_CLEAN] = {L"정리", L"Cleanup", L"整理", L"清理"},
+
+    /* ---- 프로젝트 정리: 목록 칸 ---- */
+    [UI_T_C_NOTE_SYSTEM] = {L"시스템 경로", L"System location", L"システムの場所", L"系统路径"},
+    [UI_T_C_NOTE_CONFIRMED] = {L"확인됨", L"Confirmed", L"確認済み", L"已确认"},
+    [UI_T_C_NOTE_GUESSED] = {L"추정", L"Guessed", L"推定", L"推测"},
+    [UI_T_C_NOTE_INCOMPLETE] = {L"일부 누락", L"Incomplete", L"一部欠落", L"部分缺失"},
+    [UI_T_C_NOTE_SHARED] = {L"하드 링크 공유", L"Shares hard links", L"ハードリンク共有", L"共享硬链接"},
+    [UI_T_C_NOTE_DIRTY] = {L"미커밋 변경", L"Uncommitted changes", L"未コミットの変更", L"未提交的更改"},
+    [UI_T_C_NOTE_UNPUSHED] = {L"미푸시 커밋", L"Unpushed commits", L"未プッシュのコミット", L"未推送的提交"},
+    [UI_T_C_NOTE_DORMANT] = {L"휴면", L"Dormant", L"休眠", L"休眠"},
+    [UI_T_C_ACTIVITY_UNKNOWN] = {L"모름", L"Unknown", L"不明", L"未知"},
+    [UI_T_C_ACTIVITY] = {L"%04u-%02u-%02u · %u일 전%ls", L"%04u-%02u-%02u · %u days ago%ls",
+                         L"%04u-%02u-%02u · %u 日前%ls", L"%04u-%02u-%02u · %u 天前%ls"},
+    [UI_T_C_CLEAN_FAILED] = {L"실패: %ls (0x%08X)", L"Failed: %ls (0x%08X)", L"失敗: %ls (0x%08X)",
+                             L"失败：%ls (0x%08X)"},
+    [UI_T_C_CLEAN_MOVE_FAILED] = {L"이동하지 못함", L"Couldn't move", L"移動できません", L"无法移动"},
+    [UI_T_C_CLEAN_QFAILED] = {L"실패: %ls - %ls (0x%08X)", L"Failed: %ls - %ls (0x%08X)",
+                              L"失敗: %ls - %ls (0x%08X)", L"失败：%ls - %ls (0x%08X)"},
+    [UI_T_C_UNKNOWN_ERROR] = {L"알 수 없는 오류", L"Unknown error", L"不明なエラー", L"未知错误"},
+    [UI_T_C_CLEAN_SKIPPED] = {L"건너뜀: %ls", L"Skipped: %ls", L"スキップ: %ls", L"已跳过：%ls"},
+    [UI_T_C_CLEAN_PROTECTED] = {L"보호: %ls", L"Protected: %ls", L"保護: %ls", L"受保护：%ls"},
+
+    /* ---- 프로젝트 정리: 요약·선택·경고 줄 ---- */
+    [UI_T_C_SUMMARY] = {L"표시 %u개 · %ls   /   전체 %u개 · 실제 확보 %ls (파일 크기 %ls)",
+                        L"Showing %u · %ls   /   total %u · reclaimable %ls (file size %ls)",
+                        L"表示 %u 個 · %ls   /   全体 %u 個 · 実際の解放量 %ls（ファイルサイズ %ls）",
+                        L"显示 %u 个 · %ls   /   全部 %u 个 · 实际释放 %ls（文件大小 %ls）"},
+    [UI_T_C_SEL] = {L"선택 %u개 · 실제 확보 %ls", L"Selected %u · reclaimable %ls",
+                    L"選択 %u 個 · 実際の解放量 %ls", L"已选 %u 个 · 实际释放 %ls"},
+    [UI_T_C_SEL_MOVED] = {L"선택 %u개 · 실제 확보 %ls   /   휴지통으로 옮김 %u개 · %ls",
+                          L"Selected %u · reclaimable %ls   /   moved to Recycle Bin %u · %ls",
+                          L"選択 %u 個 · 実際の解放量 %ls   /   ごみ箱に移動 %u 個 · %ls",
+                          L"已选 %u 个 · 实际释放 %ls   /   已移到回收站 %u 个 · %ls"},
+    [UI_T_C_SEL_MOVED_Q] = {L"선택 %u개 · 실제 확보 %ls   /   휴지통으로 옮김 %u개 · %ls (격리 폴더 %u개)",
+                            L"Selected %u · reclaimable %ls   /   moved to Recycle Bin %u · %ls "
+                            L"(quarantine folder %u)",
+                            L"選択 %u 個 · 実際の解放量 %ls   /   ごみ箱に移動 %u 個 · %ls（隔離フォルダー %u 個）",
+                            L"已选 %u 个 · 实际释放 %ls   /   已移到回收站 %u 个 · %ls（隔离文件夹 %u 个）"},
+    [UI_T_C_WARN_PROTECTED] = {L"경고: 시스템·프로그램 보호 경로 안입니다. 표시된 항목은 Windows나 "
+                               L"프로그램에 필요할 수 있어 휴지통으로 옮길 수 없습니다.",
+                               L"Warning: this is inside a protected system or program location. The listed "
+                               L"items may be needed by Windows or programs, so they can't be moved to the "
+                               L"Recycle Bin.",
+                               L"警告: システム・プログラムの保護された場所の中です。表示された項目は Windows や"
+                               L"プログラムに必要な場合があるため、ごみ箱に移動できません。",
+                               L"警告：位于系统或程序的受保护路径内。列出的项目可能是 Windows 或程序所需的，"
+                               L"因此无法移到回收站。"},
+    [UI_T_C_WARN_INFO] = {L"탐지는 읽기 전용입니다. 체크한 항목만 확인을 거쳐 휴지통(없는 "
+                          L"드라이브는 격리 폴더)으로 옮기며 영구 삭제하지 않습니다. "
+                          L"시스템·중요 폴더는 보호합니다.",
+                          L"Detection is read-only. Only checked items are moved, after confirmation, to the "
+                          L"Recycle Bin (or the quarantine folder on drives without one); nothing is "
+                          L"permanently deleted. System and important folders are protected.",
+                          L"検出は読み取り専用です。チェックした項目のみ、確認後にごみ箱（ごみ箱のない"
+                          L"ドライブは隔離フォルダー）に移動し、完全には削除しません。システム・重要な"
+                          L"フォルダーは保護します。",
+                          L"检测为只读操作。只有勾选的项目会在确认后移到回收站（没有回收站的驱动器移到隔离"
+                          L"文件夹），不会永久删除。系统和重要文件夹受保护。"},
+
+    /* ---- 프로젝트 정리: 상태 줄 ---- */
+    [UI_T_C_NEED_PATH] = {L"탐지할 폴더를 입력하거나 [찾아보기]로 선택하세요.",
+                          L"Enter a folder to detect in, or choose one with [Browse...].",
+                          L"検出するフォルダーを入力するか、[参照...] で選んでください。",
+                          L"请输入要检测的文件夹，或通过 [浏览...] 选择。"},
+    [UI_T_C_START_FAILED] = {L"탐지를 시작하지 못했습니다(메모리 또는 스레드 생성 실패).",
+                             L"Couldn't start detection (out of memory or couldn't create a thread).",
+                             L"検出を開始できませんでした（メモリ不足またはスレッドを作成できません）。",
+                             L"无法开始检测（内存不足或无法创建线程）。"},
+    [UI_T_C_DETECTING] = {L"탐지 중...", L"Detecting...", L"検出中...", L"正在检测..."},
+    [UI_T_C_PROGRESS] = {L"탐지 중... 폴더 %llu · 파일 %llu · 후보 %u개 · %ls · 오류 %llu  |  %ls",
+                         L"Detecting... folders %llu · files %llu · candidates %u · %ls · errors %llu  |  %ls",
+                         L"検出中... フォルダー %llu · ファイル %llu · 候補 %u 個 · %ls · エラー %llu  |  %ls",
+                         L"正在检测... 文件夹 %llu · 文件 %llu · 候选 %u 个 · %ls · 错误 %llu  |  %ls"},
+    [UI_T_C_GIT_PROGRESS] = {L"프로젝트(Git) 분석 중... %u/%u · 후보 %u개",
+                             L"Analyzing projects (Git)... %u/%u · candidates %u",
+                             L"プロジェクト（Git）を分析中... %u/%u · 候補 %u 個",
+                             L"正在分析项目（Git）... %u/%u · 候选 %u 个"},
+    [UI_T_C_HEAD_CANCELLED] = {L"취소됨(그때까지 찾은 결과)", L"Cancelled (results found so far)",
+                               L"キャンセル済み（その時点までの結果）", L"已取消（截至取消时的结果）"},
+    [UI_T_C_HEAD_FAILED] = {L"탐지 실패", L"Detection failed", L"検出に失敗", L"检测失败"},
+    [UI_T_C_FINISHED] = {L"%ls: 폴더 %llu · 파일 %llu · 오류 %llu · 건너뛴 폴더 %llu · "
+                         L"제외한 시스템 폴더 %llu · 링크 %llu · %.1f초",
+                         L"%ls: folders %llu · files %llu · errors %llu · skipped folders %llu · "
+                         L"excluded system folders %llu · links %llu · %.1f s",
+                         L"%ls: フォルダー %llu · ファイル %llu · エラー %llu · スキップしたフォルダー %llu · "
+                         L"除外したシステムフォルダー %llu · リンク %llu · %.1f 秒",
+                         L"%ls：文件夹 %llu · 文件 %llu · 错误 %llu · 跳过的文件夹 %llu · "
+                         L"排除的系统文件夹 %llu · 链接 %llu · %.1f 秒"},
+    [UI_T_C_CANCELLING_TRASH] = {L"취소하는 중... 옮기고 있던 항목은 끝까지 옮깁니다.",
+                                 L"Cancelling... The item being moved will be finished.",
+                                 L"キャンセルしています... 移動中の項目は最後まで移動します。",
+                                 L"正在取消... 正在移动的项目将完成移动。"},
+    [UI_T_C_NOTHING_CHECKED] = {L"휴지통으로 옮길 항목을 목록에서 체크하세요.",
+                                L"Check the items to move to the Recycle Bin in the list.",
+                                L"ごみ箱に移動する項目を一覧でチェックしてください。",
+                                L"请在列表中勾选要移到回收站的项目。"},
+    [UI_T_C_TRASH_CANCELLED] = {L"휴지통 이동을 취소했습니다. 아무것도 바뀌지 않았습니다.",
+                                L"Moving to the Recycle Bin was cancelled. Nothing was changed.",
+                                L"ごみ箱への移動をキャンセルしました。何も変更されていません。",
+                                L"已取消移到回收站。没有任何更改。"},
+    [UI_T_C_TRASH_START_FAILED] = {L"휴지통 이동을 시작하지 못했습니다(메모리 또는 스레드 생성 실패).",
+                                   L"Couldn't start moving to the Recycle Bin (out of memory or couldn't "
+                                   L"create a thread).",
+                                   L"ごみ箱への移動を開始できませんでした（メモリ不足またはスレッドを作成できません）。",
+                                   L"无法开始移到回收站（内存不足或无法创建线程）。"},
+    [UI_T_C_TRASH_PROGRESS] = {L"휴지통으로 옮기는 중... %u/%u · 이동 %u개(%ls, 격리 폴더 %u개) · 실패 %u개",
+                               L"Moving to the Recycle Bin... %u/%u · moved %u (%ls, quarantine folder %u) · "
+                               L"failed %u",
+                               L"ごみ箱に移動しています... %u/%u · 移動 %u 個（%ls、隔離フォルダー %u 個） · "
+                               L"失敗 %u 個",
+                               L"正在移到回收站... %u/%u · 已移动 %u 个（%ls，隔离文件夹 %u 个） · 失败 %u 个"},
+    [UI_T_C_TRASHED] = {L"휴지통으로 이동 완료: 성공 %u개(%ls 확보) · 실패 %u개 · 취소 %u개 · %.1f초",
+                        L"Moved to the Recycle Bin: succeeded %u (%ls reclaimable) · failed %u · "
+                        L"cancelled %u · %.1f s",
+                        L"ごみ箱への移動が完了: 成功 %u 個（%ls 解放） · 失敗 %u 個 · キャンセル %u 個 · %.1f 秒",
+                        L"移到回收站完成：成功 %u 个（释放 %ls） · 失败 %u 个 · 取消 %u 个 · %.1f 秒"},
+    [UI_T_C_TRASHED_Q] = {L"휴지통으로 이동 완료: 성공 %u개(%ls 확보) · 실패 %u개 · 취소 %u개 · %.1f초"
+                          L"  |  휴지통이 없어 격리 폴더로 옮김 %u개([격리 폴더] 페이지에서 복원·영구 삭제)",
+                          L"Moved to the Recycle Bin: succeeded %u (%ls reclaimable) · failed %u · "
+                          L"cancelled %u · %.1f s  |  moved to the quarantine folder (no Recycle Bin) %u "
+                          L"(restore or permanently delete on the [Quarantine] page)",
+                          L"ごみ箱への移動が完了: 成功 %u 個（%ls 解放） · 失敗 %u 個 · キャンセル %u 個 · %.1f 秒"
+                          L"  |  ごみ箱がないため隔離フォルダーに移動 %u 個（[隔離フォルダー] ページで復元・完全に削除）",
+                          L"移到回收站完成：成功 %u 个（释放 %ls） · 失败 %u 个 · 取消 %u 个 · %.1f 秒"
+                          L"  |  因没有回收站而移到隔离文件夹 %u 个（可在 [隔离文件夹] 页面恢复或永久删除）"},
+
+    /* ---- 프로젝트 정리: 확인·결과 창 ---- */
+    [UI_T_C_CONFIRM_HEAD] = {L"선택한 %u개 항목을 Windows 휴지통으로 옮깁니다.\n실제 확보 용량: %ls"
+                             L"(휴지통·격리 폴더를 비우면 확보)\n\n",
+                             L"%u selected items will be moved to the Windows Recycle Bin.\nReclaimable space: "
+                             L"%ls (freed when the Recycle Bin or quarantine folder is emptied)\n\n",
+                             L"選択した %u 個の項目を Windows のごみ箱に移動します。\n実際の解放量: %ls"
+                             L"（ごみ箱・隔離フォルダーを空にすると解放）\n\n",
+                             L"将把所选的 %u 个项目移到 Windows 回收站。\n实际释放空间：%ls"
+                             L"（清空回收站或隔离文件夹后释放）\n\n"},
+    [UI_T_C_CONFIRM_INFO] = {L"\n영구 삭제하지 않으며 휴지통에서 복원할 수 있습니다. 옮기기 직전에 항목을 다시 "
+                             L"확인해 바뀐 항목·보호 대상은 건너뜁니다.\n휴지통이 없는 드라이브(USB 등)이거나 "
+                             L"휴지통에 넣을 수 없는 항목은 같은 드라이브의 격리 폴더(.bytesieve-trash)로 옮기며, "
+                             L"[격리 폴더] 탭에서 복원하거나 영구 삭제할 수 있습니다.\n",
+                             L"\nNothing is permanently deleted, and items can be restored from the Recycle Bin. "
+                             L"Each item is checked again just before moving, and changed or protected items "
+                             L"are skipped.\nItems on drives without a Recycle Bin (such as USB drives), or "
+                             L"that can't go to the Recycle Bin, are moved to the quarantine folder "
+                             L"(.bytesieve-trash) on the same drive, where you can restore or permanently "
+                             L"delete them on the [Quarantine] tab.\n",
+                             L"\n完全には削除せず、ごみ箱から復元できます。移動の直前に項目を再確認し、変更された"
+                             L"項目・保護対象はスキップします。\nごみ箱のないドライブ（USB など）の項目や、ごみ箱に"
+                             L"入れられない項目は同じドライブの隔離フォルダー（.bytesieve-trash）に移動し、"
+                             L"[隔離フォルダー] タブで復元または完全に削除できます。\n",
+                             L"\n不会永久删除，可从回收站恢复。移动前会再次检查项目，已更改的项目和受保护的"
+                             L"项目将被跳过。\n没有回收站的驱动器（如 USB）上的项目或无法放入回收站的项目，"
+                             L"会移到同一驱动器的隔离文件夹（.bytesieve-trash），可在 [隔离文件夹] 选项卡中"
+                             L"恢复或永久删除。\n"},
+    [UI_T_C_CONFIRM_GUESSED] = {L"\n주의: '추정' 항목 %u개는 같은 폴더에 프로젝트 파일이 없어 빌드 결과물이 "
+                                L"아닐 수 있습니다.\n",
+                                L"\nCaution: %u 'Guessed' items have no project file in the same folder and may "
+                                L"not be build output.\n",
+                                L"\n注意: 「推定」の項目 %u 個は同じフォルダーにプロジェクトファイルがないため、"
+                                L"ビルド成果物ではない可能性があります。\n",
+                                L"\n注意：%u 个“推测”项目所在文件夹中没有项目文件，可能不是构建产物。\n"},
+    [UI_T_C_CONFIRM_DIRTY] = {L"\n주의: %u개는 커밋하지 않은 변경이 있는(작업 중인) 프로젝트의 항목입니다.\n",
+                              L"\nCaution: %u items belong to projects with uncommitted changes (work in "
+                              L"progress).\n",
+                              L"\n注意: %u 個はコミットしていない変更がある（作業中の）プロジェクトの項目です。\n",
+                              L"\n注意：%u 个项目属于有未提交更改的（正在进行中的）项目。\n"},
+    [UI_T_C_CONFIRM_UNPUSHED] = {L"\n참고: %u개는 원격에 올리지 않은 커밋이 있는 프로젝트의 항목입니다(정리 항목만 "
+                                 L"옮기며 소스와 커밋은 그대로입니다).\n",
+                                 L"\nNote: %u items belong to projects with commits not pushed to a remote (only "
+                                 L"the cleanup items are moved; sources and commits stay as they are).\n",
+                                 L"\n参考: %u 個はリモートにプッシュしていないコミットがあるプロジェクトの項目です"
+                                 L"（整理項目のみ移動し、ソースとコミットはそのままです）。\n",
+                                 L"\n提示：%u 个项目属于有未推送到远程的提交的项目（只移动清理项目，源代码和"
+                                 L"提交保持不变）。\n"},
+    [UI_T_C_TRASH_TITLE] = {L"휴지통으로 이동", L"Move to Recycle Bin", L"ごみ箱に移動", L"移到回收站"},
+    [UI_T_C_FAILURES_HEAD] = {L"%u개 항목을 휴지통으로 옮기지 못했습니다. 이 항목들은 그대로 "
+                              L"남아 있습니다.\n\n",
+                              L"%u items couldn't be moved to the Recycle Bin. They remain where they "
+                              L"were.\n\n",
+                              L"%u 個の項目をごみ箱に移動できませんでした。これらの項目はそのまま残っています。\n\n",
+                              L"%u 个项目无法移到回收站。这些项目保持原样。\n\n"},
+    [UI_T_C_FAILURES_TITLE] = {L"휴지통 이동 결과", L"Recycle Bin results", L"ごみ箱への移動の結果",
+                               L"移到回收站的结果"},
+    [UI_T_C_BROWSE_TITLE] = {L"정리 후보를 찾을 폴더를 선택하세요.",
+                             L"Choose a folder to search for cleanup candidates.",
+                             L"整理候補を探すフォルダーを選んでください。", L"请选择要查找清理候选项的文件夹。"},
 };
 
 static const wchar_t *const k_lang_name[UI_LANG_COUNT] = {L"ko", L"en", L"ja", L"zh-Hans"};

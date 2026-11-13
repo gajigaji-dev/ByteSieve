@@ -280,6 +280,111 @@ typedef enum {
     UI_T_Q_PURGE_RESULT_TITLE,
     UI_T_Q_PURGE_RESULT_HEAD,
 
+    /* core 상태 문구(gui_status_text 가 상태 번호를 연결): 휴지통 이동 결과(CleanupTrashStatus 순서, PENDING 제외) */
+    UI_T_TRASH_MOVED,
+    UI_T_TRASH_QUARANTINED,
+    UI_T_TRASH_DENY_PATH,
+    UI_T_TRASH_DENY_OUTSIDE,
+    UI_T_TRASH_DENY_PROTECTED,
+    UI_T_TRASH_DENY_CRITICAL,
+    UI_T_TRASH_DENY_INCOMPLETE,
+    UI_T_TRASH_DENY_DRIVE,
+    UI_T_TRASH_MISSING,
+    UI_T_TRASH_CHANGED,
+    UI_T_TRASH_NO_RECYCLE,
+    UI_T_TRASH_FAILED,
+    UI_T_TRASH_QUARANTINE_FAILED,
+    UI_T_TRASH_CANCELLED,
+    /* 지운 뒤 복구 가능성(ProjectRecovery 순서) */
+    UI_T_RECOVER_NONE,
+    UI_T_RECOVER_REBUILD,
+    UI_T_RECOVER_LOCKED,
+    UI_T_RECOVER_UNLOCKED,
+
+    /* 프로젝트 정리: 단추·입력 칸·필터·열 머리글 */
+    UI_T_C_DETECT,
+    UI_T_C_PATH_CUE,
+    UI_T_C_READY,
+    UI_T_C_FILTER_LABEL,
+    UI_T_C_ECO_LABEL,
+    UI_T_C_CHECK_ALL,
+    UI_T_C_CHECK_NONE,
+    UI_T_C_TRASH,
+    UI_T_C_ALL,           /* 필터 "전체" */
+    UI_T_C_FILTER_BUILD,  /* 유형 필터(설명 포함) */
+    UI_T_C_FILTER_CACHE,
+    UI_T_C_FILTER_TEMP,
+    UI_T_C_FILTER_LOG,
+    UI_T_C_CAT_BUILD,     /* 유형 열 */
+    UI_T_C_CAT_CACHE,
+    UI_T_C_CAT_TEMP,
+    UI_T_C_CAT_LOG,
+    UI_T_C_ECO_GENERIC,   /* 개발 환경 "일반" */
+    UI_T_C_COL_RECLAIM,
+    UI_T_C_COL_SIZE,
+    UI_T_C_COL_TYPE,
+    UI_T_C_COL_ECO,
+    UI_T_C_COL_PATH,
+    UI_T_C_COL_NOTE,
+    UI_T_C_COL_RECOVERY,
+    UI_T_C_COL_PROJECT,
+    UI_T_C_COL_ACTIVITY,
+    UI_T_C_COL_CLEAN,
+
+    /* 프로젝트 정리: 목록 칸(비고·마지막 활동·정리) */
+    UI_T_C_NOTE_SYSTEM,
+    UI_T_C_NOTE_CONFIRMED,
+    UI_T_C_NOTE_GUESSED,
+    UI_T_C_NOTE_INCOMPLETE,
+    UI_T_C_NOTE_SHARED,
+    UI_T_C_NOTE_DIRTY,
+    UI_T_C_NOTE_UNPUSHED,
+    UI_T_C_NOTE_DORMANT,
+    UI_T_C_ACTIVITY_UNKNOWN,
+    UI_T_C_ACTIVITY,          /* %04u-%02u-%02u 날짜, %u 며칠 전, %ls " · 휴면" 또는 "" */
+    UI_T_C_CLEAN_FAILED,      /* %ls 이유, %08X 오류 */
+    UI_T_C_CLEAN_MOVE_FAILED, /* 이유를 모를 때 */
+    UI_T_C_CLEAN_QFAILED,     /* %ls 상태, %ls 이유, %08X 오류 */
+    UI_T_C_UNKNOWN_ERROR,
+    UI_T_C_CLEAN_SKIPPED,     /* %ls 상태 */
+    UI_T_C_CLEAN_PROTECTED,   /* %ls 보호 이유 */
+
+    /* 프로젝트 정리: 요약·선택·경고 줄 */
+    UI_T_C_SUMMARY,      /* %u 표시, %ls 표시 용량, %u 전체, %ls 실제 확보, %ls 파일 크기 */
+    UI_T_C_SEL,          /* %u 선택, %ls 실제 확보 */
+    UI_T_C_SEL_MOVED,    /* 위 + %u 옮김, %ls 옮긴 용량 */
+    UI_T_C_SEL_MOVED_Q,  /* 위 + %u 격리 폴더 */
+    UI_T_C_WARN_PROTECTED,
+    UI_T_C_WARN_INFO,
+
+    /* 프로젝트 정리: 상태 줄 */
+    UI_T_C_NEED_PATH,
+    UI_T_C_START_FAILED,
+    UI_T_C_DETECTING,
+    UI_T_C_PROGRESS,      /* %llu 폴더, %llu 파일, %u 후보, %ls 용량, %llu 오류, %ls 지금 폴더 */
+    UI_T_C_GIT_PROGRESS,  /* %u 끝난 프로젝트, %u 전체, %u 후보 */
+    UI_T_C_HEAD_CANCELLED,
+    UI_T_C_HEAD_FAILED,
+    UI_T_C_FINISHED,      /* %ls 머리말, %llu 폴더, %llu 파일, %llu 오류, %llu 건너뜀, %llu 제외, %llu 링크, %.1f 초 */
+    UI_T_C_CANCELLING_TRASH,
+    UI_T_C_NOTHING_CHECKED,
+    UI_T_C_TRASH_CANCELLED,
+    UI_T_C_TRASH_START_FAILED,
+    UI_T_C_TRASH_PROGRESS, /* %u 끝난 수, %u 전체, %u 옮김, %ls 용량, %u 격리, %u 실패 */
+    UI_T_C_TRASHED,        /* %u 성공, %ls 확보, %u 실패, %u 취소, %.1f 초 */
+    UI_T_C_TRASHED_Q,      /* 위 + %u 격리 폴더 */
+
+    /* 프로젝트 정리: 확인·결과 창, 폴더 고르기 */
+    UI_T_C_CONFIRM_HEAD,     /* %u 항목 수, %ls 실제 확보 */
+    UI_T_C_CONFIRM_INFO,
+    UI_T_C_CONFIRM_GUESSED,  /* %u */
+    UI_T_C_CONFIRM_DIRTY,    /* %u */
+    UI_T_C_CONFIRM_UNPUSHED, /* %u */
+    UI_T_C_TRASH_TITLE,
+    UI_T_C_FAILURES_HEAD,    /* %u: 옮기지 못한 수 */
+    UI_T_C_FAILURES_TITLE,
+    UI_T_C_BROWSE_TITLE,
+
     UI_T_COUNT
 } UiText;
 

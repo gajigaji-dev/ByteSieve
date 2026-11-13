@@ -167,6 +167,10 @@ static void min_window_size(int *cx, int *cy)
     if (settings_w > panel_w) {
         panel_w = settings_w;
     }
+    settings_w = cleanup_panel_min_width(g_app.pages[NAV_PAGE_CLEANUP]);
+    if (settings_w > panel_w) {
+        panel_w = settings_w;
+    }
     need = nav_width() + 2 * scale(MAIN_MARGIN) + panel_w;
     AdjustWindowRectEx(&frame, WS_OVERLAPPEDWINDOW, FALSE, 0);
     need += frame.right - frame.left;
@@ -357,6 +361,7 @@ static void apply_language(UiLang lang)
     SendMessageW(g_app.title, WM_SETFONT, (WPARAM)(title_font != NULL ? title_font : font), FALSE);
     SetWindowTextW(g_app.title, ui_text(nav_page_text(g_app.page)));
     scan_panel_apply_language(g_app.pages[NAV_PAGE_SCAN], font);
+    cleanup_panel_apply_language(g_app.pages[NAV_PAGE_CLEANUP], font);
     quarantine_panel_apply_language(g_app.pages[NAV_PAGE_QUARANTINE], font);
     settings_panel_apply_language(g_app.pages[NAV_PAGE_SETTINGS], font);
     /* 이전 글꼴은 이제 번역된 화면이 쓰지 않는다(시작 글꼴은 번역하지 않은 페이지가 쓰므로 남긴다). */
@@ -467,6 +472,23 @@ static int write_conflict_file(const wchar_t *path)
 }
 
 /*
+ * 실행 중 언어 바꾸기 검사: 표시 언어를 en → ja → zh-Hans → ko 로 바꾸며 단계마다 verify(page)를 부른다
+ * (결과 화면이 새 언어로 다시 쓰였는지). 한국어로 돌아와 끝나므로 이어지는 한국어 검사는 그대로다. 실패 수.
+ */
+static int verify_language_round_trip(int (*verify)(HWND), HWND page)
+{
+    static const UiLang order[] = {UI_LANG_EN, UI_LANG_JA, UI_LANG_ZH_HANS, UI_LANG_KO};
+    int failures = 0;
+    size_t i;
+
+    for (i = 0; i < sizeof(order) / sizeof(order[0]); i++) {
+        apply_language(order[i]);
+        failures += verify(page);
+    }
+    return failures;
+}
+
+/*
  * SELF_TEST_QUARANTINE: 정리가 끝난 뒤 격리 폴더 페이지에서 목록 확인 → 같은 이름 파일을 하나 만든
  * 뒤 모두 복원(그 항목은 건너뜀) → 남은 항목 영구 삭제를 시작한다. 실패하면 0.
  */
@@ -502,20 +524,11 @@ static int self_test_quarantine_step(void)
         return 0;
     }
     /* 실행 중 언어 바꾸기: 복원 결과(상태 줄)와 같은 이름 때문에 건너뛴 항목의 결과 열이 새 언어로 다시
-     * 쓰이고 단추·열이 잘리지 않는지 en → ja → zh-Hans → ko 로 확인한다(한국어로 돌아와 이어 간다). */
-    {
-        static const UiLang order[] = {UI_LANG_EN, UI_LANG_JA, UI_LANG_ZH_HANS, UI_LANG_KO};
-        int failures = 0;
-        size_t i;
-        for (i = 0; i < sizeof(order) / sizeof(order[0]); i++) {
-            apply_language(order[i]);
-            failures += quarantine_panel_verify_lang(q);
-        }
-        if (page_exit(failures, NAV_PAGE_QUARANTINE) != 0 ||
-            page_exit(quarantine_panel_verify(q, 1, 1), NAV_PAGE_QUARANTINE) != 0) {
-            fwprintf(stderr, L"self-test failed: quarantine page after language switch\n");
-            return 0;
-        }
+     * 쓰이고 단추·열이 잘리지 않는지 확인한다(한국어로 돌아와 이어 간다). */
+    if (page_exit(verify_language_round_trip(quarantine_panel_verify_lang, q), NAV_PAGE_QUARANTINE) != 0 ||
+        page_exit(quarantine_panel_verify(q, 1, 1), NAV_PAGE_QUARANTINE) != 0) {
+        fwprintf(stderr, L"self-test failed: quarantine page after language switch\n");
+        return 0;
     }
     return quarantine_panel_select_all(q) == 1 && quarantine_panel_purge(q, 0);
 }
@@ -582,6 +595,7 @@ static int check_lang(LOGFONTW *out_font, int *out_min_width)
         SELF_CHECK(settings.top >= item.bottom && settings.bottom <= nav.bottom);
     }
     failures += scan_panel_verify_lang(g_app.pages[NAV_PAGE_SCAN]);
+    failures += cleanup_panel_verify_lang(g_app.pages[NAV_PAGE_CLEANUP]);
     failures += quarantine_panel_verify_lang(g_app.pages[NAV_PAGE_QUARANTINE]);
     failures += settings_panel_verify_lang(g_app.pages[NAV_PAGE_SETTINGS]);
     *out_font = lf;
@@ -1052,9 +1066,14 @@ static int on_page_notify(int id, int code)
     }
     if (id == IDC_CLEANUP && code == CPN_FINISHED &&
         (g_app.self_test == SELF_TEST_CLEANUP || g_app.self_test == SELF_TEST_CLEANUP_CANCEL)) {
-        finish_self_test(page_exit(
-            cleanup_panel_verify(cleanup, g_app.self_test == SELF_TEST_CLEANUP_CANCEL),
-            NAV_PAGE_CLEANUP));
+        int rc = page_exit(cleanup_panel_verify(cleanup, g_app.self_test == SELF_TEST_CLEANUP_CANCEL),
+                           NAV_PAGE_CLEANUP);
+        /* 탐지 결과(상태 줄·요약·비고·복구·마지막 활동 칸)가 언어를 바꾸면 새 언어로 다시 쓰이는지 */
+        if (rc == 0 && g_app.self_test == SELF_TEST_CLEANUP) {
+            rc = page_exit(verify_language_round_trip(cleanup_panel_verify_lang, cleanup),
+                           NAV_PAGE_CLEANUP);
+        }
+        finish_self_test(rc);
         return 1;
     }
     if (id == IDC_CLEANUP && code == CPN_FINISHED &&
@@ -1093,7 +1112,14 @@ static int on_page_notify(int id, int code)
             finish_self_test(restored == quarantined ? 0 : 1);
             return 1;
         }
-        finish_self_test(cleanup_panel_verify_trash(cleanup, g_app.trash_expect) == 0 ? 0 : 1);
+        {
+            int failures = cleanup_panel_verify_trash(cleanup, g_app.trash_expect);
+            /* 이동 결과(정리 칸·선택 줄·상태 줄)가 언어를 바꾸면 새 언어로 다시 쓰이는지 */
+            if (failures == 0) {
+                failures = verify_language_round_trip(cleanup_panel_verify_lang, cleanup);
+            }
+            finish_self_test(failures == 0 ? 0 : 1);
+        }
         return 1;
     }
     if (id == IDC_CLEANUP && code == CPN_TRASHED && g_app.self_test == SELF_TEST_QUARANTINE) {
