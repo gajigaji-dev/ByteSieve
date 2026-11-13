@@ -11,8 +11,8 @@ ByteSieve GUI는 **Win32 API를 유지한 채** Windows 11 Fluent Design 방향�
 | 0. 기반 | 공통 모양 모듈(`gui_theme`), 언어별 UI 글꼴, 글자 폭을 재서 정하는 컨트롤 크기, 문구에 맞춘 최소 창 크기 | **완료** |
 | 0. 다국어 | 언어 모듈(`ui_lang`: 문자열 표·언어 결정), 창 골격(사이드바 메뉴·페이지 제목)·설정 페이지·폴더 스캔 페이지 컨트롤 번역 | **완료**(1차 범위) |
 | 1. 창 외곽 | DWM: 둥근 모서리, 제목 표시줄 Mica | **완료** |
-| 2. 나머지 번역 | 폴더 스캔 페이지의 상태 줄·분석 줄·트리맵·확인 창, 실행 중 언어 바꾸기(번역된 화면) | **진행 중**(폴더 스캔·프로젝트 정리·격리 폴더 완료) |
-| 2-2. 페이지별 번역 | 격리 폴더·프로젝트 정리(완료: 결과는 문장 대신 결과 종류로 기억, core 상태는 `gui_status_text`로 연결), 다른 다섯 페이지와 그 상태 줄·확인 창, core 상태 문구(GUI 쪽에서 상태 번호를 번역 표에 연결), HTML 보고서 | 예정(페이지별) |
+| 2. 나머지 번역 | 폴더 스캔 페이지의 상태 줄·분석 줄·트리맵·확인 창, 실행 중 언어 바꾸기(모든 화면) | **완료**(모든 페이지) |
+| 2-2. 페이지별 번역 | 격리 폴더·프로젝트 정리·시스템 정리·개발 캐시·드라이브·모니터·Booster(완료: 결과는 문장 대신 결과 종류·값으로 기억, core 상태·대상 이름·설명은 `gui_status_text`로 연결), HTML 보고서 | **진행 중**(GUI 페이지 완료, HTML 보고서 예정) |
 | 3. 탐색 | 위쪽 탭 → 왼쪽 사이드바(직접 그리는 컨트롤 `gui_nav`, 메뉴 모델 `nav_model`), 목적별 그룹, 큰 페이지 제목, 밝은 테마 색 토큰(`THEME_COLOR_*`) | **완료**(1차 범위) |
 | 3-2. 설정 화면 | 사이드바 아래 끝의 [설정](`gui_settings`): 테마·표시 언어·스캔 기록 자동 저장, 저장은 `app_settings`(레지스트리) | **완료** |
 | 3-3. 탐색 나머지 | 사이드바 아이콘, 좁은 창에서 아이콘만 보이게 접기 | 예정 |
@@ -101,11 +101,10 @@ ByteSieve GUI는 **Win32 API를 유지한 채** Windows 11 Fluent Design 방향�
 - 아래쪽 **설정**(머리글 없는 footer 그룹, 사이드바 아래 끝에 붙음): 테마(시스템 설정 따르기·밝게·어둡게, 바로 적용),
   표시 언어(시스템 설정 따르기 + 네 언어를 그 언어 이름으로: 한국어·English·日本語·简体中文), 스캔 기록 자동 저장·기록 폴더.
   언어를 바꾸면 `HKCU\Software\ByteSieve`의 `Language`에 저장하고(시스템 따르기는 값을 지움) 바로 적용합니다:
-  메인 창이 언어별 글꼴을 새로 만들어 번역된 화면(사이드바·제목·폴더 스캔·설정)에 알리고, 각 패널이 문구·글꼴·폭을 다시 정합니다
-  (`scan_panel_apply_language`·`cleanup_panel_apply_language`·`quarantine_panel_apply_language`·`settings_panel_apply_language`). GUI 스레드의 UI 언어도
+  메인 창이 언어별 글꼴을 새로 만들어 사이드바·제목과 모든 페이지에 알리고, 각 패널이 문구·글꼴·폭을 다시 정합니다
+  (`scan_panel_apply_language`·`drive_panel_apply_language`·`cleanup_panel_apply_language`·`cleaner_panel_apply_language`·`quarantine_panel_apply_language`·`monitor_panel_apply_language`·`booster_panel_apply_language`·`settings_panel_apply_language`). GUI 스레드의 UI 언어도
   앱 언어로 맞춰(`SetThreadUILanguage`) Windows가 그리는 확인 창 단추가 같은 언어로 보이게 합니다. 상태 줄은 문구 대신 "무엇을 보였는지(종류·값)"를 기억해 두었다가
-  새 언어로 다시 씁니다. 아직 번역하지 않은 페이지는 문구가 그대로라 시작할 때의 글꼴을 계속 씁니다. 페이지를 번역할 때 그 페이지의
-  `*_apply_language`를 더하고 메인 창의 언어 적용에서 부릅니다.
+  새 언어로 다시 씁니다. 새 페이지를 더할 때는 그 페이지의 `*_apply_language`를 더하고 메인 창의 언어 적용에서 부릅니다.
   테마는 같은 키의 `Theme`(`system`·`light`·`dark`)에 저장합니다.
 - 주요 동작 버튼(스캔·휴지통으로 이동)만 강조색으로 채우고 나머지는 보통 버튼으로 둡니다.
 

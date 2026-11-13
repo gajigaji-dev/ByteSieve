@@ -34,4 +34,17 @@ unsigned monitor_panel_samples(HWND panel);
  * 표시하는지 확인한다. 실패한 항목 수를 반환한다. */
 int monitor_panel_verify(HWND panel);
 
+/*
+ * 표시 언어를 바꾼 뒤(ui_lang_set) 부른다. 이름표·상태 줄·RAM/CPU 문구를 마지막 측정값으로 지금 언어로
+ * 다시 쓰고(상태 줄의 측정 시각은 그대로), 글꼴을 font 로 바꿔(NULL 이면 그대로) 다시 배치한다. 그래프 제목·
+ * 범례는 다시 그릴 때 지금 언어로 그린다. 측정은 계속한다. 글꼴은 호출자가 소유한다.
+ */
+void monitor_panel_apply_language(HWND panel, HFONT font);
+
+/*
+ * 자체 검사: 이름표가 지금 언어이고 잘리지 않는지, 상태 줄·RAM/CPU 문구가 지금 언어로 쓰였는지(한국어가
+ * 아니면 한글이 없는지), 그래프 문구도 지금 언어인지 확인한다. 실패 수.
+ */
+int monitor_panel_verify_lang(HWND panel);
+
 #endif /* BYTESIEVE_GUI_MONITOR_H */

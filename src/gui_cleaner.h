@@ -76,4 +76,24 @@ int cleaner_panel_verify(HWND panel, const wchar_t *expect_root);
 /* 자체 검사: 정리 뒤 옮긴 항목은 원래 자리에 없고 결과 표시가 맞는지, 휴지통은 비우지 않았는지. */
 int cleaner_panel_verify_run(HWND panel, size_t expect_targets);
 
+/*
+ * 표시 언어를 바꾼 뒤(ui_lang_set) 부른다. 단추·안내·열 머리글·선택 줄·상세 설명·상태 줄을 지금 언어로 다시
+ * 쓰고, 글꼴을 font 로 바꿔(NULL 이면 그대로) 문구 폭에 맞게 다시 배치한다. 목록 칸(대상 이름·분류·상태·
+ * 제외·증감·위치·근거)은 그릴 때 지금 언어로 만들므로 다시 그리기만 한다. core 의 대상 이름·설명·상태는
+ * gui_status_text 로 지금 언어 문구를 쓴다. 분석 결과·선택은 그대로다. 분석·정리 중에 불러도 된다(진행 문구는
+ * 다음 알림부터 새 언어). 글꼴은 호출자가 소유한다.
+ */
+void cleaner_panel_apply_language(HWND panel, HFONT font);
+
+/* 단추 줄이 잘리지 않는 최소 폭(최소 창 크기에 쓴다). */
+int cleaner_panel_min_width(HWND panel);
+
+/*
+ * 자체 검사: 단추·안내·열 머리글이 지금 언어이고 잘리지 않는지, 상태 줄·선택 줄·상세 설명과 목록의 번역 칸이
+ * 지금 언어로 쓰였는지(한국어가 아니면 한글이 없는지, 경로·배포판 이름·Windows 오류 설명은 제외), core 문구
+ * 연결(gui_status_text_verify, 한국어는 core 문구와 같음)이 맞는지 확인한다. 분석·정리 중에는 부르지 않는다.
+ * 실패 수.
+ */
+int cleaner_panel_verify_lang(HWND panel);
+
 #endif /* BYTESIEVE_GUI_CLEANER_H */

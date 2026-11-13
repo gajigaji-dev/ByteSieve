@@ -35,4 +35,22 @@ int booster_panel_refresh(HWND panel);
  */
 int booster_panel_verify(HWND panel);
 
+/*
+ * 표시 언어를 바꾼 뒤(ui_lang_set) 부른다. 단추·이름표·체크 상자·열 머리글과 요약·정보 줄을 지금 언어로
+ * 다시 쓰고(요약은 마지막 측정값, 정보 줄은 마지막 바꾸기·끝내기 결과 그대로, 다시 측정하지 않음), 글꼴을
+ * font 로 바꿔(NULL 이면 그대로) 문구 폭에 맞게 다시 배치한다. 목록 칸(상태·위치·결과·종류)은 그릴 때 지금
+ * 언어로 만들므로 다시 그리기만 한다. 목록·선택은 그대로다. 글꼴은 호출자가 소유한다.
+ */
+void booster_panel_apply_language(HWND panel, HFONT font);
+
+/* 단추 줄이 잘리지 않는 최소 폭(최소 창 크기에 쓴다). */
+int booster_panel_min_width(HWND panel);
+
+/*
+ * 자체 검사: 단추·이름표·체크 상자·열 머리글이 지금 언어이고 잘리지 않는지, 요약·정보 줄과 목록의 번역 칸
+ * (시작 프로그램 상태·위치·결과, 프로세스 종류·상태)이 지금 언어로 쓰였는지(한국어가 아니면 한글이 없는지,
+ * 이름·명령·경로는 제외) 확인한다. 목록을 읽는 중에도 부를 수 있다. 실패 수.
+ */
+int booster_panel_verify_lang(HWND panel);
+
 #endif /* BYTESIEVE_GUI_BOOSTER_H */
