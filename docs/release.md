@@ -80,7 +80,8 @@ ByteSieve는 설치형 exe(데스크톱 프로그램)와 포터블 ZIP으로 배
 1. **버전·변경 기록**: `CMakeLists.txt`의 `project(... VERSION x.y.z)`를 올리고, `CHANGELOG.md`에 `## [x.y.z] - 날짜` 구역을 씁니다.
    이용약관을 바꾼 버전이면 `installer/terms/terms-*.txt` 네 파일의 `@EFFECTIVE_DATE@`(시행일·부칙)를 배포일로 바꿉니다
    (예: `2026년 12월 1일` / `December 1, 2026` / `2026年12月1日` / `2026年12月1日`). 남아 있으면 태그 빌드가 실패합니다(`tools/package.ps1`).
-   README·`docs/*`의 기능 표·테스트 개수가 맞는지 확인합니다.
+   README·`docs/*`의 기능 표·테스트 개수가 맞는지 확인하고, README [설치]의 최신 버전과 다운로드 링크 세 개
+   (`releases/download/v<버전>/ByteSieve-<버전>-…`)를 새 버전으로 바꿉니다(파일 이름에 버전이 들어 있어 자동으로 바뀌지 않음).
 2. **로컬 패키징**(선택): `powershell -ExecutionPolicy Bypass -File tools\package.ps1`
    (Release 빌드 → Release 테스트 → `dist\`에 설치 프로그램·ZIP·SHA256). Inno Setup이 없으면 `-NoInstaller`.
    이어서 `tools\test_installer.ps1`로 설치·업그레이드·제거를 검증합니다(위 표).
@@ -105,11 +106,12 @@ ByteSieve는 설치형 exe(데스크톱 프로그램)와 포터블 ZIP으로 배
 - [ ] 라이선스 화면에 설치 언어의 이용약관이 깨지지 않고 나오고(시행일이 배포일), 본문의 동의 단추 이름이 화면 단추와 같으며,
       끝까지 내리면 [부록]에 PolyForm Noncommercial 1.0.0 원문이 `Required Notice:` 줄부터 그대로 있다
 - [ ] 설치 폴더의 `terms\`에 약관 네 언어가 있고 `README.txt`가 그 위치를 안내한다
-- [ ] 시작 메뉴 바로 가기로 실행된다. 탐색기 속성 → 자세히에 버전 1.0.0, [설정] → 정보에 1.0.0
+- [ ] 시작 메뉴 바로 가기로 실행된다. 탐색기 속성 → 자세히에 출시 버전(예: 1.0.1), [설정] → 정보에 같은 버전
 - [ ] 125%·150% 배율에서 글자·사이드바가 잘리지 않는다. 다크 모드 전환이 된다
 - [ ] 폴더 스캔·드라이브·테스트 폴더 정리(휴지통으로 이동)·격리 폴더 복원이 된다
-- [ ] `disk-scanner --version`이 1.0.0을 출력한다(설치 폴더에서)
+- [ ] `disk-scanner --version`이 출시 버전을 출력한다(설치 폴더에서)
 - [ ] 앱을 켠 채로 다시 설치하면 닫으라고 안내한다. 업그레이드 뒤 테마·언어 설정이 그대로다
+      (이전 공개 버전을 먼저 설치한 뒤 새 설치 프로그램으로 업그레이드)
 - [ ] [설정]에서 언어를 바꾼 뒤 재설치해도 설정한 언어가 유지된다
 - [ ] 제거하면 프로그램 파일·바로 가기가 사라지고, 남긴 데이터 안내가 나온다.
       `HKCU\Software\ByteSieve`, `%LOCALAPPDATA%\ByteSieve\history`, 테스트 드라이브의 `.bytesieve-trash`가 남아 있다

@@ -5,6 +5,22 @@
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-11-14
+
+GUI의 모든 페이지를 한국어·영어·일본어·중국어 간체로 표시하고, 표시 언어를 바꾸면 다시 시작하지 않고 바로 적용하는 패치 릴리스입니다.
+설치 프로그램에 이용약관을 추가했습니다. 1.0.0을 설치했다면 새 설치 프로그램을 실행해 그대로 업그레이드할 수 있습니다(설정 유지).
+
+### 내려받기
+
+| 파일 | 설명 |
+|---|---|
+| `ByteSieve-1.0.1-setup-x64.exe` | 설치 프로그램(관리자 권한 없이 사용자별 설치, 한국어·English·日本語·简体中文) |
+| `ByteSieve-1.0.1-portable-x64.zip` | 설치 없이 실행(압축을 풀고 `bytesieve-gui.exe`) |
+| `SHA256SUMS.txt` | 위 두 파일의 SHA256. `Get-FileHash <파일> -Algorithm SHA256`으로 확인 |
+
+코드 서명이 없어 처음 실행할 때 Windows SmartScreen이 "Windows의 PC 보호" 경고를 띄울 수 있습니다.
+SHA256을 확인한 뒤 [추가 정보] → [실행]을 누르세요.
+
 ### 변경
 
 - 설치 프로그램의 라이선스 화면에 조항 형식의 이용약관을 추가했습니다(한국어·English·日本語·简体中文, 설치 언어로 표시).
@@ -12,15 +28,14 @@
   안내하고, PolyForm Noncommercial 1.0.0 원문은 그 아래에 수정 없이 그대로 보여 줍니다. 라이선스 정책은 바뀌지 않았습니다.
   일본어·중국어 약관은 검토가 필요한 번역 초안입니다.
 - 이용약관을 설치 폴더와 포터블 ZIP의 `terms\`에도 넣어 설치한 뒤 다시 볼 수 있게 했습니다(`README.txt`에 안내).
-- [설정]에서 표시 언어를 바꾸면 다시 시작하지 않고 바로 적용합니다(사이드바·페이지 제목·폴더 스캔·설정 페이지와 그 글꼴).
-  폴더 스캔 페이지의 상태 줄·분석 줄은 마지막에 보인 내용(스캔 결과 등)을 새 언어로 다시 씁니다.
+- [설정]에서 표시 언어를 바꾸면 다시 시작하지 않고 사이드바·페이지 제목과 모든 페이지에 바로 적용합니다(글꼴 포함).
+  상태 줄·결과 칸은 마지막에 보인 내용(스캔·정리·복원 결과, 드라이브 조회·모니터 측정 결과 등)을 새 언어로 다시 씁니다.
 
 ### 수정
 
 - 폴더 스캔 페이지에서 버튼은 고른 언어로 나오는데 상태 줄(진행·결과·안내 메시지), 분석 줄(디스크 사용량·직전 스캔 대비 변화),
   트리·순위 목록의 덧붙임 문구(중복 제외·변화 열), 트리맵(안내·풍선 도움말·우클릭 메뉴), 확인·오류 창과 저장 대화 상자가
   한국어로 남던 문제를 고쳤습니다. 이 문구들을 번역 표(`ui_lang`)로 옮겨 영어·일본어·중국어 간체로 보입니다.
-  다른 페이지와 HTML 보고서는 다음 작업에서 페이지별로 번역합니다.
 - 격리 폴더 페이지의 단추·안내·열 머리글·항목 상태, 결과 열(복원·영구 삭제 결과와 이유), 상태 줄, 같은 이름 확인 창과
   영구 삭제 확인·결과 창이 고른 언어로 나오지 않던 문제를 고쳤습니다. 언어를 바꾸면 결과 열·상태 줄도 새 언어로 다시 씁니다.
   결과 열의 Windows 오류 설명과 확인 창의 [예]/[아니요] 단추도 앱 언어로 보입니다(그 언어가 Windows에 없으면 기본 언어).
@@ -38,6 +53,19 @@
   프로세스 끝내기 확인 창이 고른 언어로 나오지 않던 문제를 고쳤습니다. 이제 모든 페이지가 번역되어 있습니다. 언어를 바꾸면
   마지막 조회·측정 결과와 바꾸기·끝내기 결과를 다시 측정하지 않고 새 언어로 다시 씁니다. core 상태 문구(BitLocker 상태·
   시작 프로그램 위치·보호 이유·끝내기 결과)는 CLI용 한국어를 그대로 두고 GUI에서 번역 표로 연결합니다.
+
+### 알려진 제한
+
+- 코드 서명이 없음(SmartScreen 경고)
+- 다크 모드에서 확인 창·오른쪽 클릭 메뉴·진행 막대는 밝게 표시됨
+- HTML 보고서와 CLI 출력은 아직 한국어만
+
+### English summary
+
+Patch release: every GUI page is now translated into English, Japanese and Simplified Chinese, and changing the display
+language in Settings applies immediately without a restart (status lines and results are rewritten in the new language).
+The installer now shows plain-language Terms of Use in the setup language above the unchanged PolyForm Noncommercial 1.0.0
+license text. Upgrading from 1.0.0 keeps your settings. Binaries are unsigned; verify them with `SHA256SUMS.txt`.
 
 ## [1.0.0] - 2026-11-07
 

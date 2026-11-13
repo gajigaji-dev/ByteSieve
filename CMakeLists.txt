@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 # 버전은 여기 한 곳에서만 정한다(version.h·exe 버전 리소스·설치 프로그램·릴리스 이름이 따른다). docs/release.md 참고.
-project(ByteSieve VERSION 1.0.0 LANGUAGES C RC)
+project(ByteSieve VERSION 1.0.1 LANGUAGES C RC)
 
 # C 런타임을 정적으로 링크한다: 사용자 PC 에 VC++ 재배포 패키지가 없어도 exe 하나로 실행된다.
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")

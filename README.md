@@ -10,23 +10,23 @@ CLI(`disk-scanner`)와 Win32 GUI(`bytesieve-gui`)를 제공합니다.
 **요구 사항**: Windows 10/11 64비트(x64)
 
 최신 버전은 [GitHub Releases의 최신 릴리스](https://github.com/gajigaji-dev/ByteSieve/releases/latest)에서 내려받습니다.
-지금 최신 버전은 **1.0.0**입니다.
+지금 최신 버전은 **1.0.1**입니다.
 
 | 파일 | 용도 |
 |---|---|
-| [ByteSieve-1.0.0-setup-x64.exe](https://github.com/gajigaji-dev/ByteSieve/releases/download/v1.0.0/ByteSieve-1.0.0-setup-x64.exe) | **설치 프로그램(권장)**. 관리자 권한 없이 `%LOCALAPPDATA%\Programs\ByteSieve`에 설치하고 시작 메뉴 바로 가기를 만듭니다 |
-| [ByteSieve-1.0.0-portable-x64.zip](https://github.com/gajigaji-dev/ByteSieve/releases/download/v1.0.0/ByteSieve-1.0.0-portable-x64.zip) | **포터블 버전**. 설치하지 않고 실행합니다 |
-| [SHA256SUMS.txt](https://github.com/gajigaji-dev/ByteSieve/releases/download/v1.0.0/SHA256SUMS.txt) | 내려받은 파일 확인용 |
+| [ByteSieve-1.0.1-setup-x64.exe](https://github.com/gajigaji-dev/ByteSieve/releases/download/v1.0.1/ByteSieve-1.0.1-setup-x64.exe) | **설치 프로그램(권장)**. 관리자 권한 없이 `%LOCALAPPDATA%\Programs\ByteSieve`에 설치하고 시작 메뉴 바로 가기를 만듭니다 |
+| [ByteSieve-1.0.1-portable-x64.zip](https://github.com/gajigaji-dev/ByteSieve/releases/download/v1.0.1/ByteSieve-1.0.1-portable-x64.zip) | **포터블 버전**. 설치하지 않고 실행합니다 |
+| [SHA256SUMS.txt](https://github.com/gajigaji-dev/ByteSieve/releases/download/v1.0.1/SHA256SUMS.txt) | 내려받은 파일 확인용 |
 
 이전 버전과 버전별 릴리스 노트는 [Releases 목록](https://github.com/gajigaji-dev/ByteSieve/releases)에 있습니다.
 
 **설치 프로그램**
-1. `ByteSieve-1.0.0-setup-x64.exe`를 실행하고 설치 언어(한국어·English·日本語·简体中文)를 고릅니다. 고른 언어가 앱 표시 언어가 됩니다(나중에 [설정]에서 바꿀 수 있음).
+1. `ByteSieve-1.0.1-setup-x64.exe`를 실행하고 설치 언어(한국어·English·日本語·简体中文)를 고릅니다. 고른 언어가 앱 표시 언어가 됩니다(나중에 [설정]에서 바꿀 수 있음).
 2. 이용약관에 동의하고 설치를 마치면 바로 실행할 수 있습니다. 이후에는 시작 메뉴의 **ByteSieve**로 실행합니다.
 3. 제거는 Windows [설정] → [앱] → [설치된 앱]에서 합니다.
 
 **포터블 버전**
-1. ZIP을 원하는 폴더에 풉니다(`ByteSieve-1.0.0-portable-x64\` 폴더가 생깁니다).
+1. ZIP을 원하는 폴더에 풉니다(`ByteSieve-1.0.1-portable-x64\` 폴더가 생깁니다).
 2. GUI는 `bytesieve-gui.exe`를 실행합니다. CLI `disk-scanner.exe`도 같은 폴더에 있습니다([빠른 시작](#빠른-시작) 참고).
 
 **알아 둘 점**
