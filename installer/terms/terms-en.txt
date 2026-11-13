@@ -1,0 +1,135 @@
+﻿ByteSieve Terms of Use
+
+Effective date: @EFFECTIVE_DATE@
+
+These Terms summarize, in plain language, the conditions for installing and using ByteSieve. Your right to use ByteSieve is granted under the PolyForm Noncommercial License 1.0.0 (the "License"), which is provided unchanged together with these Terms. By selecting "I accept the agreement" during installation, you agree to both these Terms and the License.
+
+
+Article 1 (Purpose)
+
+These Terms set out the rights, obligations and responsibilities of the Provider and the User regarding ByteSieve (the "Program"), a disk usage analysis and cleanup tool for Windows distributed by the Provider.
+
+
+Article 2 (Definitions)
+
+1. "Provider" means gajigaji04, the copyright holder of the Program.
+2. "User" means any individual or organization that agrees to these Terms and the License and installs or uses the Program.
+3. "Program" means the installer, the portable package, bytesieve-gui.exe (the app) and disk-scanner.exe (the command-line tool) they contain, and the accompanying documentation.
+4. "Cleanup" means moving files or folders that the User has selected and confirmed to the Recycle Bin or a quarantine folder, or permanently deleting them when the User separately confirms.
+5. "Quarantine folder" means the .bytesieve-trash folder on the same drive, used for cleaned-up items on drives where the Recycle Bin is not available.
+
+
+Article 3 (Effect of These Terms and Relationship to the License)
+
+1. These Terms are shown during installation and take effect when the User accepts them.
+2. The scope and conditions of the User's right to use the Program are governed by the License. If these Terms and the License differ, the License prevails.
+3. The full License text is in the [Appendix] below these Terms on the installation screen, in LICENSE.txt in the installation folder, and at https://polyformproject.org/licenses/noncommercial/1.0.0
+4. After installation, these Terms can be viewed again in the terms folder in the installation folder (terms-en.txt).
+
+
+Article 4 (Fees)
+
+The Program is provided free of charge. The Program contains no payments, advertisements or paid features.
+
+
+Article 5 (Permitted Use)
+
+Under the License, the User may use, copy, modify and distribute the Program only for the following purposes:
+
+1. Any noncommercial purpose
+2. Personal use for research, experiment, testing, personal study, private entertainment, hobby projects or similar purposes without any anticipated commercial application
+3. Use by charitable organizations, educational institutions, public research organizations, public safety or health organizations, environmental protection organizations, or government institutions, regardless of the source of funding
+
+
+Article 6 (Restricted Use)
+
+1. Using the Program for a for-profit business or commercial work is not within the scope permitted by the License. For commercial use, please contact the Provider separately.
+2. The User may not sublicense or transfer any rights received under the License.
+3. If the User distributes the Program, the recipient must also receive the License text (or its URL) and the "Required Notice:" line at the top of LICENSE.txt.
+4. If the User makes a written claim that the Program infringes a patent, the User's patent license ends immediately under the License.
+
+
+Article 7 (Main Features of the Program)
+
+The Program provides the following features. Details may vary between versions.
+
+1. Disk usage analysis of folders and drives, treemap, size change tracking, and export of results (CSV, HTML)
+2. Detection and cleanup of candidates such as project build outputs, development caches, temporary files and browser caches
+3. Restoring items from quarantine folders, and permanently deleting them when the User confirms
+4. Drive and system status, enabling/disabling startup programs, and ending processes chosen by the User (Booster)
+
+
+Article 8 (Cleanup Safeguards and User Responsibility)
+
+1. The Program cleans up only items that the User has selected and confirmed. Cleaned-up items are moved to the Windows Recycle Bin, or, on drives without one, to the quarantine folder on the same drive.
+2. Permanent deletion (emptying the Recycle Bin, deleting quarantined items) happens only when the User selects the items and separately confirms. Permanently deleted files cannot be recovered by the Program.
+3. The Program protects important locations such as system folders and program installation paths, but does not guarantee that data loss is prevented in every situation.
+4. The User should review the list and confirmation dialogs before cleanup. Backing up important data in advance is recommended.
+5. Ending a process in Booster may discard unsaved work in that program. Startup program settings can be turned back on at any time.
+6. After development tool caches are cleaned up, they must be downloaded again at the next build or install, and builds may fail while offline.
+
+
+Article 9 (Prohibition of Unlawful Use and Responsibility of the Actor)
+
+1. The Provider hopes that the Program will not be used as a hacking tool or for crimes or other unlawful acts.
+2. Please use the Program only on computers and data that you are legitimately authorized to use.
+3. All legal responsibility arising from using the Program for crimes or other unlawful acts, such as hacking, unauthorized access to or deletion of another person's computer or data, or destruction of evidence, lies with the person who committed the act.
+
+
+Article 10 (Personal Information and Data Handling)
+
+1. The Program does not require sign-up or sign-in and does not collect the User's personal information.
+2. The Program does not connect to the internet and does not send any information, including scan results, file lists or usage history, to the Provider or anywhere else. All analysis takes place only on the User's computer.
+3. The Program stores the following information only on the User's computer:
+   - Settings (theme, display language, automatic scan history): registry HKCU\Software\ByteSieve
+   - Scan history (folder paths and sizes): %LOCALAPPDATA%\ByteSieve\history
+   - Quarantined items and their records (original path, time, size, etc.): .bytesieve-trash on each drive
+   - Exported result files: the location chosen by the User
+4. The User can turn off automatic scan history or delete saved history in [Settings].
+5. Uninstalling the Program does not delete the data above. In particular, items in quarantine folders are the User's own files and should be reviewed by the User before being removed.
+
+
+Article 11 (Updates and Distribution)
+
+1. The Program does not update itself. New versions are available at https://github.com/gajigaji-dev/ByteSieve/releases
+2. The Program is not code-signed, so Windows SmartScreen may show a warning on first launch. Verifying downloaded files with SHA256SUMS.txt from the release page is recommended.
+3. The Provider has no obligation to continue developing, distributing or supporting the Program and may stop doing so at any time.
+
+
+Article 12 (Intellectual Property)
+
+Copyright and other intellectual property rights in the Program belong to the Provider. The User may use the Program only to the extent expressly permitted by the License; neither these Terms nor the License grant any other rights.
+
+
+Article 13 (Disclaimer of Warranty)
+
+As far as the law allows, the Program is provided "as is", and the Provider makes no express or implied warranty of any kind, including accuracy, fitness for a particular purpose, or freedom from errors or interruptions.
+
+
+Article 14 (Limitation of Liability)
+
+1. As far as the law allows, the Provider is not liable for any damages, including data loss or business interruption, arising from the use of or inability to use the Program, these Terms, or the License.
+2. This does not apply where liability cannot be limited under applicable law.
+
+
+Article 15 (Termination)
+
+1. The first time the User is notified in writing of a violation of these Terms or the License, the User's rights continue if, within 32 days of receiving notice, the User comes into full compliance with the License and takes practical steps to correct past violations. Otherwise, the User's rights end immediately.
+2. When the User's rights end, the User may no longer use the Program.
+3. The User may stop using the Program at any time by uninstalling it.
+
+
+Article 16 (Changes to These Terms)
+
+1. The Provider may change these Terms or the License when distributing a new version. Changes are shown in that version's installer and release page.
+2. Changed Terms apply from that version onward. Earlier versions the User has already received remain under the Terms and License distributed with them.
+
+
+Article 17 (Contact)
+
+For questions, bug reports or commercial use inquiries, please use https://github.com/gajigaji-dev/ByteSieve/issues
+
+
+Supplementary Provision
+
+These Terms take effect on @EFFECTIVE_DATE@.

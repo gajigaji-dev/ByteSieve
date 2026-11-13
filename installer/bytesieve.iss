@@ -8,6 +8,10 @@
 ;   - 사용자별 설치(관리자 권한 없음): %LOCALAPPDATA%\Programs\ByteSieve. HKCU 가 실제 사용자의 것이 된다.
 ;   - 설치 언어(한국어·English·日本語·简体中文)를 앱 표시 언어로 기록한다(HKCU\Software\ByteSieve\Language).
 ;     이미 값이 있으면(앱 [설정]에서 고른 언어, 이전 설치) 덮어쓰지 않는다.
+;   - 라이선스 화면은 설치 언어의 이용약관(installer\terms\terms-<언어>.txt) 뒤에 [부록] 머리글(LicenseAppendix)과
+;     설치하는 LICENSE.txt(PolyForm Noncommercial 1.0.0 원문)를 수정 없이 이어 붙여 보여 준다(InitializeWizard).
+;     원문의 사본을 따로 두지 않으므로 LICENSE 를 고쳐도 화면과 어긋나지 않는다.
+;     약관 네 언어는 설치 폴더의 terms\ 에도 넣어 설치한 뒤 다시 볼 수 있게 한다(README.txt 에 안내).
 ;   - 제거할 때 지우는 것은 설치한 프로그램 파일·바로 가기뿐이다. 테마·언어 설정, 스캔 기록,
 ;     각 드라이브의 격리 폴더(.bytesieve-trash)는 절대 지우지 않고 남아 있다고 알린다(격리 항목은 사용자 파일).
 ;   - 앱이 실행 중이면(뮤텍스 ByteSieve.Gui.Running, src/gui_main.c) 닫으라고 안내한다.
@@ -79,12 +83,16 @@ ShowLanguageDialog=yes
 UsePreviousLanguage=no
 
 [Languages]
-Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
-Name: "english"; MessagesFile: "compiler:Default.isl"
-Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl"
-Name: "chinesesimplified"; MessagesFile: "{#ZhHansIsl}"
+Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"; LicenseFile: "{#StageDir}\terms\terms-ko.txt"
+Name: "english"; MessagesFile: "compiler:Default.isl"; LicenseFile: "{#StageDir}\terms\terms-en.txt"
+Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl"; LicenseFile: "{#StageDir}\terms\terms-ja.txt"
+Name: "chinesesimplified"; MessagesFile: "{#ZhHansIsl}"; LicenseFile: "{#StageDir}\terms\terms-zh-Hans.txt"
 
 [CustomMessages]
+korean.LicenseAppendix=%n%n==========================================================================%n[부록] 라이선스 원문 - PolyForm Noncommercial License 1.0.0%n아래는 라이선스 원문을 수정하지 않고 그대로 실은 것입니다(영문).%n==========================================================================%n
+english.LicenseAppendix=%n%n==========================================================================%n[Appendix] License text - PolyForm Noncommercial License 1.0.0%nThe License text below is reproduced without modification.%n==========================================================================%n
+japanese.LicenseAppendix=%n%n==========================================================================%n[付録] ライセンス原文 - PolyForm Noncommercial License 1.0.0%n以下は、ライセンス原文を変更せずにそのまま掲載したものです(英文)。%n==========================================================================%n
+chinesesimplified.LicenseAppendix=%n%n==========================================================================%n[附录] 许可证原文 - PolyForm Noncommercial License 1.0.0%n以下为未经修改、按原样收录的许可证原文（英文）。%n==========================================================================%n
 korean.ComponentMain=ByteSieve (필수)
 english.ComponentMain=ByteSieve (required)
 japanese.ComponentMain=ByteSieve（必須）
@@ -114,6 +122,7 @@ Source: "{#StageDir}\bytesieve-gui.exe"; DestDir: "{app}"; Components: main; Fla
 Source: "{#StageDir}\disk-scanner.exe"; DestDir: "{app}"; Components: cli; Flags: ignoreversion
 Source: "{#StageDir}\LICENSE.txt"; DestDir: "{app}"; Components: main; Flags: ignoreversion
 Source: "{#StageDir}\README.txt"; DestDir: "{app}"; Components: main; Flags: ignoreversion
+Source: "{#StageDir}\terms\terms-*.txt"; DestDir: "{app}\terms"; Components: main; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\ByteSieve"; Filename: "{app}\bytesieve-gui.exe"
@@ -140,6 +149,18 @@ end;
 function CustomTypeName(Param: String): String;
 begin
   Result := SetupMessage(msgCustomInstallation);
+end;
+
+procedure InitializeWizard;
+var
+  License: AnsiString;
+begin
+  { 이용약관(LicenseFile) 뒤에 설치 언어의 [부록] 머리글과 라이선스 원문을 그대로 붙인다. 원문은 ASCII 다. }
+  ExtractTemporaryFile('LICENSE.txt');
+  { 원문을 읽지 못하면 원문 없이 동의받지 않도록 설치를 멈춘다. }
+  if not LoadStringFromFile(ExpandConstant('{tmp}\LICENSE.txt'), License) then
+    RaiseException('LICENSE.txt could not be read.');
+  WizardForm.LicenseMemo.Text := WizardForm.LicenseMemo.Text + FmtMessage(CustomMessage('LicenseAppendix'), []) + String(License);
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

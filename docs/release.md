@@ -24,7 +24,7 @@ ByteSieve는 설치형 exe(데스크톱 프로그램)와 포터블 ZIP으로 배
 | 파일 | 내용 |
 |---|---|
 | `ByteSieve-<버전>-setup-x64.exe` | 설치 프로그램(`installer/bytesieve.iss`) |
-| `ByteSieve-<버전>-portable-x64.zip` | `ByteSieve-<버전>-portable-x64\` 폴더 하나에 `bytesieve-gui.exe`·`disk-scanner.exe`·`LICENSE.txt`·`README.txt` |
+| `ByteSieve-<버전>-portable-x64.zip` | `ByteSieve-<버전>-portable-x64\` 폴더 하나에 `bytesieve-gui.exe`·`disk-scanner.exe`·`LICENSE.txt`·`README.txt`·`terms\`(이용약관 네 언어) |
 | `SHA256SUMS.txt` | 위 두 파일의 SHA256(`<해시>  <파일 이름>`) |
 | `RELEASE_NOTES.md` | `CHANGELOG.md`의 그 버전 구역(릴리스 본문으로 씀, 올리지는 않음) |
 
@@ -61,7 +61,7 @@ ByteSieve는 설치형 exe(데스크톱 프로그램)와 포터블 ZIP으로 배
 
 | 단계 | 확인 |
 |---|---|
-| 새로 설치(한국어) | 파일 4개·제거 프로그램, 제거 목록 버전, 언어 기록 `ko`, 설치된 `disk-scanner --version` |
+| 새로 설치(한국어) | 파일 4개·이용약관 4개(`terms\`)·제거 프로그램, 설치한 `LICENSE.txt`가 원문과 같음, 제거 목록 버전, 언어 기록 `ko`, 설치된 `disk-scanner --version` |
 | 업그레이드(1.0.1, 영어 설치) | 제거 목록 버전 1.0.1, 사용자가 고른 언어(`ja`) 유지, 제거 프로그램 하나(같은 AppId) |
 | 앱 실행 중 업그레이드 | 뮤텍스를 감지해 설치하지 않음(조용한 모드는 취소로 끝남), 버전 그대로 |
 | 제거 | 제거 목록·프로그램 파일·제거 프로그램이 사라지고 언어 설정은 남음 |
@@ -78,6 +78,8 @@ ByteSieve는 설치형 exe(데스크톱 프로그램)와 포터블 ZIP으로 배
 ## 릴리스 절차
 
 1. **버전·변경 기록**: `CMakeLists.txt`의 `project(... VERSION x.y.z)`를 올리고, `CHANGELOG.md`에 `## [x.y.z] - 날짜` 구역을 씁니다.
+   이용약관을 바꾼 버전이면 `installer/terms/terms-*.txt` 네 파일의 `@EFFECTIVE_DATE@`(시행일·부칙)를 배포일로 바꿉니다
+   (예: `2026년 12월 1일` / `December 1, 2026` / `2026年12月1日` / `2026年12月1日`). 남아 있으면 태그 빌드가 실패합니다(`tools/package.ps1`).
    README·`docs/*`의 기능 표·테스트 개수가 맞는지 확인합니다.
 2. **로컬 패키징**(선택): `powershell -ExecutionPolicy Bypass -File tools\package.ps1`
    (Release 빌드 → Release 테스트 → `dist\`에 설치 프로그램·ZIP·SHA256). Inno Setup이 없으면 `-NoInstaller`.
@@ -100,7 +102,9 @@ ByteSieve는 설치형 exe(데스크톱 프로그램)와 포터블 ZIP으로 배
 - [ ] `SHA256SUMS.txt`와 내려받은 파일의 `Get-FileHash` 결과가 같다
 - [ ] 설치 프로그램 실행 → SmartScreen 경고에서 [추가 정보] → [실행]으로 진행된다(관리자 권한 요청 없음)
 - [ ] 언어 선택 창에 네 언어가 있고, 고른 언어로 마법사가 나온다. 설치 뒤 앱이 그 언어로 시작한다
-- [ ] 라이선스 화면이 PolyForm Noncommercial 1.0.0이다
+- [ ] 라이선스 화면에 설치 언어의 이용약관이 깨지지 않고 나오고(시행일이 배포일), 본문의 동의 단추 이름이 화면 단추와 같으며,
+      끝까지 내리면 [부록]에 PolyForm Noncommercial 1.0.0 원문이 `Required Notice:` 줄부터 그대로 있다
+- [ ] 설치 폴더의 `terms\`에 약관 네 언어가 있고 `README.txt`가 그 위치를 안내한다
 - [ ] 시작 메뉴 바로 가기로 실행된다. 탐색기 속성 → 자세히에 버전 1.0.0, [설정] → 정보에 1.0.0
 - [ ] 125%·150% 배율에서 글자·사이드바가 잘리지 않는다. 다크 모드 전환이 된다
 - [ ] 폴더 스캔·드라이브·테스트 폴더 정리(휴지통으로 이동)·격리 폴더 복원이 된다

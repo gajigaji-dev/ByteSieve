@@ -91,9 +91,12 @@ function Lang { if (Test-Path $TestKey) { return (Get-ItemProperty $TestKey).Lan
 Write-Host "1. install 1.0.0 (korean)"
 $rc = RunSetup $setup100 "korean" "install.log"
 Check ($rc -eq 0) "exit code 0 (got $rc)"
-foreach ($f in "bytesieve-gui.exe", "disk-scanner.exe", "LICENSE.txt", "README.txt", "unins000.exe") {
+foreach ($f in "bytesieve-gui.exe", "disk-scanner.exe", "LICENSE.txt", "README.txt", "unins000.exe",
+             "terms\terms-ko.txt", "terms\terms-en.txt", "terms\terms-ja.txt", "terms\terms-zh-Hans.txt") {
     Check (Test-Path (Join-Path $app $f)) "installed $f"
 }
+# 설치한 LICENSE.txt 는 저장소의 LICENSE 원문과 바이트까지 같아야 한다(약관을 붙여도 원문은 그대로).
+Check ((Get-FileHash (Join-Path $app "LICENSE.txt")).Hash -eq (Get-FileHash (Join-Path $stage "LICENSE.txt")).Hash) "LICENSE.txt is the original"
 Check ((UninstallValue "DisplayVersion") -eq "1.0.0") "uninstall entry version 1.0.0"
 Check ((Lang) -eq "ko") "language recorded as ko (got $(Lang))"
 $ver = & (Join-Path $app "disk-scanner.exe") --version
@@ -144,6 +147,7 @@ for ($i = 0; $i -lt 60 -and ((Test-Path $TestUninstall) -or (Test-Path (Join-Pat
 }
 Check (-not (Test-Path $TestUninstall)) "uninstall entry removed"
 Check (-not (Test-Path (Join-Path $app "bytesieve-gui.exe"))) "program files removed"
+Check (-not (Test-Path (Join-Path $app "terms"))) "terms folder removed"
 Check (-not (Test-Path (Join-Path $app "unins000.exe"))) "uninstaller removed"
 Check ((Lang) -eq "ja") "language setting kept after uninstall (got $(Lang))"
 

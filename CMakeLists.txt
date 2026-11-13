@@ -248,6 +248,9 @@ bytesieve_exe_resources(disk-scanner ${CMAKE_CURRENT_SOURCE_DIR}/res/cli.rc)
 install(TARGETS bytesieve-gui disk-scanner RUNTIME DESTINATION .)
 install(FILES LICENSE DESTINATION . RENAME LICENSE.txt)
 install(FILES installer/README.txt DESTINATION .)
+# 이용약관(설치 화면에 쓰고, 설치한 뒤에도 terms\ 에서 다시 볼 수 있게 함께 배포)
+install(FILES installer/terms/terms-ko.txt installer/terms/terms-en.txt installer/terms/terms-ja.txt
+              installer/terms/terms-zh-Hans.txt DESTINATION terms)
 
 enable_testing()
 

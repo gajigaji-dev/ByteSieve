@@ -158,12 +158,22 @@ GUI 자체 검사는 화면 문구를 한국어로 확인하므로 한국어로 
 - **앱과 연동**: 고른 언어를 `HKCU\Software\ByteSieve\Language`에 `ko`·`en`·`ja`·`zh-Hans`로 기록합니다. 그래서 앱은 설치 언어로
   시작합니다. 이미 값이 있으면(앱 [설정]에서 고른 언어, 이전 설치) 덮어쓰지 않습니다. 사용자별 설치(관리자 권한 없음)라
   HKCU가 실제 사용자의 것입니다.
-- **화면 구성**: 언어 선택 → 라이선스(PolyForm Noncommercial 1.0.0, `LICENSE`) → 설치 위치(기본 `%LOCALAPPDATA%\Programs\ByteSieve`)
+- **화면 구성**: 언어 선택 → 이용약관·라이선스 → 설치 위치(기본 `%LOCALAPPDATA%\Programs\ByteSieve`)
   → 구성 요소(ByteSieve 필수, `disk-scanner` 선택) → 추가 작업(바탕 화면 바로 가기, 기본 꺼짐) → 설치 → 완료([ByteSieve 실행] 체크).
   설치 프로그램 아이콘은 앱 아이콘(`res/bytesieve.ico`)과 같습니다.
+- **이용약관·라이선스 화면**: 설치 언어의 조항 형식 이용약관(목적·정의·라이선스와의 관계·요금·허용/제한되는 이용·기능·
+  정리 기능의 안전 장치와 이용자 책임·불법 이용의 금지와 행위자의 책임·개인정보와 데이터 처리·업데이트·지식재산권·보증 부인·
+  책임 제한·종료·변경·문의)을 먼저 보여 주고, 그 아래 설치 언어의 [부록] 머리글(`[CustomMessages]`의 `LicenseAppendix`)과
+  `LICENSE`(PolyForm Noncommercial 1.0.0) 원문을 **수정 없이** 붙입니다. 약관은 `installer/terms/terms-<언어>.txt`
+  (`ko`·`en`·`ja`·`zh-Hans`, UTF-8 BOM)이고, 본문에서 인용하는 동의 단추 이름은 그 언어 메시지 파일의 `LicenseAccepted`와 같습니다.
+  원문은 사본을 두지 않고 설치 프로그램이 실행할 때 설치하는 `LICENSE.txt`를 읽어 이어 붙이므로(`InitializeWizard`),
+  `LICENSE`를 고치면 화면도 따라갑니다. 약관과 원문이 다르면 원문이 우선한다고 약관 제3조에 적습니다.
+  일본어·중국어 간체 약관은 한국어·영어 약관의 번역 초안이며 검토가 필요하다고 본문 맨 위에 적습니다.
+  시행일은 `@EFFECTIVE_DATE@` 자리 표시자로 두고 배포할 때 실제 날짜로 바꿉니다([release.md](release.md#릴리스-절차)).
+- **설치한 뒤 약관 보기**: 약관 네 언어를 설치 폴더(포터블 ZIP 포함)의 `terms\`에 넣고, `README.txt`에서 위치를 안내합니다.
 - **실행 중인 앱**: GUI가 만드는 뮤텍스 `ByteSieve.Gui.Running`으로 알아보고 닫으라고 안내합니다.
 - **제거**: 설치한 프로그램 파일·바로 가기만 지웁니다. 테마·언어 설정(`HKCU\Software\ByteSieve`), 스캔 기록
   (`%LOCALAPPDATA%\ByteSieve\history`), 각 드라이브의 격리 폴더(`.bytesieve-trash`)는 **지우지 않고** 남아 있다고 알립니다
   (격리 항목은 사용자 파일이므로 자동으로 지우면 안 됨. 설정은 재설치할 때 그대로 쓰도록 남김).
-- **포함 파일**: `bytesieve-gui.exe`, `disk-scanner.exe`(선택 구성 요소), `LICENSE.txt`, `README.txt`. 번역은 exe 안의 문자열 표라
-  언어별 파일이 따로 없습니다.
+- **포함 파일**: `bytesieve-gui.exe`, `disk-scanner.exe`(선택 구성 요소), `LICENSE.txt`, `README.txt`,
+  `terms\terms-{ko,en,ja,zh-Hans}.txt`(이용약관). 앱 번역은 exe 안의 문자열 표라 언어별 파일이 따로 없습니다.
