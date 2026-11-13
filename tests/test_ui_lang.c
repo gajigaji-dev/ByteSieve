@@ -68,6 +68,23 @@ static void test_table(void)
             }
         }
     }
+    /* 번역 누락: 한국어가 아닌 문자열에 한글(가-힣)이 들어 있으면 한국어를 그대로 넣은 것이다. */
+    for (id = 0; id < UI_T_COUNT; id++) {
+        for (lang = 0; lang < UI_LANG_COUNT; lang++) {
+            const wchar_t *s = ui_text_in((UiLang)lang, (UiText)id);
+            if (lang == UI_LANG_KO) {
+                continue;
+            }
+            for (; *s != L'\0'; s++) {
+                if (*s >= 0xAC00 && *s <= 0xD7A3) {
+                    fprintf(stderr, "untranslated (Hangul): id %d, lang %ls\n", id,
+                            ui_lang_name((UiLang)lang));
+                    g_failures++;
+                    break;
+                }
+            }
+        }
+    }
     /* 폴더 상태 표시는 이름 뒤에 붙으므로 모든 언어에서 공백으로 시작한다. */
     for (id = UI_T_FLAG_FAILED; id <= UI_T_FLAG_DEPTH_LIMIT; id++) {
         for (lang = 0; lang < UI_LANG_COUNT; lang++) {

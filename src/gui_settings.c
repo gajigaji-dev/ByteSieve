@@ -52,6 +52,9 @@ typedef struct {
     int dpi;
     ThemeMode theme_mode;
     int status_error; /* 상태 줄을 경고 색으로 */
+    /* 상태 줄 내용(언어를 바꾸면 새 언어로 다시 쓴다): 문구 번호와 그 %lu 인자. 비었으면 UI_T_COUNT. */
+    UiText status_text;
+    unsigned long status_arg;
 } SettingsPanel;
 
 typedef struct {
@@ -69,11 +72,26 @@ static int pscale(const SettingsPanel *p, int px)
     return MulDiv(px, p->dpi, 96);
 }
 
-static void set_status(SettingsPanel *p, const wchar_t *text, int error)
+/* 상태 줄을 기억해 둔 문구 번호·인자와 지금 언어로 쓴다. */
+static void render_status(SettingsPanel *p)
+{
+    wchar_t text[256];
+
+    text[0] = L'\0';
+    if (p->status_text < UI_T_COUNT) {
+        swprintf(text, 256, ui_text(p->status_text), p->status_arg);
+    }
+    SetWindowTextW(p->status, text);
+    InvalidateRect(p->status, NULL, TRUE);
+}
+
+/* 상태 줄에 문구 id(인자 %lu 하나 또는 없음)를 보인다. id 가 UI_T_COUNT 면 비운다. */
+static void set_status(SettingsPanel *p, UiText id, unsigned long arg, int error)
 {
     p->status_error = error;
-    SetWindowTextW(p->status, text != NULL ? text : L"");
-    InvalidateRect(p->status, NULL, TRUE);
+    p->status_text = id;
+    p->status_arg = arg;
+    render_status(p);
 }
 
 /* ---- 언어 ---- */
@@ -113,7 +131,6 @@ static void update_lang_note(SettingsPanel *p)
 
 static int apply_language(SettingsPanel *p, int index)
 {
-    wchar_t text[256];
     unsigned long error = 0;
     UiLang lang;
     int ok;
@@ -125,12 +142,14 @@ static int apply_language(SettingsPanel *p, int index)
     lang = (UiLang)(index - 1);
     ok = settings_save_language(index == 0 ? NULL : &lang, &error) == 0;
     if (ok) {
-        set_status(p, NULL, 0);
+        set_status(p, UI_T_COUNT, 0, 0);
     } else {
-        swprintf(text, 256, ui_text(UI_T_SET_SAVE_FAILED), error);
-        set_status(p, text, 1);
+        set_status(p, UI_T_SET_SAVE_FAILED, error, 1);
     }
     update_lang_note(p);
+    /* 저장에 실패해도 이번 실행에는 적용한다(부모가 언어를 바꾸고 settings_panel_apply_language 를 부름). */
+    SendMessageW(GetParent(p->hwnd), WM_COMMAND,
+                 MAKEWPARAM(GetDlgCtrlID(p->hwnd), STN_LANGUAGE_CHANGED), (LPARAM)p->hwnd);
     return ok;
 }
 
@@ -151,7 +170,6 @@ static void update_theme_note(SettingsPanel *p)
 
 static int apply_theme(SettingsPanel *p, ThemeMode mode)
 {
-    wchar_t text[256];
     unsigned long error = 0;
     int ok;
 
@@ -162,10 +180,9 @@ static int apply_theme(SettingsPanel *p, ThemeMode mode)
     p->theme_mode = mode;
     ok = settings_save_theme(mode, &error) == 0;
     if (ok) {
-        set_status(p, NULL, 0);
+        set_status(p, UI_T_COUNT, 0, 0);
     } else {
-        swprintf(text, 256, ui_text(UI_T_SET_SAVE_FAILED), error);
-        set_status(p, text, 1);
+        set_status(p, UI_T_SET_SAVE_FAILED, error, 1);
     }
     /* 저장에 실패해도 이번 실행에는 적용한다. */
     SendMessageW(GetParent(p->hwnd), WM_COMMAND,
@@ -374,19 +391,17 @@ static void panel_create_controls(SettingsPanel *p)
 
 static void open_history_dir(SettingsPanel *p)
 {
-    wchar_t dir[MAX_PATH * 2], text[256];
+    wchar_t dir[MAX_PATH * 2];
     INT_PTR rc;
 
     if (history_default_dir(dir, sizeof(dir) / sizeof(dir[0])) != 0 ||
         history_ensure_dir(dir) != 0) {
-        swprintf(text, 256, ui_text(UI_T_SET_SAVE_FAILED), (unsigned long)GetLastError());
-        set_status(p, text, 1);
+        set_status(p, UI_T_SET_SAVE_FAILED, (unsigned long)GetLastError(), 1);
         return;
     }
     rc = (INT_PTR)ShellExecuteW(p->hwnd, L"open", dir, NULL, NULL, SW_SHOWNORMAL);
     if (rc <= 32) {
-        swprintf(text, 256, ui_text(UI_T_SET_SAVE_FAILED), (unsigned long)rc);
-        set_status(p, text, 1);
+        set_status(p, UI_T_SET_SAVE_FAILED, (unsigned long)rc, 1);
     }
 }
 
@@ -404,6 +419,7 @@ static LRESULT CALLBACK panel_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         p->hwnd = hwnd;
         p->font = params->font;
         p->dpi = params->dpi;
+        p->status_text = UI_T_COUNT;
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)p);
         break;
     }
@@ -523,6 +539,77 @@ int settings_panel_set_language(HWND panel, const UiLang *lang)
     return apply_language(p, lang == NULL ? 0 : (int)*lang + 1);
 }
 
+UiLang settings_panel_language(HWND panel)
+{
+    SettingsPanel *p = panel_of(panel);
+
+    if (p == NULL) {
+        return ui_lang_current();
+    }
+    return chosen_language((int)SendMessageW(p->language, CB_GETCURSEL, 0, 0));
+}
+
+void settings_panel_apply_language(HWND panel, HFONT font)
+{
+    SettingsPanel *p = panel_of(panel);
+    HFONT head;
+    HWND child;
+    wchar_t text[128];
+    LRESULT sel;
+    int i;
+
+    if (p == NULL) {
+        return;
+    }
+    if (font != NULL && font != p->font) {
+        HFONT section = create_section_font(font, p->dpi);
+        p->font = font;
+        if (p->section_font != NULL) {
+            DeleteObject(p->section_font);
+        }
+        p->section_font = section;
+    }
+    head = p->section_font != NULL ? p->section_font : p->font;
+    for (child = GetWindow(p->hwnd, GW_CHILD); child != NULL; child = GetWindow(child, GW_HWNDNEXT)) {
+        int is_head = child == p->h_appearance || child == p->h_language ||
+                      child == p->h_history || child == p->h_about;
+        SendMessageW(child, WM_SETFONT, (WPARAM)(is_head ? head : p->font), FALSE);
+    }
+
+    SetWindowTextW(p->h_appearance, ui_text(UI_T_SET_APPEARANCE));
+    SetWindowTextW(p->l_theme, ui_text(UI_T_SET_THEME));
+    sel = SendMessageW(p->theme, CB_GETCURSEL, 0, 0);
+    SendMessageW(p->theme, CB_RESETCONTENT, 0, 0);
+    for (i = 0; i < THEME_MODE_COUNT; i++) {
+        SendMessageW(p->theme, CB_ADDSTRING, 0, (LPARAM)ui_text(settings_theme_text((ThemeMode)i)));
+    }
+    SendMessageW(p->theme, CB_SETCURSEL, (WPARAM)sel, 0);
+    SetWindowTextW(p->theme_note, ui_text(UI_T_SET_THEME_HC));
+
+    SetWindowTextW(p->h_language, ui_text(UI_T_SET_LANGUAGE));
+    SetWindowTextW(p->l_language, ui_text(UI_T_SET_LANG_LABEL));
+    /* "시스템 설정 따르기(…)" 항목만 지금 언어로 바꾼다(언어 이름은 그 언어 자체로 쓴 것이라 그대로). */
+    sel = SendMessageW(p->language, CB_GETCURSEL, 0, 0);
+    swprintf(text, 128, ui_text(UI_T_LANG_SYSTEM),
+             ui_lang_native_name(ui_lang_from_langid(GetUserDefaultUILanguage())));
+    SendMessageW(p->language, CB_DELETESTRING, 0, 0);
+    SendMessageW(p->language, CB_INSERTSTRING, 0, (LPARAM)text);
+    SendMessageW(p->language, CB_SETCURSEL, (WPARAM)sel, 0);
+
+    SetWindowTextW(p->h_history, ui_text(UI_T_SET_HISTORY));
+    SetWindowTextW(p->autosave, ui_text(UI_T_SCAN_AUTOSAVE));
+    SetWindowTextW(p->open_dir, ui_text(UI_T_SET_OPEN_DIR));
+    fill_history_dir(p);
+    SetWindowTextW(p->h_about, ui_text(UI_T_SET_ABOUT));
+    swprintf(text, 128, ui_text(UI_T_SET_VERSION), BYTESIEVE_VERSION_WSTRING);
+    SetWindowTextW(p->version, text);
+
+    update_lang_note(p);
+    render_status(p);
+    panel_layout(p);
+    InvalidateRect(p->hwnd, NULL, TRUE);
+}
+
 int settings_panel_autosave_request(HWND panel)
 {
     SettingsPanel *p = panel_of(panel);
@@ -539,7 +626,7 @@ void settings_panel_sync(HWND panel, int autosave_on, int ok)
     }
     SendMessageW(p->autosave, BM_SETCHECK, autosave_on ? BST_CHECKED : BST_UNCHECKED, 0);
     if (!ok) {
-        set_status(p, ui_text(UI_T_SET_AUTOSAVE_FAILED), 1);
+        set_status(p, UI_T_SET_AUTOSAVE_FAILED, 0, 1);
     }
     update_theme_note(p);
     fill_history_dir(p);

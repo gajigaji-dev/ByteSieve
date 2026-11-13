@@ -94,7 +94,8 @@ typedef enum {
     SELF_TEST_BOOSTER, /* 부스터 페이지 목록·CPU 측정 → 화면·보호 판정 검증(아무것도 바꾸지 않음) → 종료 */
     SELF_TEST_NAV,    /* 사이드바 키보드·마우스 이동 → 페이지 전환·제목·처음 열 때 조회 횟수 검증 → 종료 */
     SELF_TEST_THEME,  /* 테마 밝게 → 어둡게 → 시스템(어둡게·밝게) → 밝게 고정, 단계마다 컨트롤 색 검증 → 종료 */
-    SELF_TEST_SETTINGS /* [설정]에서 언어 저장(다음 실행 언어)·자동 저장 끄고 켜기 → 저장 값·두 페이지 검증 → 종료 */
+    SELF_TEST_SETTINGS, /* [설정]에서 언어 바꾸기(저장 값·즉시 적용)·자동 저장 끄고 켜기 → 저장 값·두 페이지 검증 → 종료 */
+    SELF_TEST_LANG_SWITCH /* 스캔(한국어) → 언어를 en·ja·zh-Hans·ko 로 차례로 바꾸며 결과·상태 줄·문구 다시 쓰기 검증 → 종료 */
 } SelfTest;
 
 typedef struct {
@@ -103,7 +104,8 @@ typedef struct {
     HWND title;
     HWND pages[NAV_PAGE_COUNT];
     NavPage page; /* 보이는 페이지 */
-    HFONT font;
+    HFONT font;       /* 지금 언어의 UI 글꼴(사이드바·폴더 스캔·설정) */
+    HFONT base_font;  /* 시작할 때 만든 글꼴: 아직 번역하지 않은 페이지가 계속 쓴다(끝날 때 해제) */
     HFONT title_font;
     int dpi;
     ThemeMode theme_mode; /* 지금 테마 설정(시스템·밝게·어둡게) */
@@ -296,6 +298,72 @@ static void apply_theme(void)
     theme_apply_window(g_app.hwnd);
 }
 
+/* ---- 표시 언어 ---- */
+
+/* 언어에 맞는 UI 글꼴(한자 모양이 언어마다 달라 글꼴 이름을 고른다). 실패하면 시스템 글꼴, 그것도 실패하면 NULL. */
+static HFONT create_ui_font(UiLang lang)
+{
+    HFONT font = theme_create_ui_font(lang);
+
+    if (font == NULL) {
+        NONCLIENTMETRICSW ncm;
+        memset(&ncm, 0, sizeof(ncm));
+        ncm.cbSize = sizeof(ncm);
+        SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
+        font = CreateFontIndirectW(&ncm.lfMessageFont);
+    }
+    return font;
+}
+
+/*
+ * 표시 언어를 실행 중에 바꾼다: 언어별 글꼴을 새로 만들어 번역된 화면(사이드바·제목·폴더 스캔·설정)의
+ * 문구와 글꼴을 다시 쓰고, 문구 길이에 맞게 최소 창 크기·배치를 다시 계산한다. 아직 번역하지 않은
+ * 페이지는 문구가 그대로라 시작할 때의 글꼴(base_font)을 계속 쓴다. 같은 언어면 아무것도 하지 않는다.
+ * 새 글꼴을 만들지 못하면 언어를 바꾸지 않는다.
+ */
+static void apply_language(UiLang lang)
+{
+    HFONT font, title_font, old_font = g_app.font, old_title = g_app.title_font;
+    RECT wr;
+    int cx, cy;
+
+    if (lang == ui_lang_current() || (unsigned)lang >= (unsigned)UI_LANG_COUNT) {
+        return;
+    }
+    font = create_ui_font(lang);
+    if (font == NULL) {
+        return;
+    }
+    ui_lang_set(lang);
+    title_font = theme_create_title_font(font, g_app.dpi);
+    g_app.font = font;
+    g_app.title_font = title_font;
+
+    nav_view_set_font(g_app.nav, font);
+    SendMessageW(g_app.title, WM_SETFONT, (WPARAM)(title_font != NULL ? title_font : font), FALSE);
+    SetWindowTextW(g_app.title, ui_text(nav_page_text(g_app.page)));
+    scan_panel_apply_language(g_app.pages[NAV_PAGE_SCAN], font);
+    settings_panel_apply_language(g_app.pages[NAV_PAGE_SETTINGS], font);
+    /* 이전 글꼴은 이제 번역된 화면이 쓰지 않는다(시작 글꼴은 번역하지 않은 페이지가 쓰므로 남긴다). */
+    if (old_font != NULL && old_font != g_app.base_font) {
+        DeleteObject(old_font);
+    }
+    if (old_title != NULL) {
+        DeleteObject(old_title);
+    }
+
+    /* 문구가 길어진 언어면 최소 창 크기보다 작아지지 않게 넓힌다(WM_SIZE → layout). */
+    GetWindowRect(g_app.hwnd, &wr);
+    min_window_size(&cx, &cy);
+    if (wr.right - wr.left < cx || wr.bottom - wr.top < cy) {
+        SetWindowPos(g_app.hwnd, NULL, 0, 0, wr.right - wr.left > cx ? wr.right - wr.left : cx,
+                     wr.bottom - wr.top > cy ? wr.bottom - wr.top : cy,
+                     SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+    layout();
+    InvalidateRect(g_app.hwnd, NULL, TRUE);
+}
+
 /* [설정] 패널 알림: 테마를 바꿨으면 적용하고, 자동 저장 요청은 폴더 스캔 패널과 같은 경로로 저장한다. */
 static void on_settings_notify(int code)
 {
@@ -304,6 +372,13 @@ static void on_settings_notify(int code)
     if (code == STN_THEME_CHANGED) {
         g_app.theme_mode = settings_panel_theme(settings);
         apply_theme();
+    } else if (code == STN_LANGUAGE_CHANGED) {
+        /* 환경 변수 BYTESIEVE_LANG 이 있으면 그 언어가 먼저다(설정 패널이 안내를 보임). */
+        UiLang lang;
+        if (!settings_lang_env_override(&lang)) {
+            lang = settings_panel_language(settings);
+        }
+        apply_language(lang);
     } else if (code == STN_AUTOSAVE) {
         int ok = scan_panel_set_autosave(scan, settings_panel_autosave_request(settings));
         settings_panel_sync(settings, scan_panel_autosave(scan), ok);
@@ -442,7 +517,7 @@ static int self_test_cleaner_run(NavPage page)
  * 최소 창 크기에서도 사이드바 문구가 잘리지 않고 폴더 스캔 페이지의 단추·체크 상자 문구가 잘리지 않고
  * 패널 안에 있는지 확인한다.
  */
-static int verify_lang(void)
+static int check_lang(LOGFONTW *out_font, int *out_min_width)
 {
     const wchar_t *face = theme_font_face(ui_lang_current());
     LOGFONTW lf;
@@ -452,7 +527,7 @@ static int verify_lang(void)
     memset(&lf, 0, sizeof(lf));
     SELF_CHECK(GetObjectW(g_app.font, sizeof(lf), &lf) == sizeof(lf));
     SELF_CHECK(face == NULL || wcscmp(lf.lfFaceName, face) == 0);
-    SELF_CHECK(text_is(g_app.title, ui_text(nav_page_text(NAV_PAGE_SCAN))));
+    SELF_CHECK(text_is(g_app.title, ui_text(nav_page_text(g_app.page))));
 
     /* 최소 창 크기로 줄여 배치한다(WM_SIZE → layout). */
     min_window_size(&cx, &cy);
@@ -477,11 +552,51 @@ static int verify_lang(void)
     }
     failures += scan_panel_verify_lang(g_app.pages[NAV_PAGE_SCAN]);
     failures += settings_panel_verify_lang(g_app.pages[NAV_PAGE_SETTINGS]);
+    *out_font = lf;
+    *out_min_width = cx;
+    return failures;
+}
+
+static int verify_lang(void)
+{
+    LOGFONTW lf;
+    int cx, failures = check_lang(&lf, &cx);
 
     /* 성공했을 때만 요약을 쓴다(CTest 가 이 줄로 통과를 판정한다). */
     if (failures == 0) {
         wprintf(L"lang: %ls, font: %ls, min width: %d\n", ui_lang_name(ui_lang_current()),
                 lf.lfFaceName, cx);
+        fflush(stdout);
+    }
+    return failures == 0 ? 0 : 1;
+}
+
+/*
+ * --self-test-lang-switch: 한국어로 스캔을 마친 화면에서 표시 언어를 en → ja → zh-Hans → ko 로 바꾸며
+ * 단계마다 언어별 글꼴, 사이드바·제목, 폴더 스캔 페이지(단추·보기·열 머리글, 상태 줄의 스캔 결과, 분석 줄,
+ * 트리·변화 열)와 설정 페이지가 새 언어로 다시 쓰였고 잘리지 않는지 확인한다(check_lang). 아직 번역하지
+ * 않은 페이지가 쓰는 시작 글꼴은 그대로 살아 있어야 한다.
+ */
+static int verify_lang_switch(void)
+{
+    static const UiLang order[] = {UI_LANG_EN, UI_LANG_JA, UI_LANG_ZH_HANS, UI_LANG_KO};
+    LOGFONTW lf, base;
+    int failures = 0, cx;
+    size_t i;
+
+    SELF_CHECK(ui_lang_current() == UI_LANG_KO);
+    failures += check_lang(&lf, &cx);
+    for (i = 0; i < sizeof(order) / sizeof(order[0]); i++) {
+        apply_language(order[i]);
+        SELF_CHECK(ui_lang_current() == order[i]);
+        failures += check_lang(&lf, &cx);
+        SELF_CHECK(GetObjectW(g_app.base_font, sizeof(base), &base) == sizeof(base));
+        if (failures == 0) {
+            wprintf(L"lang-switch: %ls, font: %ls\n", ui_lang_name(order[i]), lf.lfFaceName);
+        }
+    }
+    if (failures == 0) {
+        wprintf(L"lang-switch: en ja zh-Hans ko\n");
         fflush(stdout);
     }
     return failures == 0 ? 0 : 1;
@@ -741,16 +856,18 @@ static int verify_theme(void)
 }
 
 /*
- * --self-test-settings: [설정]에서 표시 언어를 일본어 → 한국어 → 시스템 따르기로 저장하며 저장 값·다음 실행
- * 언어(ui_lang_detect)·안내를 확인하고(지금 화면 언어는 그대로), [스캔 기록 자동 저장]을 끄고 켜며 폴더 스캔
- * 페이지·설정 파일과 맞는지 확인한다. BYTESIEVE_LANG 이 없고 BYTESIEVE_HISTORY_DIR 이 테스트 폴더여야 한다.
+ * --self-test-settings: [설정]에서 표시 언어를 일본어 → 한국어 → 시스템 따르기로 바꾸며 저장 값·다음 실행
+ * 언어(ui_lang_detect)·안내와, 화면에 바로 적용됐는지(지금 언어·번역된 페이지 문구, check_lang)를 확인하고,
+ * [스캔 기록 자동 저장]을 끄고 켜며 폴더 스캔 페이지·설정 파일과 맞는지 확인한다.
+ * BYTESIEVE_LANG 이 없고 BYTESIEVE_HISTORY_DIR 이 테스트 폴더여야 한다.
  */
 static int verify_settings(void)
 {
     HWND settings = g_app.pages[NAV_PAGE_SETTINGS], scan = g_app.pages[NAV_PAGE_SCAN];
     wchar_t dir[MAX_PATH * 2];
     UiLang lang = UI_LANG_JA, stored;
-    int failures = 0, before;
+    LOGFONTW lf;
+    int failures = 0, before, cx;
 
     SELF_CHECK(!settings_lang_env_override(&stored));
     SELF_CHECK(GetEnvironmentVariableW(L"BYTESIEVE_HISTORY_DIR", dir, MAX_PATH * 2) > 0);
@@ -759,20 +876,25 @@ static int verify_settings(void)
     failures += verify_page_shown(NAV_PAGE_SETTINGS);
     failures += settings_panel_verify(settings, scan_panel_autosave(scan));
 
-    /* 언어: 저장만 하고 지금 화면 언어(한국어)는 바꾸지 않는다 */
+    /* 언어: 저장하고 지금 화면에도 바로 적용한다(다음 실행 언어도 같다) */
     SELF_CHECK(settings_panel_set_language(settings, &lang));
     SELF_CHECK(settings_load_language(&stored) && stored == UI_LANG_JA);
     SELF_CHECK(ui_lang_detect() == UI_LANG_JA);
-    SELF_CHECK(ui_lang_current() == UI_LANG_KO);
+    SELF_CHECK(ui_lang_current() == UI_LANG_JA);
     failures += settings_panel_verify(settings, scan_panel_autosave(scan));
+    failures += check_lang(&lf, &cx);
     lang = UI_LANG_KO;
     SELF_CHECK(settings_panel_set_language(settings, &lang));
     SELF_CHECK(ui_lang_detect() == UI_LANG_KO);
+    SELF_CHECK(ui_lang_current() == UI_LANG_KO);
     failures += settings_panel_verify(settings, scan_panel_autosave(scan));
+    failures += check_lang(&lf, &cx);
     SELF_CHECK(settings_panel_set_language(settings, NULL));
     SELF_CHECK(!settings_load_language(&stored));
     SELF_CHECK(ui_lang_detect() == ui_lang_from_langid(GetUserDefaultUILanguage()));
+    SELF_CHECK(ui_lang_current() == ui_lang_from_langid(GetUserDefaultUILanguage()));
     failures += settings_panel_verify(settings, scan_panel_autosave(scan));
+    failures += check_lang(&lf, &cx);
 
     /* 자동 저장: 설정 페이지에서 끄고 켠다(폴더 스캔 페이지·설정 파일이 함께 바뀜) */
     before = scan_panel_autosave(scan);
@@ -829,15 +951,8 @@ static void create_controls(void)
     HINSTANCE inst = GetModuleHandleW(NULL);
     int i;
 
-    /* 언어에 맞는 UI 글꼴(한자 모양이 언어마다 달라 글꼴 이름을 고른다). 실패하면 시스템 글꼴. */
-    g_app.font = theme_create_ui_font(ui_lang_current());
-    if (g_app.font == NULL) {
-        NONCLIENTMETRICSW ncm;
-        memset(&ncm, 0, sizeof(ncm));
-        ncm.cbSize = sizeof(ncm);
-        SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
-        g_app.font = CreateFontIndirectW(&ncm.lfMessageFont);
-    }
+    g_app.font = create_ui_font(ui_lang_current());
+    g_app.base_font = g_app.font;
     g_app.title_font = theme_create_title_font(g_app.font, g_app.dpi);
 
     /* 탭 순서가 화면 순서와 같도록 사이드바부터 만든다. */
@@ -883,6 +998,13 @@ static int on_page_notify(int id, int code)
 
     if (g_app.self_test == SELF_TEST_NONE) {
         return 0;
+    }
+    if (id == IDC_SCANPAGE && code == SPN_FINISHED && g_app.self_test == SELF_TEST_LANG_SWITCH) {
+        /* 먼저 한국어 결과 화면이 맞는지 확인한 뒤 언어를 바꿔 간다. */
+        int rc = page_exit(scan_panel_verify(g_app.pages[NAV_PAGE_SCAN], SCAN_VERIFY_SCAN, NULL, 0),
+                           NAV_PAGE_SCAN);
+        finish_self_test(rc != 0 ? rc : verify_lang_switch());
+        return 1;
     }
     if (id == IDC_SCANPAGE && code == SPN_FINISHED) {
         finish_self_test(page_exit(scan_panel_verify(g_app.pages[NAV_PAGE_SCAN], scan_verify_mode(),
@@ -1116,6 +1238,7 @@ static void parse_args(int argc, wchar_t **argv, const wchar_t **target,
         {L"--self-test-nav", SELF_TEST_NAV, 0},
         {L"--self-test-theme", SELF_TEST_THEME, 0},
         {L"--self-test-settings", SELF_TEST_SETTINGS, 0},
+        {L"--self-test-lang-switch", SELF_TEST_LANG_SWITCH, 1},
     };
     size_t i;
 
@@ -1135,6 +1258,7 @@ static void parse_args(int argc, wchar_t **argv, const wchar_t **target,
             case SELF_TEST_NO_AUTOSAVE:
             case SELF_TEST_CLEAR_HISTORY:
             case SELF_TEST_CANCEL:
+            case SELF_TEST_LANG_SWITCH:
                 *target = argv[2];
                 break;
             case SELF_TEST_EXPORT:
@@ -1425,6 +1549,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmd, int show)
     /* 자체 검사의 경로 인자(quarantine_root 등)를 루프 동안 쓰므로 끝난 뒤 해제한다. */
     LocalFree(argv);
     DeleteObject(g_app.font);
+    if (g_app.base_font != NULL && g_app.base_font != g_app.font) {
+        DeleteObject(g_app.base_font);
+    }
     if (g_app.title_font != NULL) {
         DeleteObject(g_app.title_font);
     }

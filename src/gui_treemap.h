@@ -35,7 +35,7 @@ typedef enum {
     TREEMAP_COLOR_COUNT
 } TreemapColorMode;
 
-/* 메뉴용 이름("깊이" 등). */
+/* 메뉴용 이름("깊이" 등, 지금 표시 언어). */
 const wchar_t *treemap_color_text(TreemapColorMode mode);
 
 /* 식별자 이름("depth" 등). */
@@ -46,6 +46,13 @@ int treemap_view_register(HINSTANCE inst);
 
 /* 트리맵 창을 만든다(처음에는 숨김). 글꼴은 호출자가 소유하며 창보다 오래 살아야 한다. */
 HWND treemap_view_create(HWND parent, int id, HFONT font, int dpi);
+
+/*
+ * 글꼴을 바꾸고(표시 언어를 바꿨을 때) 다시 그린다. 굵은 글꼴·글줄 높이·풍선 도움말 글꼴도 맞춘다.
+ * 그림·안내·풍선 도움말·메뉴 문구는 그릴 때마다 지금 언어로 가져오므로 따로 바꿀 것이 없다.
+ * 글꼴은 호출자가 소유하며 창보다 오래 살아야 한다. font 가 NULL 이면 아무것도 하지 않는다.
+ */
+void treemap_view_set_font(HWND view, HFONT font);
 
 /* 모델을 바꾼다(NULL 이면 비움). 기준 폴더는 루트(0), 고른 폴더는 없음으로 돌아간다. */
 void treemap_view_set_model(HWND view, const ScanModel *model);

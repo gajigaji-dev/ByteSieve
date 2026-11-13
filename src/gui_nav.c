@@ -335,6 +335,17 @@ HWND nav_view_create(HWND parent, int id, HFONT font, int dpi)
                            parent, (HMENU)(INT_PTR)id, GetModuleHandleW(NULL), &params);
 }
 
+void nav_view_set_font(HWND nav, HFONT font)
+{
+    NavView *v = nav_of(nav);
+
+    if (v == NULL || font == NULL) {
+        return;
+    }
+    v->font = font;
+    InvalidateRect(nav, NULL, FALSE);
+}
+
 int nav_view_min_height(HWND nav)
 {
     NavView *v = nav_of(nav);

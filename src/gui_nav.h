@@ -26,6 +26,12 @@ int nav_view_register(HINSTANCE inst);
 /* 사이드바를 만든다(보이는 상태, 처음 고른 항목은 NAV_PAGE_SCAN). 글꼴은 호출자가 소유한다. */
 HWND nav_view_create(HWND parent, int id, HFONT font, int dpi);
 
+/*
+ * 글꼴을 바꾸고(표시 언어를 바꿨을 때) 다시 그린다. 문구는 그릴 때마다 지금 언어로 가져오고 폭도
+ * nav_view_width 가 그때 재므로, 부모는 이어서 다시 배치하면 된다. 글꼴은 호출자가 소유한다.
+ */
+void nav_view_set_font(HWND nav, HFONT font);
+
 /* 사이드바 폭: 가장 긴 문구(머리글·항목) + 여백, 최소 200px(96 DPI 기준). */
 int nav_view_width(HWND nav);
 
