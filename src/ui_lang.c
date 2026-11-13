@@ -921,6 +921,574 @@ static const wchar_t *const k_text[UI_T_COUNT][UI_LANG_COUNT] = {
     [UI_T_C_BROWSE_TITLE] = {L"정리 후보를 찾을 폴더를 선택하세요.",
                              L"Choose a folder to search for cleanup candidates.",
                              L"整理候補を探すフォルダーを選んでください。", L"请选择要查找清理候选项的文件夹。"},
+
+    /* ---- core: Cleaner 대상 종류 이름·설명 ---- */
+    [UI_T_K_NAME_USER_TEMP] = {L"사용자 임시 파일", L"User temporary files", L"ユーザーの一時ファイル",
+                               L"用户临时文件"},
+    [UI_T_K_NAME_WER] = {L"Windows 오류 보고서", L"Windows Error Reporting files", L"Windows エラー報告",
+                         L"Windows 错误报告"},
+    [UI_T_K_NAME_RECYCLE] = {L"휴지통", L"Recycle Bin", L"ごみ箱", L"回收站"},
+    [UI_T_K_NAME_CHROME] = {L"Chrome 캐시", L"Chrome cache", L"Chrome キャッシュ", L"Chrome 缓存"},
+    [UI_T_K_NAME_EDGE] = {L"Edge 캐시", L"Edge cache", L"Edge キャッシュ", L"Edge 缓存"},
+    [UI_T_K_NAME_FIREFOX] = {L"Firefox 캐시", L"Firefox cache", L"Firefox キャッシュ", L"Firefox 缓存"},
+    [UI_T_K_NAME_DEV] = {L"개발 도구 캐시", L"Developer tool caches", L"開発ツールのキャッシュ",
+                         L"开发工具缓存"},
+    [UI_T_K_NAME_VDISK] = {L"가상 디스크", L"Virtual disk", L"仮想ディスク", L"虚拟磁盘"},
+    [UI_T_K_NOTE_USER_TEMP] =
+        {L"프로그램이 작업 중에 만들고 지우지 않은 임시 파일(%TEMP%)입니다. 최근 24시간 안에 바뀐 "
+         L"항목은 지금 쓰고 있을 수 있어 빼고, 사용 중이라 옮기지 못한 파일은 건너뜁니다.",
+         L"Temporary files (%TEMP%) that programs created while working and didn't delete. Items "
+         L"changed in the last 24 hours may be in use, so they're excluded, and files that can't be "
+         L"moved because they're in use are skipped.",
+         L"プログラムが作業中に作成して削除しなかった一時ファイル（%TEMP%）です。最近 24 時間以内に"
+         L"変更された項目は使用中の可能性があるため除外し、使用中で移動できないファイルはスキップします。",
+         L"程序在运行时创建但未删除的临时文件（%TEMP%）。最近 24 小时内更改过的项目可能正在使用，因此"
+         L"将其排除；因正在使用而无法移动的文件会被跳过。"},
+    [UI_T_K_NOTE_WER] =
+        {L"프로그램이 비정상 종료될 때 Windows가 이 계정에 남긴 보고서입니다. 정리해도 프로그램 "
+         L"동작에는 영향이 없지만, 아직 보내지 않은 보고서는 보내지 않게 됩니다.",
+         L"Reports that Windows saved for this account when programs crashed. Cleaning them up doesn't "
+         L"affect how programs work, but reports that haven't been sent yet won't be sent.",
+         L"プログラムが異常終了したときに Windows がこのアカウントに残したレポートです。整理しても"
+         L"プログラムの動作には影響しませんが、まだ送信していないレポートは送信されなくなります。",
+         L"程序异常退出时 Windows 为此帐户留下的报告。清理不会影响程序运行，但尚未发送的报告将不再发送。"},
+    [UI_T_K_NOTE_RECYCLE] =
+        {L"모든 드라이브의 휴지통을 비웁니다. 휴지통의 파일은 영구 삭제되어 복원할 수 없습니다"
+         L"(ByteSieve가 이전에 휴지통으로 옮긴 항목 포함). 다른 항목은 비운 뒤에 휴지통으로 옮기므로 "
+         L"이번에 정리한 항목은 복원할 수 있습니다.",
+         L"Empties the Recycle Bin on all drives. Files in the Recycle Bin are permanently deleted and "
+         L"can't be restored (including items ByteSieve moved there earlier). Other items are moved to "
+         L"the Recycle Bin after it's emptied, so items cleaned up this time can be restored.",
+         L"すべてのドライブのごみ箱を空にします。ごみ箱のファイルは完全に削除され、復元できません"
+         L"（ByteSieve が以前ごみ箱に移動した項目を含む）。ほかの項目は空にした後でごみ箱に移動するため、"
+         L"今回整理した項目は復元できます。",
+         L"清空所有驱动器的回收站。回收站中的文件将被永久删除且无法恢复（包括 ByteSieve 之前移到回收站的"
+         L"项目）。其他项目会在清空后移到回收站，因此本次清理的项目可以恢复。"},
+    [UI_T_K_NOTE_CHROME] =
+        {L"웹 페이지·이미지·스크립트 캐시(Cache·Code Cache·GPUCache)입니다. 로그인·북마크·방문 기록은 "
+         L"그대로이며, 다음 방문 때 다시 내려받아 처음에는 조금 느릴 수 있습니다. Chrome이 실행 중이면 "
+         L"정리하지 않습니다.",
+         L"Cache of web pages, images, and scripts (Cache, Code Cache, GPUCache). Sign-ins, bookmarks, "
+         L"and history are kept; pages are downloaded again on your next visit, so they may be a little "
+         L"slower at first. Not cleaned up while Chrome is running.",
+         L"Web ページ・画像・スクリプトのキャッシュ（Cache・Code Cache・GPUCache）です。ログイン・"
+         L"ブックマーク・閲覧履歴はそのままで、次回の訪問時に再ダウンロードするため最初は少し遅くなる"
+         L"ことがあります。Chrome が実行中の場合は整理しません。",
+         L"网页、图片和脚本缓存（Cache、Code Cache、GPUCache）。登录信息、书签和浏览记录保持不变，下次"
+         L"访问时会重新下载，因此一开始可能稍慢。Chrome 正在运行时不清理。"},
+    [UI_T_K_NOTE_EDGE] =
+        {L"웹 페이지·이미지·스크립트 캐시(Cache·Code Cache·GPUCache)입니다. 로그인·즐겨찾기·검색 기록은 "
+         L"그대로입니다. Edge는 창을 닫아도 백그라운드에서 실행될 수 있으며(시작 부스트), 실행 중이면 "
+         L"정리하지 않습니다.",
+         L"Cache of web pages, images, and scripts (Cache, Code Cache, GPUCache). Sign-ins, favorites, "
+         L"and search history are kept. Edge can keep running in the background after its windows are "
+         L"closed (startup boost); it isn't cleaned up while running.",
+         L"Web ページ・画像・スクリプトのキャッシュ（Cache・Code Cache・GPUCache）です。ログイン・"
+         L"お気に入り・検索履歴はそのままです。Edge はウィンドウを閉じてもバックグラウンドで実行される"
+         L"ことがあり（スタートアップ ブースト）、実行中の場合は整理しません。",
+         L"网页、图片和脚本缓存（Cache、Code Cache、GPUCache）。登录信息、收藏夹和搜索记录保持不变。"
+         L"Edge 关闭窗口后仍可能在后台运行（启动增强），正在运行时不清理。"},
+    [UI_T_K_NOTE_FIREFOX] =
+        {L"웹 페이지 캐시(cache2)입니다. 로그인·북마크·방문 기록은 그대로입니다. Firefox가 실행 중이면 "
+         L"정리하지 않습니다.",
+         L"Web page cache (cache2). Sign-ins, bookmarks, and history are kept. Not cleaned up while "
+         L"Firefox is running.",
+         L"Web ページのキャッシュ（cache2）です。ログイン・ブックマーク・閲覧履歴はそのままです。"
+         L"Firefox が実行中の場合は整理しません。",
+         L"网页缓存（cache2）。登录信息、书签和浏览记录保持不变。Firefox 正在运行时不清理。"},
+    [UI_T_K_NOTE_DEV] = {L"여러 프로젝트가 함께 쓰는 패키지 관리자·빌드 도구 캐시입니다. 정리하면 다음 빌드·설치 때 "
+                         L"다시 내려받습니다.",
+                         L"Package manager and build tool caches shared by multiple projects. After cleanup, "
+                         L"they're downloaded again at the next build or install.",
+                         L"複数のプロジェクトで共有するパッケージマネージャー・ビルドツールのキャッシュです。"
+                         L"整理すると次回のビルド・インストール時に再ダウンロードします。",
+                         L"多个项目共用的包管理器和构建工具缓存。清理后，下次构建或安装时会重新下载。"},
+    [UI_T_K_NOTE_VDISK] =
+        {L"WSL 배포판·Docker Desktop의 가상 디스크(.vhdx)입니다. 안에서 파일을 지워도 이 파일은 저절로 "
+         L"줄지 않습니다. 지우면 배포판·컨테이너가 모두 사라지므로 ByteSieve는 정리하지 않고 줄이는 방법만 "
+         L"알려 줍니다(WSL 을 끈 뒤 압축, 관리자 권한 필요).",
+         L"Virtual disk (.vhdx) of a WSL distribution or Docker Desktop. Deleting files inside doesn't "
+         L"shrink this file by itself. Deleting it would remove the whole distribution and its "
+         L"containers, so ByteSieve doesn't clean it up and only shows how to shrink it (compact after "
+         L"shutting down WSL; requires administrator rights).",
+         L"WSL ディストリビューション・Docker Desktop の仮想ディスク（.vhdx）です。中のファイルを削除"
+         L"してもこのファイルは自動的には小さくなりません。削除するとディストリビューション・コンテナーが"
+         L"すべて失われるため、ByteSieve は整理せず、縮小する方法だけを案内します（WSL を停止してから"
+         L"圧縮、管理者権限が必要）。",
+         L"WSL 发行版或 Docker Desktop 的虚拟磁盘（.vhdx）。在其中删除文件不会让此文件自动变小。删除它会"
+         L"丢失整个发行版和容器，因此 ByteSieve 不清理，只提供缩小的方法（关闭 WSL 后压缩，需要管理员权限）。"},
+    [UI_T_K_GROUP_WINDOWS] = {L"Windows 임시 파일", L"Windows temporary files", L"Windows 一時ファイル",
+                              L"Windows 临时文件"},
+    [UI_T_K_GROUP_RECYCLE] = {L"휴지통", L"Recycle Bin", L"ごみ箱", L"回收站"},
+    [UI_T_K_GROUP_BROWSER] = {L"브라우저 캐시", L"Browser caches", L"ブラウザーのキャッシュ", L"浏览器缓存"},
+    [UI_T_K_GROUP_DEV] = {L"개발 도구 캐시", L"Developer tool caches", L"開発ツールのキャッシュ",
+                          L"开发工具缓存"},
+    [UI_T_K_GROUP_VDISK] = {L"가상 디스크(WSL·Docker)", L"Virtual disks (WSL, Docker)",
+                            L"仮想ディスク（WSL・Docker）", L"虚拟磁盘（WSL、Docker）"},
+    [UI_T_K_ST_READY] = {L"정리 가능", L"Can be cleaned up", L"整理可能", L"可清理"},
+    [UI_T_K_ST_EMPTY] = {L"정리할 것 없음", L"Nothing to clean up", L"整理するものなし", L"无需清理"},
+    [UI_T_K_ST_NOT_FOUND] = {L"없음", L"Not found", L"なし", L"不存在"},
+    [UI_T_K_ST_APP_RUNNING] = {L"프로그램 실행 중", L"Program is running", L"プログラム実行中",
+                               L"程序正在运行"},
+    [UI_T_K_ST_DENIED] = {L"보호·확인 불가로 정리 안 함", L"Not cleaned up (protected or can't be checked)",
+                          L"保護・確認不可のため整理しない", L"因受保护或无法确认而不清理"},
+    [UI_T_K_ST_ERROR] = {L"조회 실패", L"Lookup failed", L"取得に失敗", L"查询失败"},
+    [UI_T_K_ST_CANCELLED] = {L"분석 취소됨", L"Analysis cancelled", L"分析をキャンセル", L"分析已取消"},
+    [UI_T_K_ST_INFO_ONLY] = {L"분석만(정리하지 않음)", L"Analysis only (not cleaned up)",
+                             L"分析のみ（整理しない）", L"仅分析（不清理）"},
+    [UI_T_K_PROFILES] = {L"프로필 %d개", L"%d profiles", L"プロファイル %d 個", L"%d 个配置文件"},
+    [UI_T_K_ALL_DRIVES] = {L"모든 드라이브", L"All drives", L"すべてのドライブ", L"所有驱动器"},
+    [UI_T_SKIP_NONE] = {L"건너뛰지 않음", L"Not skipped", L"スキップしない", L"未跳过"},
+    [UI_T_SKIP_RECENT] = {L"분석 뒤 최근에 바뀌어 건너뜀", L"Skipped (changed after analysis)",
+                          L"分析後に変更されたためスキップ", L"分析后有更改，已跳过"},
+    [UI_T_SKIP_APP_RUNNING] = {L"관련 프로그램이 실행 중이라 건너뜀", L"Skipped (related program is running)",
+                               L"関連プログラムが実行中のためスキップ", L"相关程序正在运行，已跳过"},
+
+    /* ---- core: 개발 캐시 이름·설명·상태·근거 ---- */
+    [UI_T_D_LABEL_NPM] = {L"패키지 캐시", L"package cache", L"パッケージキャッシュ", L"包缓存"},
+    [UI_T_D_LABEL_PIP] = {L"패키지 캐시", L"package cache", L"パッケージキャッシュ", L"包缓存"},
+    [UI_T_D_LABEL_GRADLE] = {L"의존성·빌드 캐시", L"dependency and build cache", L"依存関係・ビルドキャッシュ",
+                             L"依赖项和构建缓存"},
+    [UI_T_D_LABEL_GRADLE_WRAPPER] = {L"래퍼 배포판", L"wrapper distributions", L"ラッパー配布物",
+                                     L"包装器发行版"},
+    [UI_T_D_LABEL_CARGO_REGISTRY] = {L"레지스트리 캐시", L"registry cache", L"レジストリキャッシュ",
+                                     L"注册表缓存"},
+    [UI_T_D_LABEL_CARGO_GIT] = {L"git 의존성", L"git dependencies", L"git 依存関係", L"git 依赖项"},
+    [UI_T_D_LABEL_NUGET_PACKAGES] = {L"전역 패키지", L"global packages", L"グローバルパッケージ", L"全局包"},
+    [UI_T_D_LABEL_NUGET_HTTP] = {L"HTTP 캐시", L"HTTP cache", L"HTTP キャッシュ", L"HTTP 缓存"},
+    [UI_T_D_LABEL_PNPM] = {L"패키지 저장소", L"package store", L"パッケージストア", L"包存储"},
+    [UI_T_D_LABEL_YARN] = {L"패키지 캐시(v1)", L"package cache (v1)", L"パッケージキャッシュ（v1）",
+                           L"包缓存（v1）"},
+    [UI_T_D_LABEL_YARN_BERRY] = {L"전역 캐시(Berry)", L"global cache (Berry)", L"グローバルキャッシュ（Berry）",
+                                 L"全局缓存（Berry）"},
+    [UI_T_D_LABEL_MAVEN] = {L"로컬 저장소", L"local repository", L"ローカルリポジトリ", L"本地仓库"},
+    [UI_T_D_LABEL_GO_MOD] = {L"모듈 캐시", L"module cache", L"モジュールキャッシュ", L"模块缓存"},
+    [UI_T_D_LABEL_GO_BUILD] = {L"빌드 캐시", L"build cache", L"ビルドキャッシュ", L"构建缓存"},
+    [UI_T_D_LABEL_CONDA] = {L"패키지 캐시", L"package cache", L"パッケージキャッシュ", L"包缓存"},
+    [UI_T_D_NOTE_NPM] =
+        {L"npm이 내려받은 패키지 캐시입니다. 다음 설치 때 다시 내려받습니다('npm cache clean "
+         L"--force'와 같은 효과). npm·npx가 실행 중이면 끝난 뒤 정리하세요.",
+         L"Package cache downloaded by npm. Packages are downloaded again at the next install (same "
+         L"effect as 'npm cache clean --force'). If npm or npx is running, clean up after it finishes.",
+         L"npm がダウンロードしたパッケージキャッシュです。次回のインストール時に再ダウンロードします"
+         L"（'npm cache clean --force' と同じ効果）。npm・npx が実行中の場合は終了後に整理してください。",
+         L"npm 下载的包缓存。下次安装时会重新下载（与 'npm cache clean --force' 效果相同）。如果 npm 或 "
+         L"npx 正在运行，请在其结束后再清理。"},
+    [UI_T_D_NOTE_PIP] =
+        {L"pip이 내려받은 패키지·빌드한 휠 캐시입니다. 다음 설치 때 다시 내려받거나 빌드합니다"
+         L"('pip cache purge'와 같은 효과). 휠을 직접 빌드하는 패키지는 설치가 느려질 수 있습니다.",
+         L"Cache of packages downloaded and wheels built by pip. They're downloaded or built again at "
+         L"the next install (same effect as 'pip cache purge'). Packages that build their own wheels "
+         L"may install more slowly.",
+         L"pip がダウンロードしたパッケージ・ビルドした wheel のキャッシュです。次回のインストール時に"
+         L"再ダウンロードまたは再ビルドします（'pip cache purge' と同じ効果）。wheel を自分でビルドする"
+         L"パッケージはインストールが遅くなる場合があります。",
+         L"pip 下载的包和构建的 wheel 缓存。下次安装时会重新下载或构建（与 'pip cache purge' 效果相同）。"
+         L"需要自行构建 wheel 的包安装可能会变慢。"},
+    [UI_T_D_NOTE_GRADLE] =
+        {L"Gradle이 내려받은 의존성과 빌드 캐시입니다. 다음 빌드 때 다시 내려받아 첫 빌드가 느려집니다. "
+         L"Gradle 데몬이 실행 중이면 사용 중 오류가 날 수 있으니 'gradle --stop' 후 정리하세요. "
+         L"설정(gradle.properties)은 건드리지 않습니다.",
+         L"Dependencies and build cache downloaded by Gradle. They're downloaded again at the next build, "
+         L"so the first build is slower. If the Gradle daemon is running, you may get in-use errors, so "
+         L"run 'gradle --stop' before cleaning up. Settings (gradle.properties) aren't touched.",
+         L"Gradle がダウンロードした依存関係とビルドキャッシュです。次回のビルド時に再ダウンロードする"
+         L"ため、最初のビルドが遅くなります。Gradle デーモンが実行中の場合は使用中エラーになることが"
+         L"あるため、'gradle --stop' の後に整理してください。設定（gradle.properties）には触れません。",
+         L"Gradle 下载的依赖项和构建缓存。下次构建时会重新下载，因此首次构建会变慢。如果 Gradle 守护进程"
+         L"正在运行，可能会出现正在使用的错误，请先运行 'gradle --stop' 再清理。不会改动设置"
+         L"（gradle.properties）。"},
+    [UI_T_D_NOTE_GRADLE_WRAPPER] =
+        {L"Gradle 래퍼가 내려받은 Gradle 배포판입니다. 다음 빌드 때 배포판(수백 MB)을 다시 "
+         L"내려받으므로 인터넷이 없으면 빌드할 수 없습니다.",
+         L"Gradle distributions downloaded by the Gradle wrapper. The distribution (hundreds of MB) is "
+         L"downloaded again at the next build, so you can't build without an internet connection.",
+         L"Gradle ラッパーがダウンロードした Gradle 配布物です。次回のビルド時に配布物（数百 MB）を再"
+         L"ダウンロードするため、インターネットがないとビルドできません。",
+         L"Gradle 包装器下载的 Gradle 发行版。下次构建时会重新下载发行版（数百 MB），因此没有网络时无法"
+         L"构建。"},
+    [UI_T_D_NOTE_CARGO_REGISTRY] =
+        {L"crates.io 색인·크레이트 압축 파일·풀어 둔 소스입니다. 다음 빌드 때 다시 내려받습니다. "
+         L"cargo가 실행 중이면 끝난 뒤 정리하세요. 설치한 도구(.cargo\\bin)와 설정은 건드리지 "
+         L"않습니다.",
+         L"crates.io index, crate archives, and extracted sources. They're downloaded again at the next "
+         L"build. If cargo is running, clean up after it finishes. Installed tools (.cargo\\bin) and "
+         L"settings aren't touched.",
+         L"crates.io のインデックス・クレートのアーカイブ・展開したソースです。次回のビルド時に再"
+         L"ダウンロードします。cargo が実行中の場合は終了後に整理してください。インストールしたツール"
+         L"（.cargo\\bin）と設定には触れません。",
+         L"crates.io 索引、crate 压缩包和解压后的源代码。下次构建时会重新下载。如果 cargo 正在运行，请在"
+         L"其结束后再清理。不会改动已安装的工具（.cargo\\bin）和设置。"},
+    [UI_T_D_NOTE_CARGO_GIT] =
+        {L"git 저장소에서 받은 의존성입니다. 다음 빌드 때 다시 받습니다. 설치한 도구(.cargo\\bin)와 "
+         L"설정은 건드리지 않습니다.",
+         L"Dependencies fetched from git repositories. They're fetched again at the next build. "
+         L"Installed tools (.cargo\\bin) and settings aren't touched.",
+         L"git リポジトリから取得した依存関係です。次回のビルド時に再取得します。インストールした"
+         L"ツール（.cargo\\bin）と設定には触れません。",
+         L"从 git 仓库获取的依赖项。下次构建时会重新获取。不会改动已安装的工具（.cargo\\bin）和设置。"},
+    [UI_T_D_NOTE_NUGET_PACKAGES] =
+        {L"NuGet 전역 패키지 폴더입니다. 다음 복원(restore) 때 모든 패키지를 다시 내려받으므로 "
+         L"인터넷이 없으면 빌드할 수 없습니다. Visual Studio·dotnet이 실행 중이면 사용 중 오류가 날 "
+         L"수 있습니다('dotnet nuget locals global-packages --clear'와 같은 효과).",
+         L"NuGet global packages folder. All packages are downloaded again at the next restore, so you "
+         L"can't build without an internet connection. If Visual Studio or dotnet is running, you may "
+         L"get in-use errors (same effect as 'dotnet nuget locals global-packages --clear').",
+         L"NuGet のグローバルパッケージフォルダーです。次回の復元（restore）時にすべてのパッケージを再"
+         L"ダウンロードするため、インターネットがないとビルドできません。Visual Studio・dotnet が実行中"
+         L"の場合は使用中エラーになることがあります（'dotnet nuget locals global-packages --clear' と"
+         L"同じ効果）。",
+         L"NuGet 全局包文件夹。下次还原（restore）时会重新下载所有包，因此没有网络时无法构建。如果 "
+         L"Visual Studio 或 dotnet 正在运行，可能会出现正在使用的错误（与 'dotnet nuget locals "
+         L"global-packages --clear' 效果相同）。"},
+    [UI_T_D_NOTE_NUGET_HTTP] =
+        {L"NuGet 피드 응답 캐시입니다. 다음 복원 때 다시 내려받습니다('dotnet nuget locals "
+         L"http-cache --clear'와 같은 효과).",
+         L"Cache of NuGet feed responses. Downloaded again at the next restore (same effect as "
+         L"'dotnet nuget locals http-cache --clear').",
+         L"NuGet フィードの応答キャッシュです。次回の復元時に再ダウンロードします（'dotnet nuget locals "
+         L"http-cache --clear' と同じ効果）。",
+         L"NuGet 源的响应缓存。下次还原时会重新下载（与 'dotnet nuget locals http-cache --clear' 效果"
+         L"相同）。"},
+    [UI_T_D_NOTE_PNPM] =
+        {L"pnpm이 프로젝트의 node_modules에 하드 링크로 나눠 주는 패키지 저장소입니다. 프로젝트 쪽 파일은 남고 "
+         L"다음 설치 때 다시 내려받습니다(쓰지 않는 패키지만 지우려면 'pnpm store prune'). 프로젝트와 링크를 "
+         L"나누는 파일은 지워도 비지 않으므로 실제 확보는 그만큼 작습니다.",
+         L"Package store that pnpm shares with projects' node_modules through hard links. The project "
+         L"files remain, and packages are downloaded again at the next install (to remove only unused "
+         L"packages, use 'pnpm store prune'). Files that share links with projects free no space when "
+         L"deleted, so the reclaimable space is smaller by that amount.",
+         L"pnpm がプロジェクトの node_modules にハードリンクで共有するパッケージストアです。プロジェクト"
+         L"側のファイルは残り、次回のインストール時に再ダウンロードします（使っていないパッケージだけを"
+         L"削除するには 'pnpm store prune'）。プロジェクトとリンクを共有するファイルは削除しても空き"
+         L"容量が増えないため、実際の解放量はその分小さくなります。",
+         L"pnpm 通过硬链接与项目的 node_modules 共享的包存储。项目中的文件会保留，下次安装时会重新下载"
+         L"（只删除未使用的包请用 'pnpm store prune'）。与项目共享链接的文件删除后不会释放空间，因此实际"
+         L"释放量会相应减少。"},
+    [UI_T_D_NOTE_YARN] =
+        {L"Yarn 1(classic)이 내려받은 패키지 캐시입니다. 다음 설치 때 다시 내려받습니다('yarn cache clean'과 "
+         L"같은 효과).",
+         L"Package cache downloaded by Yarn 1 (classic). Downloaded again at the next install (same "
+         L"effect as 'yarn cache clean').",
+         L"Yarn 1（classic）がダウンロードしたパッケージキャッシュです。次回のインストール時に再"
+         L"ダウンロードします（'yarn cache clean' と同じ効果）。",
+         L"Yarn 1（classic）下载的包缓存。下次安装时会重新下载（与 'yarn cache clean' 效果相同）。"},
+    [UI_T_D_NOTE_YARN_BERRY] =
+        {L"Yarn 2 이상(Berry)의 전역 캐시입니다. 다음 설치 때 다시 내려받습니다. 프로젝트 안의 .yarn\\cache"
+         L"(zero-install)는 건드리지 않습니다.",
+         L"Global cache of Yarn 2 or later (Berry). Downloaded again at the next install. The "
+         L".yarn\\cache folder inside projects (zero-install) isn't touched.",
+         L"Yarn 2 以降（Berry）のグローバルキャッシュです。次回のインストール時に再ダウンロードします。"
+         L"プロジェクト内の .yarn\\cache（zero-install）には触れません。",
+         L"Yarn 2 及以上版本（Berry）的全局缓存。下次安装时会重新下载。不会改动项目中的 .yarn\\cache"
+         L"（zero-install）。"},
+    [UI_T_D_NOTE_MAVEN] =
+        {L"Maven 로컬 저장소입니다. 다음 빌드 때 의존성을 모두 다시 내려받으므로 인터넷이 없으면 빌드할 수 "
+         L"없고, 'mvn install'로 직접 넣은 내 아티팩트도 사라집니다. settings.xml은 건드리지 않습니다.",
+         L"Maven local repository. All dependencies are downloaded again at the next build, so you can't "
+         L"build without an internet connection, and your own artifacts added with 'mvn install' are "
+         L"also removed. settings.xml isn't touched.",
+         L"Maven のローカルリポジトリです。次回のビルド時に依存関係をすべて再ダウンロードするため、"
+         L"インターネットがないとビルドできず、'mvn install' で入れた自分のアーティファクトも失われます。"
+         L"settings.xml には触れません。",
+         L"Maven 本地仓库。下次构建时会重新下载所有依赖项，因此没有网络时无法构建，用 'mvn install' 安装的"
+         L"自有构件也会丢失。不会改动 settings.xml。"},
+    [UI_T_D_NOTE_GO_MOD] =
+        {L"Go가 내려받은 모듈 캐시입니다. 다음 빌드 때 다시 내려받습니다('go clean -modcache'와 같은 효과). "
+         L"파일이 읽기 전용이라 일부를 옮기지 못하면 'go clean -modcache'로 지우세요.",
+         L"Module cache downloaded by Go. Downloaded again at the next build (same effect as 'go clean "
+         L"-modcache'). If some files can't be moved because they're read-only, remove them with 'go "
+         L"clean -modcache'.",
+         L"Go がダウンロードしたモジュールキャッシュです。次回のビルド時に再ダウンロードします（'go clean "
+         L"-modcache' と同じ効果）。ファイルが読み取り専用のため一部を移動できない場合は 'go clean "
+         L"-modcache' で削除してください。",
+         L"Go 下载的模块缓存。下次构建时会重新下载（与 'go clean -modcache' 效果相同）。如果文件为只读而"
+         L"无法移动部分文件，请用 'go clean -modcache' 删除。"},
+    [UI_T_D_NOTE_GO_BUILD] = {L"Go 빌드 결과 캐시입니다. 다음 빌드·테스트가 느려집니다('go clean -cache'와 같은 효과).",
+                              L"Go build output cache. The next builds and tests will be slower (same effect "
+                              L"as 'go clean -cache').",
+                              L"Go のビルド結果キャッシュです。次回のビルド・テストが遅くなります（'go clean "
+                              L"-cache' と同じ効果）。",
+                              L"Go 构建结果缓存。下次构建和测试会变慢（与 'go clean -cache' 效果相同）。"},
+    [UI_T_D_NOTE_CONDA] =
+        {L"conda가 내려받은 패키지(pkgs)입니다. 이미 만든 환경은 하드 링크로 파일을 갖고 있어 그대로지만, 새 "
+         L"환경을 만들거나 패키지를 바꿀 때 다시 내려받습니다. 쓰지 않는 것만 지우려면 'conda clean --all'을 "
+         L"권합니다.",
+         L"Packages (pkgs) downloaded by conda. Existing environments keep their files through hard "
+         L"links and stay as they are, but packages are downloaded again when you create environments "
+         L"or change packages. To remove only unused ones, 'conda clean --all' is recommended.",
+         L"conda がダウンロードしたパッケージ（pkgs）です。作成済みの環境はハードリンクでファイルを"
+         L"持っているためそのままですが、新しい環境の作成やパッケージの変更時に再ダウンロードします。"
+         L"使っていないものだけを削除するには 'conda clean --all' をお勧めします。",
+         L"conda 下载的包（pkgs）。已创建的环境通过硬链接保留文件，因此不受影响，但创建新环境或更改包时"
+         L"会重新下载。只删除未使用的包建议使用 'conda clean --all'。"},
+    [UI_T_D_ST_FOUND] = {L"있음", L"Found", L"あり", L"存在"},
+    [UI_T_D_ST_NOT_FOUND] = {L"없음", L"Not found", L"なし", L"不存在"},
+    [UI_T_D_ST_NOT_DIR] = {L"폴더가 아님", L"Not a folder", L"フォルダーではありません", L"不是文件夹"},
+    [UI_T_D_ST_LINK] = {L"링크라 정리하지 않음", L"Not cleaned up (it's a link)", L"リンクのため整理しない",
+                        L"是链接，不清理"},
+    [UI_T_D_ST_UNRECOGNIZED] = {L"캐시 구조가 아니라 정리하지 않음",
+                                L"Not cleaned up (doesn't look like a cache)",
+                                L"キャッシュの構造ではないため整理しない", L"不是缓存结构，不清理"},
+    [UI_T_D_ST_NO_PATH] = {L"위치를 정할 수 없음", L"Location can't be determined", L"場所を特定できません",
+                           L"无法确定位置"},
+    [UI_T_D_SRC_DEFAULT] = {L"기본 위치", L"Default location", L"既定の場所", L"默认位置"},
+    [UI_T_D_SRC_ENV] = {L"환경 변수 %ls", L"Environment variable %ls", L"環境変数 %ls", L"环境变量 %ls"},
+    [UI_T_D_SRC_CONFIG] = {L"설정 파일 %ls", L"Config file %ls", L"設定ファイル %ls", L"配置文件 %ls"},
+
+    /* ---- Cleaner 패널: 단추·열 머리글·안내 ---- */
+    [UI_T_CL_REFRESH] = {L"다시 분석", L"Analyze again", L"再分析", L"重新分析"},
+    [UI_T_CL_RUN] = {L"선택 항목 정리...", L"Clean up selected...", L"選択した項目を整理...", L"清理所选项..."},
+    [UI_T_CL_COL_TARGET] = {L"대상", L"Target", L"対象", L"对象"},
+    [UI_T_CL_COL_GROUP] = {L"분류", L"Category", L"分類", L"分类"},
+    [UI_T_CL_COL_GROWTH] = {L"증감", L"Change", L"増減", L"增减"},
+    [UI_T_CL_COL_EXCLUDED] = {L"제외", L"Excluded", L"除外", L"已排除"},
+    [UI_T_CL_COL_LOCATION] = {L"위치", L"Location", L"場所", L"位置"},
+    [UI_T_CL_COL_SOURCE] = {L"위치 근거", L"Location source", L"場所の根拠", L"位置来源"},
+    [UI_T_CL_INFO_SYSTEM] =
+        {L"Windows 임시 파일·오류 보고서·휴지통·브라우저 캐시를 분석합니다. [실제 확보]는 디스크 "
+         L"할당 크기 기준이며 하드 링크로 다른 곳과 나누는 파일은 뺍니다. 휴지통 비우기를 뺀 항목은 "
+         L"휴지통(없는 드라이브는 격리 폴더)으로 옮기므로 그곳을 비워야 공간이 확보됩니다. "
+         L"휴지통 비우기(영구 삭제)는 [모두 선택]에 들어가지 않습니다.",
+         L"Analyzes Windows temporary files, error reports, the Recycle Bin, and browser caches. "
+         L"[Reclaimable] is based on allocated disk size and excludes files that share hard links with "
+         L"other places. Items other than emptying the Recycle Bin are moved to the Recycle Bin (the "
+         L"quarantine folder on drives without one), so space is freed when you empty it. Emptying the "
+         L"Recycle Bin (permanent deletion) isn't included in [Select all].",
+         L"Windows の一時ファイル・エラー報告・ごみ箱・ブラウザーのキャッシュを分析します。[実際の"
+         L"解放量] はディスクの割り当てサイズ基準で、ハードリンクでほかの場所と共有するファイルは除き"
+         L"ます。ごみ箱を空にする以外の項目はごみ箱（ごみ箱のないドライブは隔離フォルダー）に移動する"
+         L"ため、そこを空にすると容量が解放されます。ごみ箱を空にする（完全な削除）は [すべて選択] に"
+         L"含まれません。",
+         L"分析 Windows 临时文件、错误报告、回收站和浏览器缓存。[实际释放] 以磁盘分配大小为准，不包括"
+         L"通过硬链接与其他位置共享的文件。除清空回收站外的项目会移到回收站（没有回收站的驱动器移到"
+         L"隔离文件夹），清空那里后才会释放空间。清空回收站（永久删除）不包含在 [全选] 中。"},
+    [UI_T_CL_INFO_CACHE] =
+        {L"npm·pip·Gradle·Cargo·NuGet 등 여러 프로젝트가 함께 쓰는 개발 캐시와 WSL·Docker 가상 "
+         L"디스크(분석만)를 봅니다. 개발 캐시는 지우면 다시 내려받아야 하므로 [모두 선택]에 들어가지 "
+         L"않고 행을 직접 체크해야 합니다. 정리한 캐시는 휴지통(없는 드라이브는 격리 폴더)으로 옮깁니다.",
+         L"Shows developer caches shared by multiple projects, such as npm, pip, Gradle, Cargo, and NuGet, "
+         L"and WSL and Docker virtual disks (analysis only). Developer caches must be downloaded again "
+         L"after deletion, so they aren't included in [Select all]; check their rows yourself. Cleaned-up "
+         L"caches are moved to the Recycle Bin (the quarantine folder on drives without one).",
+         L"npm・pip・Gradle・Cargo・NuGet など複数のプロジェクトで共有する開発キャッシュと、WSL・Docker の"
+         L"仮想ディスク（分析のみ）を確認します。開発キャッシュは削除すると再ダウンロードが必要なため "
+         L"[すべて選択] には含まれず、行を自分でチェックする必要があります。整理したキャッシュはごみ箱"
+         L"（ごみ箱のないドライブは隔離フォルダー）に移動します。",
+         L"查看 npm、pip、Gradle、Cargo、NuGet 等多个项目共用的开发缓存，以及 WSL 和 Docker 虚拟磁盘"
+         L"（仅分析）。开发缓存删除后需要重新下载，因此不包含在 [全选] 中，需要手动勾选。清理的缓存会移到"
+         L"回收站（没有回收站的驱动器移到隔离文件夹）。"},
+    [UI_T_CL_INFO_ALL] =
+        {L"Windows 임시 파일·오류 보고서·휴지통·브라우저 캐시와 npm·pip·Gradle·"
+         L"Cargo·NuGet 공용 캐시를 분석합니다. [실제 확보]는 디스크 할당 크기 기준이며 "
+         L"하드 링크로 다른 곳과 나누는 파일은 뺍니다. 휴지통 비우기를 뺀 항목은 "
+         L"휴지통(없는 드라이브는 격리 폴더)으로 옮기므로 그곳을 비워야 공간이 확보됩니다. "
+         L"휴지통 비우기(영구 삭제)와 개발 도구 캐시는 [모두 선택]에 들어가지 않습니다.",
+         L"Analyzes Windows temporary files, error reports, the Recycle Bin, browser caches, and shared "
+         L"npm, pip, Gradle, Cargo, and NuGet caches. [Reclaimable] is based on allocated disk size and "
+         L"excludes files that share hard links with other places. Items other than emptying the "
+         L"Recycle Bin are moved to the Recycle Bin (the quarantine folder on drives without one), so "
+         L"space is freed when you empty it. Emptying the Recycle Bin (permanent deletion) and developer "
+         L"tool caches aren't included in [Select all].",
+         L"Windows の一時ファイル・エラー報告・ごみ箱・ブラウザーのキャッシュと npm・pip・Gradle・"
+         L"Cargo・NuGet の共有キャッシュを分析します。[実際の解放量] はディスクの割り当てサイズ基準で、"
+         L"ハードリンクでほかの場所と共有するファイルは除きます。ごみ箱を空にする以外の項目はごみ箱"
+         L"（ごみ箱のないドライブは隔離フォルダー）に移動するため、そこを空にすると容量が解放されます。"
+         L"ごみ箱を空にする（完全な削除）と開発ツールのキャッシュは [すべて選択] に含まれません。",
+         L"分析 Windows 临时文件、错误报告、回收站、浏览器缓存以及 npm、pip、Gradle、Cargo、NuGet 共用"
+         L"缓存。[实际释放] 以磁盘分配大小为准，不包括通过硬链接与其他位置共享的文件。除清空回收站外的"
+         L"项目会移到回收站（没有回收站的驱动器移到隔离文件夹），清空那里后才会释放空间。清空回收站"
+         L"（永久删除）和开发工具缓存不包含在 [全选] 中。"},
+
+    /* ---- Cleaner: 목록 칸 ---- */
+    [UI_T_CL_STATE_EMPTIED] = {L"비움(영구 삭제) · %ls", L"Emptied (permanently deleted) · %ls",
+                               L"空にしました（完全に削除） · %ls", L"已清空（永久删除） · %ls"},
+    [UI_T_CL_STATE_EMPTY_FAILED] = {L"비우지 못함: %ls (0x%08X)", L"Couldn't empty: %ls (0x%08X)",
+                                    L"空にできません: %ls (0x%08X)", L"无法清空：%ls (0x%08X)"},
+    [UI_T_CL_ERROR_WORD] = {L"오류", L"Error", L"エラー", L"错误"},
+    [UI_T_CL_STATE_DONE] = {L"정리함 %u개 · %ls%ls%ls", L"Cleaned up %u · %ls%ls%ls",
+                            L"整理済み %u 個 · %ls%ls%ls", L"已清理 %u 个 · %ls%ls%ls"},
+    [UI_T_CL_PART_QUARANTINE] = {L" (일부 격리 폴더)", L" (some to the quarantine folder)",
+                                 L"（一部は隔離フォルダー）", L"（部分移到隔离文件夹）"},
+    [UI_T_CL_PART_SKIPPED] = {L" 건너뜀 %u", L" skipped %u", L" スキップ %u", L" 跳过 %u"},
+    [UI_T_CL_PART_FAILED] = {L" 실패 %u", L" failed %u", L" 失敗 %u", L" 失败 %u"},
+    [UI_T_CL_PART_CANCELLED] = {L" 취소 %u", L" cancelled %u", L" キャンセル %u", L" 取消 %u"},
+    [UI_T_CL_STATE_PERMANENT] = {L"정리 가능 · 영구 삭제", L"Can be cleaned up · permanent deletion",
+                                 L"整理可能 · 完全な削除", L"可清理 · 永久删除"},
+    [UI_T_CL_STATE_CAUTION] = {L"정리 가능 · 주의", L"Can be cleaned up · caution", L"整理可能 · 注意",
+                               L"可清理 · 注意"},
+    [UI_T_CL_EXCL_RECENT] = {L"최근 24시간 안에 바뀐 %u개(%ls)", L"%u changed in the last 24 hours (%ls)",
+                             L"最近 24 時間以内に変更 %u 個（%ls）", L"最近 24 小时内更改 %u 个（%ls）"},
+    [UI_T_CL_EXCL_DENIED] = {L"%ls보호·사용 중·확인 불가 %u개", L"%lsprotected, in use, or unverifiable %u",
+                             L"%ls保護・使用中・確認不可 %u 個", L"%ls受保护、正在使用或无法确认 %u 个"},
+    [UI_T_CL_GROWTH_FIRST] = {L"첫 기록", L"First record", L"初回の記録", L"首次记录"},
+    [UI_T_CL_GROWTH_SAME] = {L"변화 없음 (%llu일 전과 같음)", L"No change (same as %llu days ago)",
+                             L"変化なし（%llu 日前と同じ）", L"无变化（与 %llu 天前相同）"},
+    [UI_T_CL_GROWTH_DELTA] = {L"%lc%ls (%llu일 전보다)", L"%lc%ls (vs. %llu days ago)",
+                              L"%lc%ls（%llu 日前より）", L"%lc%ls（与 %llu 天前相比）"},
+
+    /* ---- Cleaner: 선택 줄·상세 설명 ---- */
+    [UI_T_CL_SELECTION] = {L"선택 %u개 · 실제 확보 %ls (파일 크기 %ls)%ls",
+                           L"Selected %u · reclaimable %ls (file size %ls)%ls",
+                           L"選択 %u 個 · 実際の解放量 %ls（ファイルサイズ %ls）%ls",
+                           L"已选 %u 个 · 实际释放 %ls（文件大小 %ls）%ls"},
+    [UI_T_CL_SEL_RECYCLE] = {L" + 휴지통 비우기(영구 삭제)", L" + empty Recycle Bin (permanent deletion)",
+                             L" + ごみ箱を空にする（完全な削除）", L" + 清空回收站（永久删除）"},
+    [UI_T_CL_SEL_CAUTION] = {L" · 주의 %u개", L" · caution %u", L" · 注意 %u 個", L" · 注意 %u 个"},
+    [UI_T_CL_DETAIL_HINT] = {L"항목을 고르면 무엇을 정리하는지와 주의 사항이 여기 표시됩니다.",
+                             L"Select an item to see what will be cleaned up and any cautions here.",
+                             L"項目を選ぶと、何を整理するかと注意事項がここに表示されます。",
+                             L"选择项目后，将在此处显示要清理的内容和注意事项。"},
+    [UI_T_CL_DETAIL_SOURCE] = {L" · 위치 근거: ", L" · location source: ", L" · 場所の根拠: ", L" · 位置来源："},
+    [UI_T_CL_DETAIL_SHARED] = {L"\r\n하드 링크로 다른 곳과 나누는 %ls는 지워도 비지 않아 실제 확보에서 뺐습니다.",
+                               L"\r\n%ls shared with other places through hard links frees no space when "
+                               L"deleted, so it's excluded from the reclaimable space.",
+                               L"\r\nハードリンクでほかの場所と共有する %ls は削除しても空かないため、実際の"
+                               L"解放量から除きました。",
+                               L"\r\n通过硬链接与其他位置共享的 %ls 删除后不会释放空间，已从实际释放中排除。"},
+    [UI_T_CL_DETAIL_VDISK] = {L"%ls\r\n위치: %ls · 실제 점유 %ls%ls\r\n줄이는 방법: %ls",
+                              L"%ls\r\nLocation: %ls · actually occupies %ls%ls\r\nHow to shrink: %ls",
+                              L"%ls\r\n場所: %ls · 実際の占有 %ls%ls\r\n縮小する方法: %ls",
+                              L"%ls\r\n位置：%ls · 实际占用 %ls%ls\r\n缩小方法：%ls"},
+    [UI_T_CL_UNKNOWN] = {L"(모름)", L"(unknown)", L"（不明）", L"（未知）"},
+    [UI_T_CL_SPARSE] = {L"(스파스)", L" (sparse)", L"（スパース）", L"（稀疏）"},
+    [UI_T_CL_DETAIL] = {L"%ls%ls\r\n위치: %ls%ls · %ls%ls%ls%ls", L"%ls%ls\r\nLocation: %ls%ls · %ls%ls%ls%ls",
+                        L"%ls%ls\r\n場所: %ls%ls · %ls%ls%ls%ls", L"%ls%ls\r\n位置：%ls%ls · %ls%ls%ls%ls"},
+    [UI_T_CL_CAUTION_TAG] = {L"[주의] ", L"[Caution] ", L"[注意] ", L"[注意] "},
+    [UI_T_CL_EXCL_LABEL] = {L" · 제외: ", L" · excluded: ", L" · 除外: ", L" · 已排除："},
+
+    /* ---- Cleaner: 상태 줄 ---- */
+    [UI_T_CL_START_FAILED] = {L"분석을 시작하지 못했습니다(메모리 또는 스레드 생성 실패).",
+                              L"Couldn't start the analysis (out of memory or couldn't create a thread).",
+                              L"分析を開始できませんでした（メモリ不足またはスレッドを作成できません）。",
+                              L"无法开始分析（内存不足或无法创建线程）。"},
+    [UI_T_CL_ANALYZING] = {L"분석하는 중...", L"Analyzing...", L"分析しています...", L"正在分析..."},
+    [UI_T_CL_SCANNING] = {L"분석하는 중... %ls (%u/%u) · 지금까지 %ls", L"Analyzing... %ls (%u/%u) · %ls so far",
+                          L"分析しています... %ls（%u/%u） · これまでに %ls", L"正在分析... %ls（%u/%u） · 目前 %ls"},
+    [UI_T_CL_NO_MEMORY] = {L"분석 결과를 표시하지 못했습니다(메모리 부족).",
+                           L"Couldn't show the analysis results (out of memory).",
+                           L"分析結果を表示できませんでした（メモリ不足）。", L"无法显示分析结果（内存不足）。"},
+    [UI_T_CL_SCANNED] = {L"%ls: 정리할 수 있는 대상 %u개 · 실제 확보 %ls(휴지통 제외) · %.1f초",
+                         L"%ls: %u targets can be cleaned up · reclaimable %ls (excluding the Recycle Bin) · %.1f s",
+                         L"%ls: 整理できる対象 %u 個 · 実際の解放量 %ls（ごみ箱を除く） · %.1f 秒",
+                         L"%ls：可清理的对象 %u 个 · 实际释放 %ls（不含回收站） · %.1f 秒"},
+    [UI_T_CL_SCAN_DONE_HEAD] = {L"분석 완료", L"Analysis complete", L"分析完了", L"分析完成"},
+    [UI_T_CL_SCAN_CANCELLED_HEAD] = {L"분석 취소됨(다 세지 못한 대상은 정리할 수 없음)",
+                                     L"Analysis cancelled (targets that weren't fully counted can't be cleaned up)",
+                                     L"分析をキャンセル（数え終わらなかった対象は整理できません）",
+                                     L"分析已取消（未统计完的对象无法清理）"},
+    [UI_T_CL_CANCELLING_RUN] = {L"취소하는 중... 옮기던 항목과 휴지통 비우기는 끝까지 합니다.",
+                                L"Cancelling... The item being moved and emptying the Recycle Bin will be finished.",
+                                L"キャンセルしています... 移動中の項目とごみ箱を空にする処理は最後まで行います。",
+                                L"正在取消... 正在移动的项目和清空回收站会完成。"},
+    [UI_T_CL_NOTHING_CHECKED] = {L"정리할 대상을 목록에서 체크하세요.",
+                                 L"Check the targets to clean up in the list.",
+                                 L"整理する対象を一覧でチェックしてください。", L"请在列表中勾选要清理的对象。"},
+    [UI_T_CL_RUN_CANCELLED] = {L"정리를 취소했습니다. 아무것도 바뀌지 않았습니다.",
+                               L"Cleanup was cancelled. Nothing was changed.",
+                               L"整理をキャンセルしました。何も変更されていません。", L"已取消清理。没有任何更改。"},
+    [UI_T_CL_NOTHING_TO_RUN] = {L"정리할 대상이 없습니다. 아무것도 바뀌지 않았습니다.",
+                                L"There's nothing to clean up. Nothing was changed.",
+                                L"整理する対象がありません。何も変更されていません。", L"没有要清理的对象。没有任何更改。"},
+    [UI_T_CL_RUN_START_FAILED] = {L"정리를 시작하지 못했습니다(메모리 또는 스레드 생성 실패).",
+                                  L"Couldn't start cleanup (out of memory or couldn't create a thread).",
+                                  L"整理を開始できませんでした（メモリ不足またはスレッドを作成できません）。",
+                                  L"无法开始清理（内存不足或无法创建线程）。"},
+    [UI_T_CL_RUNNING_START] = {L"정리하는 중...", L"Cleaning up...", L"整理しています...", L"正在清理..."},
+    [UI_T_CL_EMPTYING] = {L"휴지통을 비우는 중...", L"Emptying the Recycle Bin...", L"ごみ箱を空にしています...",
+                          L"正在清空回收站..."},
+    [UI_T_CL_RUNNING] = {L"정리하는 중... %u/%u · 옮김 %u개(%ls) · 건너뜀·실패 %u개",
+                         L"Cleaning up... %u/%u · moved %u (%ls) · skipped or failed %u",
+                         L"整理しています... %u/%u · 移動 %u 個（%ls） · スキップ・失敗 %u 個",
+                         L"正在清理... %u/%u · 已移动 %u 个（%ls） · 跳过或失败 %u 个"},
+    [UI_T_CL_RAN] = {L"정리 완료: %u개 옮김(%ls, 휴지통·격리 폴더를 비우면 확보)%ls · 건너뜀 %u개 · 실패 %u개%ls · %.1f초",
+                     L"Cleanup finished: moved %u (%ls, freed when the Recycle Bin or quarantine folder is "
+                     L"emptied)%ls · skipped %u · failed %u%ls · %.1f s",
+                     L"整理完了: %u 個を移動（%ls、ごみ箱・隔離フォルダーを空にすると解放）%ls · スキップ %u 個 · "
+                     L"失敗 %u 個%ls · %.1f 秒",
+                     L"清理完成：已移动 %u 个（%ls，清空回收站或隔离文件夹后释放）%ls · 跳过 %u 个 · 失败 %u 个%ls · "
+                     L"%.1f 秒"},
+    [UI_T_CL_RAN_RECYCLE_DONE] = {L" · 휴지통 비움(%ls)", L" · Recycle Bin emptied (%ls)",
+                                  L" · ごみ箱を空にしました（%ls）", L" · 已清空回收站（%ls）"},
+    [UI_T_CL_RAN_RECYCLE_FAILED] = {L" · 휴지통 비우지 못함", L" · couldn't empty the Recycle Bin",
+                                    L" · ごみ箱を空にできませんでした", L" · 无法清空回收站"},
+    [UI_T_CL_RAN_CANCELLED] = {L" · 취소됨", L" · cancelled", L" · キャンセル済み", L" · 已取消"},
+
+    /* ---- Cleaner: 확인·결과 창 ---- */
+    [UI_T_CL_CONFIRM_HEAD] = {L"선택한 %u개 대상을 정리합니다. 실제 확보 용량: %ls%ls\n\n",
+                              L"%u selected targets will be cleaned up. Reclaimable space: %ls%ls\n\n",
+                              L"選択した %u 個の対象を整理します。実際の解放量: %ls%ls\n\n",
+                              L"将清理所选的 %u 个对象。实际释放空间：%ls%ls\n\n"},
+    [UI_T_CL_CONFIRM_RECYCLE] = {L" + 휴지통 비우기", L" + empty Recycle Bin", L" + ごみ箱を空にする",
+                                 L" + 清空回收站"},
+    [UI_T_CL_TAG_PERMANENT] = {L" [영구 삭제]", L" [permanent deletion]", L" [完全な削除]", L" [永久删除]"},
+    [UI_T_CL_TAG_CAUTION] = {L" [주의]", L" [caution]", L" [注意]", L" [注意]"},
+    [UI_T_CL_CONFIRM_DEV] = {L"\n개발 도구 캐시 %u개가 들어 있습니다. 여러 프로젝트가 함께 쓰는 캐시라 정리하면 다음 "
+                             L"빌드·설치 때 다시 내려받습니다.",
+                             L"\nThis includes %u developer tool caches. They're shared by multiple projects, so "
+                             L"after cleanup they're downloaded again at the next build or install.",
+                             L"\n開発ツールのキャッシュ %u 個が含まれています。複数のプロジェクトで共有するキャッシュ"
+                             L"のため、整理すると次回のビルド・インストール時に再ダウンロードします。",
+                             L"\n其中包含 %u 个开发工具缓存。这些缓存由多个项目共用，清理后下次构建或安装时会重新下载。"},
+    [UI_T_CL_CONFIRM_DEV_CAUTION] = {L" 이 중 [주의] %u개는 정리하면 인터넷이 없을 때 빌드할 수 없습니다.",
+                                     L" Of these, %u marked [caution] can't be rebuilt without an internet connection "
+                                     L"after cleanup.",
+                                     L" このうち [注意] の %u 個は、整理するとインターネットがないときにビルドできません。",
+                                     L" 其中 %u 个 [注意] 项清理后，没有网络时将无法构建。"},
+    [UI_T_CL_CONFIRM_INFO] =
+        {L"\n휴지통 비우기를 뺀 항목은 Windows 휴지통(휴지통이 없는 드라이브는 격리 폴더)으로 "
+         L"옮기며 영구 삭제하지 않습니다. 공간은 그곳을 비울 때 확보됩니다. 사용 중인 파일과 "
+         L"분석 뒤 바뀐 임시 파일은 건너뛰고 항목별로 알려 드립니다. 브라우저 캐시는 그 브라우저가 실행 중이면 정리하지 않습니다.\n"
+         L"\n계속할까요?",
+         L"\nItems other than emptying the Recycle Bin are moved to the Windows Recycle Bin (the quarantine "
+         L"folder on drives without one) and aren't permanently deleted. Space is freed when you empty "
+         L"it. Files in use and temporary files changed after the analysis are skipped and reported "
+         L"item by item. Browser caches aren't cleaned up while that browser is running.\n"
+         L"\nDo you want to continue?",
+         L"\nごみ箱を空にする以外の項目は Windows のごみ箱（ごみ箱のないドライブは隔離フォルダー）に移動し、"
+         L"完全には削除しません。容量はそこを空にしたときに解放されます。使用中のファイルと分析後に変更"
+         L"された一時ファイルはスキップし、項目ごとにお知らせします。ブラウザーのキャッシュはそのブラウザー"
+         L"が実行中の場合は整理しません。\n"
+         L"\n続行しますか？",
+         L"\n除清空回收站外的项目会移到 Windows 回收站（没有回收站的驱动器移到隔离文件夹），不会永久删除。"
+         L"清空那里后才会释放空间。正在使用的文件和分析后更改的临时文件会被跳过，并逐项告知。浏览器缓存在"
+         L"该浏览器运行时不会清理。\n"
+         L"\n要继续吗？"},
+    [UI_T_CL_RECYCLE_CONFIRM] =
+        {L"휴지통의 항목 %llu개(%ls)를 영구 삭제합니다.\n\n"
+         L"영구 삭제한 파일은 복원할 수 없습니다. ByteSieve가 이전에 휴지통으로 옮긴 항목도 "
+         L"함께 지워집니다.\n\n"
+         L"[예] 휴지통을 비우고 정리\n[아니요] 휴지통은 그대로 두고 나머지만 정리\n"
+         L"[취소] 아무것도 하지 않음",
+         L"%llu items (%ls) in the Recycle Bin will be permanently deleted.\n\n"
+         L"Permanently deleted files can't be restored. Items ByteSieve moved to the Recycle Bin earlier "
+         L"are deleted too.\n\n"
+         L"[Yes] Empty the Recycle Bin and clean up\n[No] Keep the Recycle Bin and clean up the rest only\n"
+         L"[Cancel] Do nothing",
+         L"ごみ箱の項目 %llu 個（%ls）を完全に削除します。\n\n"
+         L"完全に削除したファイルは復元できません。ByteSieve が以前ごみ箱に移動した項目も一緒に削除"
+         L"されます。\n\n"
+         L"[はい] ごみ箱を空にして整理\n[いいえ] ごみ箱はそのままにして残りだけ整理\n"
+         L"[キャンセル] 何もしない",
+         L"将永久删除回收站中的 %llu 个项目（%ls）。\n\n"
+         L"永久删除的文件无法恢复。ByteSieve 之前移到回收站的项目也会一并删除。\n\n"
+         L"[是] 清空回收站并清理\n[否] 保留回收站，只清理其余项目\n"
+         L"[取消] 不执行任何操作"},
+    [UI_T_CL_RECYCLE_TITLE] = {L"휴지통 비우기(영구 삭제)", L"Empty Recycle Bin (permanent deletion)",
+                               L"ごみ箱を空にする（完全な削除）", L"清空回收站（永久删除）"},
+    [UI_T_CL_FAILURES_HEAD] = {L"%u개 항목을 정리하지 못했습니다. 이 항목들은 그대로 남아 있습니다.\n"
+                               L"사용 중인 프로그램을 닫은 뒤 다시 분석해 정리할 수 있습니다.\n\n",
+                               L"%u items couldn't be cleaned up. They remain where they were.\n"
+                               L"Close the programs using them, then analyze again to clean them up.\n\n",
+                               L"%u 個の項目を整理できませんでした。これらの項目はそのまま残っています。\n"
+                               L"使用中のプログラムを閉じてから再分析すると整理できます。\n\n",
+                               L"%u 个项目无法清理。这些项目保持原样。\n"
+                               L"关闭正在使用它们的程序后重新分析即可清理。\n\n"},
+    [UI_T_CL_FAILURES_RECYCLE] = {L"휴지통\n    비우지 못함: %ls (0x%08X)\n",
+                                  L"Recycle Bin\n    couldn't empty: %ls (0x%08X)\n",
+                                  L"ごみ箱\n    空にできません: %ls (0x%08X)\n", L"回收站\n    无法清空：%ls (0x%08X)\n"},
+    [UI_T_CL_MOVE_FAILED] = {L"옮기지 못함", L"Couldn't move", L"移動できません", L"无法移动"},
+    [UI_T_CL_RESULT_TITLE] = {L"Cleaner 결과", L"Cleaner results", L"Cleaner の結果", L"Cleaner 结果"},
 };
 
 static const wchar_t *const k_lang_name[UI_LANG_COUNT] = {L"ko", L"en", L"ja", L"zh-Hans"};

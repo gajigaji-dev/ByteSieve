@@ -171,6 +171,10 @@ static void min_window_size(int *cx, int *cy)
     if (settings_w > panel_w) {
         panel_w = settings_w;
     }
+    settings_w = cleaner_panel_min_width(g_app.pages[NAV_PAGE_CLEANER]);
+    if (settings_w > panel_w) {
+        panel_w = settings_w;
+    }
     need = nav_width() + 2 * scale(MAIN_MARGIN) + panel_w;
     AdjustWindowRectEx(&frame, WS_OVERLAPPEDWINDOW, FALSE, 0);
     need += frame.right - frame.left;
@@ -362,6 +366,8 @@ static void apply_language(UiLang lang)
     SetWindowTextW(g_app.title, ui_text(nav_page_text(g_app.page)));
     scan_panel_apply_language(g_app.pages[NAV_PAGE_SCAN], font);
     cleanup_panel_apply_language(g_app.pages[NAV_PAGE_CLEANUP], font);
+    cleaner_panel_apply_language(g_app.pages[NAV_PAGE_CLEANER], font);
+    cleaner_panel_apply_language(g_app.pages[NAV_PAGE_CACHE], font);
     quarantine_panel_apply_language(g_app.pages[NAV_PAGE_QUARANTINE], font);
     settings_panel_apply_language(g_app.pages[NAV_PAGE_SETTINGS], font);
     /* 이전 글꼴은 이제 번역된 화면이 쓰지 않는다(시작 글꼴은 번역하지 않은 페이지가 쓰므로 남긴다). */
@@ -596,6 +602,8 @@ static int check_lang(LOGFONTW *out_font, int *out_min_width)
     }
     failures += scan_panel_verify_lang(g_app.pages[NAV_PAGE_SCAN]);
     failures += cleanup_panel_verify_lang(g_app.pages[NAV_PAGE_CLEANUP]);
+    failures += cleaner_panel_verify_lang(g_app.pages[NAV_PAGE_CLEANER]);
+    failures += cleaner_panel_verify_lang(g_app.pages[NAV_PAGE_CACHE]);
     failures += quarantine_panel_verify_lang(g_app.pages[NAV_PAGE_QUARANTINE]);
     failures += settings_panel_verify_lang(g_app.pages[NAV_PAGE_SETTINGS]);
     *out_font = lf;
@@ -1149,7 +1157,9 @@ static int on_page_notify(int id, int code)
                 finish_self_test(1);
             }
         } else if (code == CLN_CLEANED) {
-            if (cleaner_panel_verify_run(g_app.pages[page], g_app.cleaner_expect) != 0) {
+            /* 정리 결과(상태 줄·상태 칸·선택 줄·상세 설명)가 언어를 바꾸면 새 언어로 다시 쓰이는지도 본다. */
+            if (cleaner_panel_verify_run(g_app.pages[page], g_app.cleaner_expect) != 0 ||
+                verify_language_round_trip(cleaner_panel_verify_lang, g_app.pages[page]) != 0) {
                 finish_self_test(1);
             } else if (page == NAV_PAGE_CLEANER) {
                 show_page(NAV_PAGE_CACHE);
