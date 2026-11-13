@@ -20,6 +20,10 @@ ByteSieve는 폴더·드라이브의 디스크 사용량을 분석하고, 프로
 이 프로그램은 코드 서명이 없어 처음 실행할 때 Windows SmartScreen 경고가 나올 수 있습니다.
 다운로드한 파일이 맞는지는 릴리스의 SHA256SUMS.txt 로 확인하세요.
 
+이용약관: 이 폴더의 terms\terms-ko.txt (English: terms-en.txt, 日本語: terms-ja.txt, 简体中文: terms-zh-Hans.txt)
+라이선스: PolyForm Noncommercial License 1.0.0 (LICENSE.txt). 약관과 라이선스 원문이 다르면 원문이 우선합니다.
+일본어·중국어 약관은 검토가 필요한 번역 초안입니다.
+
 [English]
 ByteSieve analyzes disk usage of folders and drives and safely cleans up build outputs, caches and
 temporary files (Windows 10/11, 64-bit).
@@ -37,5 +41,7 @@ Uninstalling does not delete this data.
 The binaries are not code-signed, so Windows SmartScreen may warn on first launch.
 Verify downloads with SHA256SUMS.txt from the release page.
 
-License: PolyForm Noncommercial License 1.0.0 (see LICENSE.txt)
+Terms of Use: terms\terms-en.txt in this folder (also terms-ko.txt, terms-ja.txt, terms-zh-Hans.txt;
+the Japanese and Chinese versions are draft translations that need review).
+License: PolyForm Noncommercial License 1.0.0 (see LICENSE.txt). If the Terms and the License differ, the License prevails.
 Project: https://github.com/gajigaji-dev/ByteSieve

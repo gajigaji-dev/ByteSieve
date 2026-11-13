@@ -49,8 +49,17 @@ $stage = Join-Path $dist "stage"
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
 Run "cmake" @("--install", $BuildDir, "--config", "Release", "--prefix", $stage)
-foreach ($f in "bytesieve-gui.exe", "disk-scanner.exe", "LICENSE.txt", "README.txt") {
+foreach ($f in "bytesieve-gui.exe", "disk-scanner.exe", "LICENSE.txt", "README.txt",
+             "terms\terms-ko.txt", "terms\terms-en.txt", "terms\terms-ja.txt", "terms\terms-zh-Hans.txt") {
     if (-not (Test-Path (Join-Path $stage $f))) { throw "missing $f in stage" }
+}
+# 이용약관 시행일은 배포일로 직접 적는다. 자리 표시자가 남아 있으면 태그 빌드는 실패한다(로컬은 경고).
+$undated = Get-ChildItem (Join-Path $stage "terms") -Filter "terms-*.txt" | Where-Object {
+    (Get-Content $_.FullName -Raw -Encoding UTF8).Contains("@EFFECTIVE_DATE@") } | ForEach-Object Name
+if ($undated) {
+    $msg = "terms effective date is not set (@EFFECTIVE_DATE@ in installer\terms): $($undated -join ', ')"
+    if ($env:GITHUB_REF_NAME -and $env:GITHUB_REF_NAME.StartsWith("v")) { throw $msg }
+    Write-Warning $msg
 }
 $exeVersion = (Get-Item (Join-Path $stage "bytesieve-gui.exe")).VersionInfo.ProductVersion
 if ($exeVersion -ne $version) { throw "exe version $exeVersion does not match $version" }
