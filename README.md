@@ -7,18 +7,33 @@ CLI(`disk-scanner`)와 Win32 GUI(`bytesieve-gui`)를 제공합니다.
 
 ## 설치
 
-[GitHub Releases](https://github.com/gajigaji-dev/ByteSieve/releases)에서 내려받습니다(Windows 10/11, 64비트).
+**요구 사항**: Windows 10/11 64비트(x64)
+
+최신 버전은 [GitHub Releases의 최신 릴리스](https://github.com/gajigaji-dev/ByteSieve/releases/latest)에서 내려받습니다.
+지금 최신 버전은 **1.0.0**입니다.
 
 | 파일 | 용도 |
 |---|---|
-| `ByteSieve-<버전>-setup-x64.exe` | 설치 프로그램. 관리자 권한 없이 `%LOCALAPPDATA%\Programs\ByteSieve`에 설치하고 시작 메뉴 바로 가기를 만듭니다. 설치 언어(한국어·English·日本語·简体中文)가 앱 표시 언어가 됩니다 |
-| `ByteSieve-<버전>-portable-x64.zip` | 설치 없이 실행. 압축을 풀고 `bytesieve-gui.exe`를 실행합니다 |
-| `SHA256SUMS.txt` | 내려받은 파일 확인용 |
+| [ByteSieve-1.0.0-setup-x64.exe](https://github.com/gajigaji-dev/ByteSieve/releases/download/v1.0.0/ByteSieve-1.0.0-setup-x64.exe) | **설치 프로그램(권장)**. 관리자 권한 없이 `%LOCALAPPDATA%\Programs\ByteSieve`에 설치하고 시작 메뉴 바로 가기를 만듭니다 |
+| [ByteSieve-1.0.0-portable-x64.zip](https://github.com/gajigaji-dev/ByteSieve/releases/download/v1.0.0/ByteSieve-1.0.0-portable-x64.zip) | **포터블 버전**. 설치하지 않고 실행합니다 |
+| [SHA256SUMS.txt](https://github.com/gajigaji-dev/ByteSieve/releases/download/v1.0.0/SHA256SUMS.txt) | 내려받은 파일 확인용 |
 
+이전 버전과 버전별 릴리스 노트는 [Releases 목록](https://github.com/gajigaji-dev/ByteSieve/releases)에 있습니다.
+
+**설치 프로그램**
+1. `ByteSieve-1.0.0-setup-x64.exe`를 실행하고 설치 언어(한국어·English·日本語·简体中文)를 고릅니다. 고른 언어가 앱 표시 언어가 됩니다(나중에 [설정]에서 바꿀 수 있음).
+2. 이용약관에 동의하고 설치를 마치면 바로 실행할 수 있습니다. 이후에는 시작 메뉴의 **ByteSieve**로 실행합니다.
+3. 제거는 Windows [설정] → [앱] → [설치된 앱]에서 합니다.
+
+**포터블 버전**
+1. ZIP을 원하는 폴더에 풉니다(`ByteSieve-1.0.0-portable-x64\` 폴더가 생깁니다).
+2. GUI는 `bytesieve-gui.exe`를 실행합니다. CLI `disk-scanner.exe`도 같은 폴더에 있습니다([빠른 시작](#빠른-시작) 참고).
+
+**알아 둘 점**
 - 코드 서명이 없어 처음 실행할 때 **Windows SmartScreen** 경고("Windows의 PC 보호")가 나올 수 있습니다.
-  `Get-FileHash <파일> -Algorithm SHA256` 결과가 `SHA256SUMS.txt`와 같은지 확인한 뒤 [추가 정보] → [실행]을 누르세요.
+  PowerShell에서 `Get-FileHash <파일> -Algorithm SHA256` 결과가 `SHA256SUMS.txt`와 같은지 확인한 뒤 [추가 정보] → [실행]을 누르세요.
 - 설정(`HKCU\Software\ByteSieve`)·스캔 기록(`%LOCALAPPDATA%\ByteSieve\history`)·각 드라이브의 격리 폴더(`.bytesieve-trash`)는
-  제거해도 지우지 않습니다(격리 항목은 정리 중에 옮긴 사용자 파일). 포터블 판도 같은 위치를 씁니다.
+  제거해도 지우지 않습니다(격리 항목은 정리 중에 옮긴 사용자 파일). 포터블 버전도 같은 위치를 씁니다.
 - 변경 내용은 [CHANGELOG.md](CHANGELOG.md), 배포 절차는 [docs/release.md](docs/release.md)에 있습니다.
 
 ## 주요 기능
@@ -49,7 +64,9 @@ CLI(`disk-scanner`)와 Win32 GUI(`bytesieve-gui`)를 제공합니다.
 
 ## 빌드
 
-**요구 사항**: Windows 10 이상, CMake 3.21 이상, Visual Studio(MSVC) 빌드 도구
+**요구 사항**: Windows 10 이상, CMake 3.21 이상, Visual Studio(MSVC) 빌드 도구("C++를 사용한 데스크톱 개발" 워크로드)
+
+`cmake`가 PATH에 없으면 **Developer PowerShell for VS**에서 실행하세요(Visual Studio에 포함된 CMake를 씁니다).
 
 ```powershell
 cmake -S . -B build
@@ -106,7 +123,6 @@ GUI는 왼쪽 사이드바에서 목적별로 묶은 여덟 페이지와 아래 
 | 격리·복원 | 격리 폴더 |
 | 시스템 | 모니터 · 부스터 |
 | (아래 끝) | 설정 |
-
 
 - **폴더 스캔**: 경로 옆 **[정밀 스캔(하드 링크)]** 을 체크하면 하드 링크로 중복 집계된 용량을 보정해 기본 집계와의 차이를 함께 보여 줍니다.
   스캔이 끝나면 **[CSV 내보내기...]·[HTML 보고서...]** 로 결과를 저장하고, **[스캔 기록 자동 저장]** 체크·**[기록 삭제...]** 로 변화 추적 기록을 관리합니다.
@@ -195,7 +211,8 @@ ByteSieve/
 
 ## 구현 상태와 향후 계획
 
-CLI 스캐너, JSON Lines 출력, 개발 환경 분석(공용 캐시 15종·WSL2/Docker 가상 디스크·증가 기록), Git 기반 프로젝트 분석(휴면 판정·미커밋/미푸시 경고·복구 가능성), CLI 정리 후보 찾기·정리 명령(`find`·`clean --dry-run`·`--execute`, JSON 문서 출력, GUI와 같은 정리 계획·실행 코드), GUI 여덟 페이지(목적별 사이드바), 시스템 정리(임시 파일·오류 보고서·휴지통·브라우저 캐시·공용 개발 캐시(npm·pip·Gradle·Cargo·NuGet) 분석·정리), 프로젝트 정리(정리 후보 탐지·휴지통 이동), 실제 확보 용량(할당 크기·하드 링크 반영), Booster(시작 프로그램·프로세스 관리, CPU·메모리 사용량), 휴지통 없는 드라이브의 격리 폴더(복원·영구 삭제), 디스크 사용량 분석, 트리맵 시각화, 드라이브별 BitLocker 암호화 상태 표시, 정밀 스캔(하드 링크 중복 보정), 폴더별 변화 추적(자동 저장 설정·기록 삭제 포함), 스캔 결과 CSV·HTML 내보내기, 병렬 스캔(미리 읽기 작업 수 제한으로 메모리 절감), GUI 표시 언어(한국어·영어·일본어·중국어 간체, 사이드바·페이지 제목·설정 페이지와 폴더 스캔·프로젝트 정리·격리 폴더 페이지의 컨트롤·상태 줄·결과·확인 창, 실행 중 언어 바꾸기), Windows 11 창 외곽과 사이드바 탐색, 다크 모드(시스템 설정 따르기 포함)와 설정 페이지(테마·표시 언어·스캔 기록·버전 정보), 진행 막대의 완료·취소·실패 표시, 배포(설치 프로그램·포터블 ZIP·SHA256, exe 버전 정보·아이콘·매니페스트, 정적 C 런타임, CI·릴리스 자동화)가 구현되어 있습니다.
+[주요 기능](#주요-기능) 표의 기능은 모두 구현되어 있으며, CLI·GUI·배포(설치 프로그램·포터블 ZIP·SHA256, CI·릴리스 자동화)까지
+1.0.0으로 출시했습니다. 버전별 변경은 [CHANGELOG.md](CHANGELOG.md)에 있습니다.
 
 ### 향후 개선 계획(미구현)
 
@@ -219,6 +236,7 @@ CLI 스캐너, JSON Lines 출력, 개발 환경 분석(공용 캐시 15종·WSL2
   휴면 기준 일수를 GUI에서 바꾸기, 원격 정보가 오래됐을 때(`git fetch` 전) 알림, Mercurial 등 다른 버전 관리 도구
 - 설치 경로 보호 확대: 레지스트리·`AppData`에 없는 임의 위치(예: `D:\tools`에 압축을 푼 VS Code 포터블)의 개발 도구도 보호 경로로 인식
 - 정밀 스캔의 CLI·CSV 지원: 지금은 GUI와 HTML 보고서에서만 하드 링크 보정 결과를 보여 줌
+
 **UI·버그 수정**
 - Windows 11 Fluent 디자인 나머지 단계([docs/ui-design.md](docs/ui-design.md)): 사이드바 아이콘·좁은 창에서 접기,
   트리맵·그래프·드라이브 막대를 Direct2D로 다시 그리기, 모니터마다 다른 배율(Per-Monitor DPI) 지원
@@ -228,6 +246,56 @@ CLI 스캐너, JSON Lines 출력, 개발 환경 분석(공용 캐시 15종·WSL2
 **배포·문서**
 - 배포 이후([docs/release.md](docs/release.md#나중에-검토할-것)): 코드 서명(SmartScreen 경고 제거), winget 등록,
   설치 프로그램에서 `disk-scanner`를 PATH에 추가하는 선택, 업데이트 확인
+
+## 기여하기
+
+버그 신고, 기능 제안, 번역 개선, 문서 수정, 코드 기여를 모두 환영합니다.
+
+### Issue 등록
+
+[Issues](https://github.com/gajigaji-dev/ByteSieve/issues)에서 먼저 비슷한 Issue가 있는지 찾아본 뒤 새로 등록해 주세요.
+버그라면 아래 내용을 적어 주면 빨리 확인할 수 있습니다.
+
+- ByteSieve 버전(GUI [설정] 페이지의 버전 정보 또는 `disk-scanner --version`)과 설치 프로그램·포터블 중 어느 것인지
+- Windows 버전, 표시 언어
+- 재현 순서, 기대한 결과와 실제 결과, 오류 문구
+- 스크린샷이나 로그(사용자 이름·폴더 이름 등 개인정보는 가려 주세요)
+
+파일이 잘못 옮겨지거나 지워진 것 같은 문제는 정리한 페이지, 항목 경로, 격리 폴더(`.bytesieve-trash`)에 남아 있는지를 함께 알려 주세요.
+
+### Pull Request 제출
+
+1. 저장소를 Fork하고 `main`에서 작업 브랜치를 만듭니다. 브랜치 이름은 `feat/…`·`fix/…`·`docs/…`·`refactor/…`처럼 작업 종류를 앞에 붙입니다.
+2. 변경하고, 아래 [로컬 빌드·테스트](#로컬-빌드테스트)가 경고·실패 없이 통과하는지 확인합니다.
+3. 커밋 메시지는 `fix: 격리 폴더 페이지 번역 및 언어 즉시 적용`처럼 `종류: 요약` 형식으로 씁니다.
+4. `main`으로 PR을 열고 무엇을 왜 바꿨는지, 어떻게 확인했는지 적습니다. 화면이 바뀌면 스크린샷을 붙여 주세요.
+5. PR을 열면 GitHub Actions(CI)가 Release 구성으로 빌드·테스트합니다. 실패하면 로그를 확인해 고쳐 주세요.
+
+큰 기능이나 구조 변경은 먼저 Issue로 방향을 맞춘 뒤 시작하는 것이 좋습니다.
+
+### 로컬 빌드·테스트
+
+```powershell
+cmake -S . -B build
+cmake --build build --config Debug
+ctest --test-dir build -C Debug --output-on-failure
+```
+
+- 요구 사항과 결과물 위치는 [빌드](#빌드)를, 테스트 목록과 GUI 자체 검사는 [docs/testing.md](docs/testing.md)를 참고하세요.
+- 일부 CLI 검사는 Git이 있으면 Git 상태까지 확인하고, 없으면 그 부분을 건너뜁니다.
+- 설치 프로그램까지 만들어 보려면 [Inno Setup 6](https://jrsoftware.org/isinfo.php)이 필요합니다(`tools\package.ps1`, 없으면 `-NoInstaller`).
+
+### 기본 규칙
+
+- **C11 + Win32 API만** 씁니다. 외부 라이브러리를 추가하지 않습니다.
+- MSVC `/W4`로 빌드하므로 새 코드에서 경고가 나오지 않게 합니다.
+- 주변 코드 스타일을 따릅니다: 한국어 주석, 헤더에 동작·안전 조건 설명, 문자열은 `wchar_t`.
+- GUI 문구는 직접 쓰지 않고 번역 표(`src/ui_lang.c`)에 한국어·영어·일본어·중국어 간체를 모두 넣습니다(`test_ui_lang`이 빠진 번역을 잡습니다).
+- 상태 enum을 추가하면 화면용 `*_status_text`와 식별자 `*_status_name`도 함께 추가합니다.
+- **정리(삭제) 기능의 안전 원칙**: 영구 삭제는 사용자가 명시적으로 확인한 경우에만 합니다. 어떤 경로로 정리하든
+  `src/cleanup_trash.h`의 안전 장치(경로 판정 → 옮기기 직전 확인 → 옮기는 중 확인)를 거칩니다([docs/cleanup.md](docs/cleanup.md)).
+- 기능을 바꾸면 관련 `docs/*.md`와 README의 기능 표·향후 계획을, 테스트를 추가·삭제하면 README의 테스트 개수와 [docs/testing.md](docs/testing.md)를 함께 고칩니다.
+- 기여한 코드는 이 저장소의 [라이선스](#라이선스)로 함께 배포됩니다. PR을 보내기 전에 라이선스를 확인해 주세요.
 
 ## 라이선스
 
