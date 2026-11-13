@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 
+#include "drive.h"
 #include "ui_lang.h"
 
 /* CleanupTrashStatus 순서(PENDING 은 문구 없음). */
@@ -105,6 +106,35 @@ static const UiText k_dev_status[DEV_CACHE_STATUS_COUNT] = {
     [DEV_CACHE_NO_PATH] = UI_T_D_ST_NO_PATH,
 };
 
+/* Booster: 시작 프로그램 위치(BoosterStartupSource)·보호 이유(BoosterProtect)·끝내기 결과(BoosterEndStatus). */
+static const UiText k_booster_source[BOOSTER_SRC_COUNT] = {
+    [BOOSTER_SRC_RUN_USER] = UI_T_B_SRC_RUN_USER,
+    [BOOSTER_SRC_RUN_MACHINE] = UI_T_B_SRC_RUN_MACHINE,
+    [BOOSTER_SRC_RUN_MACHINE32] = UI_T_B_SRC_RUN_MACHINE32,
+    [BOOSTER_SRC_FOLDER_USER] = UI_T_B_SRC_FOLDER_USER,
+    [BOOSTER_SRC_FOLDER_COMMON] = UI_T_B_SRC_FOLDER_COMMON,
+};
+static const UiText k_booster_protect[BOOSTER_PROTECT_COUNT] = {
+    [BOOSTER_PROTECT_NONE] = UI_T_B_PROT_NONE,         [BOOSTER_PROTECT_SYSTEM] = UI_T_B_PROT_SYSTEM,
+    [BOOSTER_PROTECT_SESSION] = UI_T_B_PROT_SESSION,   [BOOSTER_PROTECT_CRITICAL] = UI_T_B_PROT_CRITICAL,
+    [BOOSTER_PROTECT_WINDOWS] = UI_T_B_PROT_WINDOWS,   [BOOSTER_PROTECT_SELF] = UI_T_B_PROT_SELF,
+    [BOOSTER_PROTECT_NO_ACCESS] = UI_T_B_PROT_NO_ACCESS,
+};
+static const UiText k_booster_end[BOOSTER_END_COUNT] = {
+    [BOOSTER_END_OK] = UI_T_B_END_OK,           [BOOSTER_END_PROTECTED] = UI_T_B_END_PROTECTED,
+    [BOOSTER_END_GONE] = UI_T_B_END_GONE,       [BOOSTER_END_CHANGED] = UI_T_B_END_CHANGED,
+    [BOOSTER_END_DENIED] = UI_T_B_END_DENIED,   [BOOSTER_END_FAILED] = UI_T_B_END_FAILED,
+};
+/* 드라이브 BitLocker 상태(DriveEncryption 순서). */
+static const UiText k_drive_enc[DRIVE_ENC_COUNT] = {
+    [DRIVE_ENC_NOT_QUERIED] = UI_T_DR_ENC_NOT_QUERIED, [DRIVE_ENC_NONE] = UI_T_DR_ENC_NONE,
+    [DRIVE_ENC_OFF] = UI_T_DR_ENC_OFF,                 [DRIVE_ENC_ON] = UI_T_DR_ENC_ON,
+    [DRIVE_ENC_LOCKED] = UI_T_DR_ENC_LOCKED,           [DRIVE_ENC_ENCRYPTING] = UI_T_DR_ENC_ENCRYPTING,
+    [DRIVE_ENC_DECRYPTING] = UI_T_DR_ENC_DECRYPTING,   [DRIVE_ENC_SUSPENDED] = UI_T_DR_ENC_SUSPENDED,
+    [DRIVE_ENC_PENDING] = UI_T_DR_ENC_PENDING,         [DRIVE_ENC_UNKNOWN] = UI_T_DR_ENC_UNKNOWN,
+    [DRIVE_ENC_FAILED] = UI_T_DR_ENC_FAILED,
+};
+
 /* 표 table[n] 의 i 번째 문구(범위 밖·빈 칸은 빈 문자열). */
 static const wchar_t *table_text(const UiText *table, int n, int i)
 {
@@ -167,6 +197,30 @@ void gui_dev_cache_source_text(DevCacheSource source, const wchar_t *origin, wch
         swprintf(buf, len, L"%ls", ui_text(UI_T_D_SRC_DEFAULT));
         break;
     }
+}
+
+const wchar_t *gui_booster_source_text(BoosterStartupSource source)
+{
+    return table_text(k_booster_source, BOOSTER_SRC_COUNT, (int)source);
+}
+
+const wchar_t *gui_booster_protect_text(BoosterProtect protect)
+{
+    return table_text(k_booster_protect, BOOSTER_PROTECT_COUNT, (int)protect);
+}
+
+const wchar_t *gui_booster_end_text(BoosterEndStatus status)
+{
+    return table_text(k_booster_end, BOOSTER_END_COUNT, (int)status);
+}
+
+const wchar_t *gui_drive_encryption_text(int enc)
+{
+    /* core 와 같이 범위 밖 값은 "알 수 없음". */
+    if ((unsigned)enc >= (unsigned)DRIVE_ENC_COUNT) {
+        enc = DRIVE_ENC_UNKNOWN;
+    }
+    return table_text(k_drive_enc, DRIVE_ENC_COUNT, enc);
 }
 
 const wchar_t *gui_trash_status_text(CleanupTrashStatus status)
@@ -242,6 +296,23 @@ int gui_status_text_verify(void)
         gui_dev_cache_source_text((DevCacheSource)i, L"X", got, 128);
         dev_cache_source_text((DevCacheSource)i, L"X", core, 128);
         CHECK_SAME("dev source", i, got, core);
+    }
+    /* Booster·드라이브 */
+    for (i = 0; i < BOOSTER_SRC_COUNT; i++) {
+        CHECK_SAME("booster source", i, gui_booster_source_text((BoosterStartupSource)i),
+                   booster_source_text((BoosterStartupSource)i));
+    }
+    for (i = 0; i < BOOSTER_PROTECT_COUNT; i++) {
+        CHECK_SAME("booster protect", i, gui_booster_protect_text((BoosterProtect)i),
+                   booster_protect_text((BoosterProtect)i));
+    }
+    for (i = 0; i < BOOSTER_END_COUNT; i++) {
+        CHECK_SAME("booster end", i, gui_booster_end_text((BoosterEndStatus)i),
+                   booster_end_text((BoosterEndStatus)i));
+    }
+    for (i = 0; i < DRIVE_ENC_COUNT; i++) {
+        CHECK_SAME("drive encryption", i, gui_drive_encryption_text(i),
+                   drive_encryption_text((DriveEncryption)i));
     }
 #undef CHECK_SAME
     return failures;

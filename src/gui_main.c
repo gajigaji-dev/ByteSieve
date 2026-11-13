@@ -105,7 +105,7 @@ typedef struct {
     HWND pages[NAV_PAGE_COUNT];
     NavPage page; /* 보이는 페이지 */
     HFONT font;       /* 지금 언어의 UI 글꼴(사이드바·폴더 스캔·설정) */
-    HFONT base_font;  /* 시작할 때 만든 글꼴: 아직 번역하지 않은 페이지가 계속 쓴다(끝날 때 해제) */
+    HFONT base_font;  /* 시작할 때 만든 글꼴(언어를 바꿔도 끝날 때 해제) */
     HFONT title_font;
     int dpi;
     ThemeMode theme_mode; /* 지금 테마 설정(시스템·밝게·어둡게) */
@@ -172,6 +172,14 @@ static void min_window_size(int *cx, int *cy)
         panel_w = settings_w;
     }
     settings_w = cleaner_panel_min_width(g_app.pages[NAV_PAGE_CLEANER]);
+    if (settings_w > panel_w) {
+        panel_w = settings_w;
+    }
+    settings_w = drive_panel_min_width(g_app.pages[NAV_PAGE_DRIVES]);
+    if (settings_w > panel_w) {
+        panel_w = settings_w;
+    }
+    settings_w = booster_panel_min_width(g_app.pages[NAV_PAGE_BOOSTER]);
     if (settings_w > panel_w) {
         panel_w = settings_w;
     }
@@ -337,9 +345,8 @@ static void apply_thread_ui_language(UiLang lang)
 }
 
 /*
- * 표시 언어를 실행 중에 바꾼다: 언어별 글꼴을 새로 만들어 번역된 화면(사이드바·제목·폴더 스캔·격리 폴더·설정)의
- * 문구와 글꼴을 다시 쓰고, 문구 길이에 맞게 최소 창 크기·배치를 다시 계산한다. 아직 번역하지 않은
- * 페이지는 문구가 그대로라 시작할 때의 글꼴(base_font)을 계속 쓴다. 같은 언어면 아무것도 하지 않는다.
+ * 표시 언어를 실행 중에 바꾼다: 언어별 글꼴을 새로 만들어 사이드바·제목과 모든 페이지의 문구와 글꼴을
+ * 다시 쓰고, 문구 길이에 맞게 최소 창 크기·배치를 다시 계산한다. 같은 언어면 아무것도 하지 않는다.
  * 새 글꼴을 만들지 못하면 언어를 바꾸지 않는다.
  */
 static void apply_language(UiLang lang)
@@ -369,8 +376,11 @@ static void apply_language(UiLang lang)
     cleaner_panel_apply_language(g_app.pages[NAV_PAGE_CLEANER], font);
     cleaner_panel_apply_language(g_app.pages[NAV_PAGE_CACHE], font);
     quarantine_panel_apply_language(g_app.pages[NAV_PAGE_QUARANTINE], font);
+    drive_panel_apply_language(g_app.pages[NAV_PAGE_DRIVES], font);
+    monitor_panel_apply_language(g_app.pages[NAV_PAGE_MONITOR], font);
+    booster_panel_apply_language(g_app.pages[NAV_PAGE_BOOSTER], font);
     settings_panel_apply_language(g_app.pages[NAV_PAGE_SETTINGS], font);
-    /* 이전 글꼴은 이제 번역된 화면이 쓰지 않는다(시작 글꼴은 번역하지 않은 페이지가 쓰므로 남긴다). */
+    /* 이전 글꼴은 이제 어느 화면도 쓰지 않는다(시작 글꼴 base_font 는 메인 창이 끝날 때 지운다). */
     if (old_font != NULL && old_font != g_app.base_font) {
         DeleteObject(old_font);
     }
@@ -605,6 +615,9 @@ static int check_lang(LOGFONTW *out_font, int *out_min_width)
     failures += cleaner_panel_verify_lang(g_app.pages[NAV_PAGE_CLEANER]);
     failures += cleaner_panel_verify_lang(g_app.pages[NAV_PAGE_CACHE]);
     failures += quarantine_panel_verify_lang(g_app.pages[NAV_PAGE_QUARANTINE]);
+    failures += drive_panel_verify_lang(g_app.pages[NAV_PAGE_DRIVES]);
+    failures += monitor_panel_verify_lang(g_app.pages[NAV_PAGE_MONITOR]);
+    failures += booster_panel_verify_lang(g_app.pages[NAV_PAGE_BOOSTER]);
     failures += settings_panel_verify_lang(g_app.pages[NAV_PAGE_SETTINGS]);
     *out_font = lf;
     *out_min_width = cx;
@@ -628,8 +641,8 @@ static int verify_lang(void)
 /*
  * --self-test-lang-switch: 한국어로 스캔을 마친 화면에서 표시 언어를 en → ja → zh-Hans → ko 로 바꾸며
  * 단계마다 언어별 글꼴, 사이드바·제목, 폴더 스캔 페이지(단추·보기·열 머리글, 상태 줄의 스캔 결과, 분석 줄,
- * 트리·변화 열)와 설정 페이지가 새 언어로 다시 쓰였고 잘리지 않는지 확인한다(check_lang). 아직 번역하지
- * 않은 페이지가 쓰는 시작 글꼴은 그대로 살아 있어야 한다.
+ * 트리·변화 열)와 다른 페이지·설정 페이지가 새 언어로 다시 쓰였고 잘리지 않는지 확인한다(check_lang).
+ * 시작 글꼴(끝날 때 해제)은 그대로 살아 있어야 한다.
  */
 static int verify_lang_switch(void)
 {
@@ -1068,8 +1081,13 @@ static int on_page_notify(int id, int code)
         return 1;
     }
     if (id == IDC_DRIVES && code == DPN_REFRESHED && g_app.self_test == SELF_TEST_DRIVES) {
-        finish_self_test(
-            page_exit(drive_panel_verify(g_app.pages[NAV_PAGE_DRIVES]), NAV_PAGE_DRIVES));
+        /* 조회 결과(상태 줄·종류·암호화·사용률 칸)가 언어를 바꾸면 새 언어로 다시 쓰이고, 한국어로
+         * 돌아와도 처음과 같은지 본다. */
+        HWND drives = g_app.pages[NAV_PAGE_DRIVES];
+        finish_self_test(page_exit(drive_panel_verify(drives) +
+                                       verify_language_round_trip(drive_panel_verify_lang, drives) +
+                                       drive_panel_verify(drives),
+                                   NAV_PAGE_DRIVES));
         return 1;
     }
     if (id == IDC_CLEANUP && code == CPN_FINISHED &&
@@ -1145,8 +1163,11 @@ static int on_page_notify(int id, int code)
     /* 첫 측정(CPU 값 없음) 뒤 몇 번 더 받아 갱신 간격까지 확인한다. */
     if (id == IDC_MONITOR && code == MPN_SAMPLED && g_app.self_test == SELF_TEST_MONITOR &&
         monitor_panel_samples(g_app.pages[NAV_PAGE_MONITOR]) >= MONITOR_SELF_TEST_SAMPLES) {
-        finish_self_test(
-            page_exit(monitor_panel_verify(g_app.pages[NAV_PAGE_MONITOR]), NAV_PAGE_MONITOR));
+        /* 마지막에 보인 측정값(검사가 넣은 측정 실패 포함)이 언어를 바꾸면 새 언어로 다시 쓰이는지도 본다. */
+        HWND monitor = g_app.pages[NAV_PAGE_MONITOR];
+        finish_self_test(page_exit(monitor_panel_verify(monitor) +
+                                       verify_language_round_trip(monitor_panel_verify_lang, monitor),
+                                   NAV_PAGE_MONITOR));
         return 1;
     }
     /* 시스템 정리 → 개발 캐시 순서로 분석·정리한다. */
@@ -1174,8 +1195,12 @@ static int on_page_notify(int id, int code)
         return 1;
     }
     if (id == IDC_BOOSTER && code == BPN_REFRESHED && g_app.self_test == SELF_TEST_BOOSTER) {
-        finish_self_test(
-            page_exit(booster_panel_verify(g_app.pages[NAV_PAGE_BOOSTER]), NAV_PAGE_BOOSTER));
+        /* 요약·정보 줄과 목록의 상태·위치·종류 칸이 언어를 바꾸면 새 언어로 다시 쓰이는지도 본다. */
+        HWND booster = g_app.pages[NAV_PAGE_BOOSTER];
+        finish_self_test(page_exit(booster_panel_verify(booster) +
+                                       verify_language_round_trip(booster_panel_verify_lang, booster) +
+                                       booster_panel_verify(booster),
+                                   NAV_PAGE_BOOSTER));
         return 1;
     }
     return 0;

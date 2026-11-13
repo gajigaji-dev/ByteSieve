@@ -9,9 +9,11 @@
 
 #include "booster.h"
 #include "gui_booster.h"
+#include "gui_status_text.h"
 #include "gui_theme.h"
 #include "size_format.h"
 #include "sysmon.h"
+#include "ui_lang.h"
 
 #define BOOSTER_PANEL_CLASS L"ByteSieveBoosterPanel"
 
@@ -44,6 +46,25 @@ enum {
 enum { SCOL_NAME, SCOL_STATE, SCOL_SOURCE, SCOL_COMMAND, SCOL_RESULT, SCOL_COUNT };
 enum { PCOL_NAME, PCOL_PID, PCOL_KIND, PCOL_CPU, PCOL_MEM, PCOL_STATE, PCOL_PATH, PCOL_COUNT };
 
+/* 열 머리글과 기본 폭(한국어 화면의 예전 폭). */
+typedef struct {
+    UiText title;
+    int width;
+    int fmt;
+} ColumnDef;
+
+static const ColumnDef k_scols[SCOL_COUNT] = {
+    {UI_T_B_COL_NAME, 180, LVCFMT_LEFT},    {UI_T_B_COL_STATE, 80, LVCFMT_LEFT},
+    {UI_T_B_COL_SOURCE, 200, LVCFMT_LEFT},  {UI_T_B_COL_COMMAND, 420, LVCFMT_LEFT},
+    {UI_T_B_COL_RESULT, 220, LVCFMT_LEFT},
+};
+static const ColumnDef k_pcols[PCOL_COUNT] = {
+    {UI_T_B_COL_NAME, 180, LVCFMT_LEFT},  {UI_T_B_COL_PID, 60, LVCFMT_RIGHT},
+    {UI_T_B_COL_KIND, 80, LVCFMT_LEFT},   {UI_T_B_COL_CPU, 60, LVCFMT_RIGHT},
+    {UI_T_B_COL_MEMORY, 90, LVCFMT_RIGHT}, {UI_T_B_COL_STATE, 220, LVCFMT_LEFT},
+    {UI_T_B_COL_PATH, 400, LVCFMT_LEFT},
+};
+
 typedef struct {
     HFONT font;
     int dpi;
@@ -68,9 +89,25 @@ typedef struct {
     HFONT font;
     int dpi;
     int started;
+    /* 문구에 맞춘 폭(언어를 바꾸면 다시 잰다). */
+    int w_refresh, w_disable, w_enable, w_background, w_end, label_w;
 
     SysMonitor mon;
     SysmonSample sample;
+    int has_sample;
+
+    /* 정보 줄에 마지막으로 보인 작업 결과(언어를 바꾸면 이것으로 다시 쓴다). */
+    struct {
+        int shown;
+        int enable;
+        unsigned ok;
+        int partial;
+    } start_note;
+    struct {
+        int shown;
+        unsigned ok, failed;
+        uint64_t mem;
+    } proc_note;
 
     BoosterStartupList startup;
     StartupRow *srows;
@@ -105,12 +142,16 @@ static int proc_can_check(const BoosterPanel *p, size_t i)
 
 /* ---- 요약 ---- */
 
-static void update_summary(BoosterPanel *p)
+/* 요약 줄 문구(마지막 측정값을 지금 언어로). 아직 측정하지 않았으면 빈 문자열. */
+static void summary_text(const BoosterPanel *p, wchar_t *text, size_t len)
 {
-    wchar_t text[320], used[32], total[32], cpu[32];
+    wchar_t used[32], total[32], cpu[32];
     size_t i, background = 0;
 
-    sysmon_sample(&p->mon, &p->sample);
+    text[0] = L'\0';
+    if (!p->has_sample) {
+        return;
+    }
     for (i = 0; i < p->procs.len; i++) {
         background += !p->procs.items[i].has_window;
     }
@@ -118,39 +159,73 @@ static void update_summary(BoosterPanel *p)
         swprintf(cpu, 32, L"%u.%u%%", p->sample.cpu.usage_permille / 10,
                  p->sample.cpu.usage_permille % 10);
     } else {
-        swprintf(cpu, 32, L"측정 중");
+        swprintf(cpu, 32, L"%ls", ui_text(UI_T_B_MEASURING));
     }
     if (p->sample.memory.status == SYSMON_OK) {
         format_size(p->sample.memory.used_bytes, used, 32);
         format_size(p->sample.memory.total_bytes, total, 32);
-        swprintf(text, sizeof(text) / sizeof(text[0]),
-                 L"CPU %ls · 메모리 %ls / %ls (%u%%) · 프로세스 %u개(백그라운드 %u개)", cpu, used,
-                 total, p->sample.memory.usage_permille / 10, (unsigned)p->procs.len,
-                 (unsigned)background);
+        swprintf(text, len, ui_text(UI_T_B_SUMMARY), cpu, used, total,
+                 p->sample.memory.usage_permille / 10, (unsigned)p->procs.len, (unsigned)background);
     } else {
-        swprintf(text, sizeof(text) / sizeof(text[0]), L"CPU %ls · 메모리 측정 실패", cpu);
+        swprintf(text, len, ui_text(UI_T_B_SUMMARY_MEM_FAIL), cpu);
     }
+}
+
+static void render_summary(BoosterPanel *p)
+{
+    wchar_t text[320];
+
+    summary_text(p, text, sizeof(text) / sizeof(text[0]));
     SetWindowTextW(p->summary, text);
+}
+
+/* 새로 측정해 요약 줄을 쓴다. */
+static void update_summary(BoosterPanel *p)
+{
+    sysmon_sample(&p->mon, &p->sample);
+    p->has_sample = 1;
+    render_summary(p);
 }
 
 /* ---- 시작 프로그램 ---- */
 
-static void update_startup_info(BoosterPanel *p)
+/* 시작 프로그램 정보 줄: 마지막 바꾸기 결과, 없으면 개수·선택 수. */
+static void start_info_text(const BoosterPanel *p, wchar_t *text, size_t len)
 {
-    wchar_t text[256];
     size_t i, enabled = 0, checked = 0;
 
+    if (p->start_note.shown) {
+        swprintf(text, len, ui_text(p->start_note.enable ? UI_T_B_APPLIED_ON : UI_T_B_APPLIED_OFF),
+                 p->start_note.ok, p->start_note.partial ? ui_text(UI_T_B_PARTIAL_FAIL) : L"");
+        return;
+    }
     for (i = 0; i < p->startup.len; i++) {
         enabled += p->startup.items[i].enabled;
         checked += p->srows != NULL && p->srows[i].checked;
     }
-    swprintf(text, sizeof(text) / sizeof(text[0]),
-             L"%u개 중 사용 %u개 · 선택 %u개%ls", (unsigned)p->startup.len, (unsigned)enabled,
-             (unsigned)checked,
-             p->startup.errors > 0 ? L" · 일부 위치를 읽지 못함" : L"");
+    swprintf(text, len, ui_text(UI_T_B_START_INFO), (unsigned)p->startup.len, (unsigned)enabled,
+             (unsigned)checked, p->startup.errors > 0 ? ui_text(UI_T_B_START_READ_ERRORS) : L"");
+}
+
+static void render_start_info(BoosterPanel *p)
+{
+    wchar_t text[256];
+    size_t i, checked = 0;
+
+    for (i = 0; p->srows != NULL && i < p->startup.len; i++) {
+        checked += p->srows[i].checked;
+    }
+    start_info_text(p, text, sizeof(text) / sizeof(text[0]));
     SetWindowTextW(p->start_info, text);
     EnableWindow(p->disable_btn, checked > 0);
     EnableWindow(p->enable_btn, checked > 0);
+}
+
+/* 선택이 바뀌면 결과 대신 개수·선택 수를 보인다. */
+static void update_startup_info(BoosterPanel *p)
+{
+    p->start_note.shown = 0;
+    render_start_info(p);
 }
 
 static void load_startup(BoosterPanel *p)
@@ -170,13 +245,13 @@ static void startup_result_text(const BoosterPanel *p, size_t i, wchar_t *buf, s
 
     buf[0] = L'\0';
     if (r->applied && r->result == 0) {
-        swprintf(buf, len, L"바꿈");
+        swprintf(buf, len, L"%ls", ui_text(UI_T_B_RES_CHANGED));
     } else if (r->applied && r->result == ERROR_ACCESS_DENIED) {
-        swprintf(buf, len, L"바꾸지 못함: 관리자 권한 필요");
+        swprintf(buf, len, L"%ls", ui_text(UI_T_B_RES_DENIED));
     } else if (r->applied) {
-        swprintf(buf, len, L"바꾸지 못함(오류 %lu)", r->result);
+        swprintf(buf, len, ui_text(UI_T_B_RES_FAILED), r->result);
     } else if (booster_source_needs_admin(p->startup.items[i].source)) {
-        swprintf(buf, len, L"바꾸려면 관리자 권한 필요");
+        swprintf(buf, len, L"%ls", ui_text(UI_T_B_RES_NEEDS_ADMIN));
     }
 }
 
@@ -184,7 +259,6 @@ static void startup_result_text(const BoosterPanel *p, size_t i, wchar_t *buf, s
 static void apply_startup(BoosterPanel *p, int enable)
 {
     size_t i, ok = 0, failed = 0;
-    wchar_t text[160];
 
     for (i = 0; p->srows != NULL && i < p->startup.len; i++) {
         BoosterStartupItem *it = &p->startup.items[i];
@@ -204,10 +278,11 @@ static void apply_startup(BoosterPanel *p, int enable)
             failed++;
         }
     }
-    swprintf(text, 160, L"시작 프로그램 %u개를 %ls으로 바꿈%ls", (unsigned)ok,
-             enable ? L"사용" : L"사용 안 함", failed > 0 ? L" · 일부 실패(행의 결과 참고)" : L"");
-    update_startup_info(p);
-    SetWindowTextW(p->start_info, text);
+    p->start_note.shown = 1;
+    p->start_note.enable = enable;
+    p->start_note.ok = (unsigned)ok;
+    p->start_note.partial = failed > 0;
+    render_start_info(p);
     InvalidateRect(p->start_list, NULL, TRUE);
 }
 
@@ -269,12 +344,22 @@ static void build_order(BoosterPanel *p)
     InvalidateRect(p->proc_list, NULL, FALSE);
 }
 
-static void update_proc_info(BoosterPanel *p)
+/* 프로세스 정보 줄: 읽는 중, 마지막 끝내기 결과, 없으면 선택 수·확보 예상 메모리. */
+static void proc_info_text(const BoosterPanel *p, wchar_t *text, size_t len)
 {
-    wchar_t text[200], size[32];
+    wchar_t size[32];
     size_t i, checked = 0;
     uint64_t mem = 0;
 
+    if (p->measuring) {
+        swprintf(text, len, L"%ls", ui_text(UI_T_B_PROC_READING));
+        return;
+    }
+    if (p->proc_note.shown) {
+        format_size(p->proc_note.mem, size, 32);
+        swprintf(text, len, ui_text(UI_T_B_END_RESULT), p->proc_note.ok, size, p->proc_note.failed);
+        return;
+    }
     for (i = 0; p->prows != NULL && i < p->procs.len; i++) {
         if (p->prows[i].checked) {
             checked++;
@@ -282,9 +367,27 @@ static void update_proc_info(BoosterPanel *p)
         }
     }
     format_size(mem, size, 32);
-    swprintf(text, 200, L"선택 %u개 · 확보 예상 메모리 %ls", (unsigned)checked, size);
-    SetWindowTextW(p->proc_info, p->measuring ? L"프로세스 목록과 CPU 사용률을 읽는 중..." : text);
+    swprintf(text, len, ui_text(UI_T_B_PROC_INFO), (unsigned)checked, size);
+}
+
+static void render_proc_info(BoosterPanel *p)
+{
+    wchar_t text[256];
+    size_t i, checked = 0;
+
+    for (i = 0; p->prows != NULL && i < p->procs.len; i++) {
+        checked += p->prows[i].checked;
+    }
+    proc_info_text(p, text, sizeof(text) / sizeof(text[0]));
+    SetWindowTextW(p->proc_info, text);
     EnableWindow(p->end_btn, !p->measuring && checked > 0);
+}
+
+/* 선택·목록이 바뀌면 결과 대신 선택 수를 보인다. */
+static void update_proc_info(BoosterPanel *p)
+{
+    p->proc_note.shown = 0;
+    render_proc_info(p);
 }
 
 static void start_process_refresh(BoosterPanel *p)
@@ -350,7 +453,7 @@ static int confirm_end(BoosterPanel *p)
         }
     }
     format_size(mem, size, 32);
-    APPEND(L"선택한 프로세스 %u개를 끝냅니다(확보 예상 메모리 %ls).\n\n", (unsigned)checked, size);
+    APPEND(ui_text(UI_T_B_CONFIRM_HEAD), (unsigned)checked, size);
     for (i = 0; i < p->procs.len && shown < CONFIRM_LIST_MAX; i++) {
         const BoosterProcess *pr = &p->procs.items[i];
         if (!p->prows[i].checked) {
@@ -358,18 +461,15 @@ static int confirm_end(BoosterPanel *p)
         }
         format_size(pr->working_set, size, 32);
         APPEND(L"■ %ls (PID %lu, %ls, %ls)\n", pr->name, (unsigned long)pr->pid, size,
-               pr->has_window ? L"앱" : L"백그라운드");
+               ui_text(pr->has_window ? UI_T_B_KIND_APP : UI_T_B_KIND_BACKGROUND));
         shown++;
     }
     if (checked > shown) {
-        APPEND(L"... 외 %u개\n", (unsigned)(checked - shown));
+        APPEND(ui_text(UI_T_B_CONFIRM_MORE), (unsigned)(checked - shown));
     }
-    APPEND(L"\n프로세스를 바로 끝내므로 저장하지 않은 작업은 사라질 수 있습니다. 끝낸 프로그램은 "
-           L"다시 실행할 수 있으며, 시작 프로그램이면 다음 로그인 때 다시 실행됩니다.\n"
-           L"시스템·Windows 구성 요소·ByteSieve 는 고를 수 없고, 목록을 읽은 뒤 다른 프로세스로 "
-           L"바뀐 경우(같은 PID 재사용)에는 끝내지 않습니다.\n\n계속할까요?");
+    APPEND(L"%ls", ui_text(UI_T_B_CONFIRM_WARN));
 #undef APPEND
-    answer = MessageBoxW(GetAncestor(p->hwnd, GA_ROOT), text, L"Booster - 프로세스 끝내기",
+    answer = MessageBoxW(GetAncestor(p->hwnd, GA_ROOT), text, ui_text(UI_T_B_CONFIRM_TITLE),
                          MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
     free(text);
     return answer == IDYES;
@@ -379,7 +479,6 @@ static void end_processes(BoosterPanel *p)
 {
     size_t i, ok = 0, failed = 0;
     uint64_t mem = 0;
-    wchar_t text[200], size[32];
 
     if (p->prows == NULL || p->measuring || !confirm_end(p)) {
         return;
@@ -399,12 +498,12 @@ static void end_processes(BoosterPanel *p)
             failed++;
         }
     }
-    format_size(mem, size, 32);
-    swprintf(text, 200, L"끝냄 %u개(메모리 약 %ls) · 끝내지 못함 %u개(행의 상태 참고)",
-             (unsigned)ok, size, (unsigned)failed);
     InvalidateRect(p->proc_list, NULL, TRUE);
-    update_proc_info(p);
-    SetWindowTextW(p->proc_info, text);
+    p->proc_note.shown = 1;
+    p->proc_note.ok = (unsigned)ok;
+    p->proc_note.failed = (unsigned)failed;
+    p->proc_note.mem = mem;
+    render_proc_info(p);
 }
 
 static void proc_state_text(const BoosterPanel *p, size_t i, wchar_t *buf, size_t len)
@@ -414,16 +513,16 @@ static void proc_state_text(const BoosterPanel *p, size_t i, wchar_t *buf, size_
 
     if (r->ended) {
         if (r->result.status == BOOSTER_END_PROTECTED) {
-            swprintf(buf, len, L"%ls: %ls", booster_end_text(r->result.status),
-                     booster_protect_text(r->result.protect));
+            swprintf(buf, len, L"%ls: %ls", gui_booster_end_text(r->result.status),
+                     gui_booster_protect_text(r->result.protect));
         } else if (r->result.code != 0) {
-            swprintf(buf, len, L"%ls (오류 %lu)", booster_end_text(r->result.status),
+            swprintf(buf, len, ui_text(UI_T_B_STATE_ERROR), gui_booster_end_text(r->result.status),
                      r->result.code);
         } else {
-            swprintf(buf, len, L"%ls", booster_end_text(r->result.status));
+            swprintf(buf, len, L"%ls", gui_booster_end_text(r->result.status));
         }
     } else if (pr->protect != BOOSTER_PROTECT_NONE) {
-        swprintf(buf, len, L"보호: %ls", booster_protect_text(pr->protect));
+        swprintf(buf, len, ui_text(UI_T_B_PROTECTED), gui_booster_protect_text(pr->protect));
     } else {
         buf[0] = L'\0';
     }
@@ -454,10 +553,10 @@ static void start_dispinfo(BoosterPanel *p, NMLVDISPINFOW *di)
         di->item.pszText = it->name;
         break;
     case SCOL_STATE:
-        di->item.pszText = it->enabled ? (wchar_t *)L"사용" : (wchar_t *)L"사용 안 함";
+        di->item.pszText = (wchar_t *)ui_text(it->enabled ? UI_T_B_STATE_ON : UI_T_B_STATE_OFF);
         break;
     case SCOL_SOURCE:
-        di->item.pszText = (wchar_t *)booster_source_text(it->source);
+        di->item.pszText = (wchar_t *)gui_booster_source_text(it->source);
         break;
     case SCOL_COMMAND:
         di->item.pszText = it->command;
@@ -496,7 +595,7 @@ static void proc_dispinfo(BoosterPanel *p, NMLVDISPINFOW *di)
         swprintf(p->cell, 32, L"%lu", (unsigned long)pr->pid);
         break;
     case PCOL_KIND:
-        di->item.pszText = pr->has_window ? (wchar_t *)L"앱" : (wchar_t *)L"백그라운드";
+        di->item.pszText = (wchar_t *)ui_text(pr->has_window ? UI_T_B_KIND_APP : UI_T_B_KIND_BACKGROUND);
         break;
     case PCOL_CPU:
         swprintf(p->cell, 32, L"%u.%u%%", pr->cpu_permille / 10, pr->cpu_permille % 10);
@@ -567,14 +666,15 @@ static void sort_procs(BoosterPanel *p, int col)
 static void panel_layout(BoosterPanel *p)
 {
     RECT rc;
-    int h = pscale(p, 24), gap = pscale(p, 6), bw = pscale(p, 100), label_w = pscale(p, 110);
+    int h = pscale(p, 24), gap = pscale(p, 6), label_w = p->label_w;
     int w, y, x, start_h, proc_h, rest;
 
     GetClientRect(p->hwnd, &rc);
     w = rc.right - rc.left;
     y = 0;
-    MoveWindow(p->refresh, 0, y, bw, h, TRUE);
-    MoveWindow(p->summary, bw + 2 * gap, y + pscale(p, 4), w - bw - 2 * gap, pscale(p, 20), TRUE);
+    MoveWindow(p->refresh, 0, y, p->w_refresh, h, TRUE);
+    x = p->w_refresh + 2 * gap;
+    MoveWindow(p->summary, x, y + pscale(p, 4), w - x > 0 ? w - x : 0, pscale(p, 20), TRUE);
     y += h + gap;
     rest = rc.bottom - y - 2 * (h + gap) - gap;
     start_h = rest * 2 / 5;
@@ -582,10 +682,10 @@ static void panel_layout(BoosterPanel *p)
 
     MoveWindow(p->start_label, 0, y + pscale(p, 4), label_w, pscale(p, 20), TRUE);
     x = label_w;
-    MoveWindow(p->disable_btn, x, y, bw, h, TRUE);
-    x += bw + gap;
-    MoveWindow(p->enable_btn, x, y, bw, h, TRUE);
-    x += bw + 2 * gap;
+    MoveWindow(p->disable_btn, x, y, p->w_disable, h, TRUE);
+    x += p->w_disable + gap;
+    MoveWindow(p->enable_btn, x, y, p->w_enable, h, TRUE);
+    x += p->w_enable + 2 * gap;
     MoveWindow(p->start_info, x, y + pscale(p, 4), w - x > 0 ? w - x : 0, pscale(p, 20), TRUE);
     y += h + gap;
     MoveWindow(p->start_list, 0, y, w, start_h > 0 ? start_h : 0, TRUE);
@@ -593,13 +693,40 @@ static void panel_layout(BoosterPanel *p)
 
     MoveWindow(p->proc_label, 0, y + pscale(p, 4), label_w, pscale(p, 20), TRUE);
     x = label_w;
-    MoveWindow(p->background, x, y, pscale(p, 130), h, TRUE);
-    x += pscale(p, 130) + gap;
-    MoveWindow(p->end_btn, x, y, pscale(p, 170), h, TRUE);
-    x += pscale(p, 170) + 2 * gap;
+    MoveWindow(p->background, x, y, p->w_background, h, TRUE);
+    x += p->w_background + gap;
+    MoveWindow(p->end_btn, x, y, p->w_end, h, TRUE);
+    x += p->w_end + 2 * gap;
     MoveWindow(p->proc_info, x, y + pscale(p, 4), w - x > 0 ? w - x : 0, pscale(p, 20), TRUE);
     y += h + gap;
     MoveWindow(p->proc_list, 0, y, w, proc_h > 0 ? proc_h : 0, TRUE);
+}
+
+/*
+ * 단추·체크 상자·이름표 폭: 예전 고정 폭(단추 100, [백그라운드만] 130, 끝내기 170, 이름표 110)을 최소로
+ * 두고(한국어 화면은 그대로), 지금 글꼴로 잰 문구가 더 길면 넓힌다.
+ */
+static void measure_controls(BoosterPanel *p)
+{
+    int a, b;
+
+    p->w_refresh = theme_button_width(p->hwnd, p->font, ui_text(UI_T_B_REFRESH), p->dpi, pscale(p, 100));
+    p->w_disable = theme_button_width(p->hwnd, p->font, ui_text(UI_T_B_DISABLE), p->dpi, pscale(p, 100));
+    p->w_enable = theme_button_width(p->hwnd, p->font, ui_text(UI_T_B_ENABLE), p->dpi, pscale(p, 100));
+    p->w_background =
+        theme_check_width(p->hwnd, p->font, ui_text(UI_T_B_BACKGROUND_ONLY), p->dpi, pscale(p, 130));
+    p->w_end = theme_button_width(p->hwnd, p->font, ui_text(UI_T_B_END), p->dpi, pscale(p, 170));
+    a = theme_text_width(p->hwnd, p->font, ui_text(UI_T_B_START_LABEL));
+    b = theme_text_width(p->hwnd, p->font, ui_text(UI_T_B_PROC_LABEL));
+    a = (a > b ? a : b) + pscale(p, 8);
+    p->label_w = a > pscale(p, 110) ? a : pscale(p, 110);
+}
+
+/* 열 폭: 기본 폭과, 머리글 문구가 잘리지 않는 폭 중 큰 값. */
+static int column_width(BoosterPanel *p, HWND list, const ColumnDef *def)
+{
+    int need = theme_text_width(list, p->font, ui_text(def->title)) + pscale(p, 16);
+    return pscale(p, def->width) > need ? pscale(p, def->width) : need;
 }
 
 static HWND panel_child(BoosterPanel *p, const wchar_t *cls, const wchar_t *text, DWORD style,
@@ -611,8 +738,7 @@ static HWND panel_child(BoosterPanel *p, const wchar_t *cls, const wchar_t *text
     return h;
 }
 
-static void add_columns(BoosterPanel *p, HWND list, const wchar_t *const *titles,
-                        const int *widths, const int *fmts, int count)
+static void add_columns(BoosterPanel *p, HWND list, const ColumnDef *cols, int count)
 {
     int i;
 
@@ -623,52 +749,73 @@ static void add_columns(BoosterPanel *p, HWND list, const wchar_t *const *titles
         LVCOLUMNW col;
         memset(&col, 0, sizeof(col));
         col.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_FMT;
-        col.pszText = (wchar_t *)titles[i];
-        col.cx = pscale(p, widths[i]);
-        col.fmt = fmts[i];
+        col.pszText = (wchar_t *)ui_text(cols[i].title);
+        col.cx = column_width(p, list, &cols[i]);
+        col.fmt = cols[i].fmt;
         SendMessageW(list, LVM_INSERTCOLUMNW, (WPARAM)i, (LPARAM)&col);
     }
 }
 
+/* 언어를 바꾼 뒤 열 머리글을 다시 쓰고, 새 머리글이 잘리지 않게 넓힌다(사용자가 넓힌 폭은 줄이지 않음). */
+static void retitle_columns(BoosterPanel *p, HWND list, const ColumnDef *cols, int count)
+{
+    int i;
+
+    for (i = 0; i < count; i++) {
+        LVCOLUMNW col;
+        int need = column_width(p, list, &cols[i]);
+        memset(&col, 0, sizeof(col));
+        col.mask = LVCF_TEXT;
+        col.pszText = (wchar_t *)ui_text(cols[i].title);
+        SendMessageW(list, LVM_SETCOLUMNW, (WPARAM)i, (LPARAM)&col);
+        if (ListView_GetColumnWidth(list, i) < need) {
+            ListView_SetColumnWidth(list, i, need);
+        }
+    }
+}
+
+/* 단추·이름표·체크 상자와 문구(위에서 아래, 왼쪽부터). */
+#define CONTROL_TEXTS 7
+static void control_texts(BoosterPanel *p, HWND *h, UiText *t)
+{
+    h[0] = p->refresh, t[0] = UI_T_B_REFRESH;
+    h[1] = p->start_label, t[1] = UI_T_B_START_LABEL;
+    h[2] = p->disable_btn, t[2] = UI_T_B_DISABLE;
+    h[3] = p->enable_btn, t[3] = UI_T_B_ENABLE;
+    h[4] = p->proc_label, t[4] = UI_T_B_PROC_LABEL;
+    h[5] = p->background, t[5] = UI_T_B_BACKGROUND_ONLY;
+    h[6] = p->end_btn, t[6] = UI_T_B_END;
+}
+
 static void panel_create_controls(BoosterPanel *p)
 {
-    static const wchar_t *const stitles[SCOL_COUNT] = {L"이름", L"상태", L"위치", L"명령",
-                                                       L"결과"};
-    static const int swidths[SCOL_COUNT] = {180, 80, 200, 420, 220};
-    static const int sfmts[SCOL_COUNT] = {LVCFMT_LEFT, LVCFMT_LEFT, LVCFMT_LEFT, LVCFMT_LEFT,
-                                          LVCFMT_LEFT};
-    static const wchar_t *const ptitles[PCOL_COUNT] = {L"이름", L"PID", L"종류", L"CPU",
-                                                       L"메모리", L"상태", L"경로"};
-    static const int pwidths[PCOL_COUNT] = {180, 60, 80, 60, 90, 220, 400};
-    static const int pfmts[PCOL_COUNT] = {LVCFMT_LEFT,  LVCFMT_RIGHT, LVCFMT_LEFT, LVCFMT_RIGHT,
-                                          LVCFMT_RIGHT, LVCFMT_LEFT,  LVCFMT_LEFT};
     DWORD list_style = LVS_REPORT | LVS_OWNERDATA | LVS_SHOWSELALWAYS | WS_TABSTOP;
 
-    p->refresh = panel_child(p, L"BUTTON", L"새로고침", BS_PUSHBUTTON | WS_TABSTOP, 0,
+    p->refresh = panel_child(p, L"BUTTON", ui_text(UI_T_B_REFRESH), BS_PUSHBUTTON | WS_TABSTOP, 0,
                              IDC_B_REFRESH);
     p->summary = panel_child(p, L"STATIC", L"", SS_LEFTNOWORDWRAP | SS_ENDELLIPSIS, 0,
                              IDC_B_SUMMARY);
-    p->start_label = panel_child(p, L"STATIC", L"시작 프로그램", SS_LEFT, 0, IDC_B_START_LABEL);
-    p->disable_btn = panel_child(p, L"BUTTON", L"사용 안 함", BS_PUSHBUTTON | WS_TABSTOP, 0,
+    p->start_label = panel_child(p, L"STATIC", ui_text(UI_T_B_START_LABEL), SS_LEFT, 0, IDC_B_START_LABEL);
+    p->disable_btn = panel_child(p, L"BUTTON", ui_text(UI_T_B_DISABLE), BS_PUSHBUTTON | WS_TABSTOP, 0,
                                  IDC_B_DISABLE);
-    p->enable_btn = panel_child(p, L"BUTTON", L"사용", BS_PUSHBUTTON | WS_TABSTOP, 0,
+    p->enable_btn = panel_child(p, L"BUTTON", ui_text(UI_T_B_ENABLE), BS_PUSHBUTTON | WS_TABSTOP, 0,
                                 IDC_B_ENABLE);
     p->start_info = panel_child(p, L"STATIC", L"", SS_LEFTNOWORDWRAP | SS_ENDELLIPSIS, 0,
                                 IDC_B_START_INFO);
     p->start_list = panel_child(p, WC_LISTVIEWW, L"", list_style, WS_EX_CLIENTEDGE,
                                 IDC_B_START_LIST);
-    p->proc_label = panel_child(p, L"STATIC", L"프로세스", SS_LEFT, 0, IDC_B_PROC_LABEL);
-    p->background = panel_child(p, L"BUTTON", L"백그라운드만", BS_AUTOCHECKBOX | WS_TABSTOP, 0,
-                                IDC_B_BACKGROUND);
+    p->proc_label = panel_child(p, L"STATIC", ui_text(UI_T_B_PROC_LABEL), SS_LEFT, 0, IDC_B_PROC_LABEL);
+    p->background = panel_child(p, L"BUTTON", ui_text(UI_T_B_BACKGROUND_ONLY), BS_AUTOCHECKBOX | WS_TABSTOP,
+                                0, IDC_B_BACKGROUND);
     /* 끝내기 단추에는 단축 글자(&)를 두지 않는다(실수로 눌리지 않게, 확인 창 기본은 [아니요]). */
-    p->end_btn = panel_child(p, L"BUTTON", L"선택한 프로세스 끝내기...", BS_PUSHBUTTON | WS_TABSTOP,
-                             0, IDC_B_END);
+    p->end_btn = panel_child(p, L"BUTTON", ui_text(UI_T_B_END), BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_B_END);
     p->proc_info = panel_child(p, L"STATIC", L"", SS_LEFTNOWORDWRAP | SS_ENDELLIPSIS, 0,
                                IDC_B_PROC_INFO);
     p->proc_list = panel_child(p, WC_LISTVIEWW, L"", list_style, WS_EX_CLIENTEDGE,
                                IDC_B_PROC_LIST);
-    add_columns(p, p->start_list, stitles, swidths, sfmts, SCOL_COUNT);
-    add_columns(p, p->proc_list, ptitles, pwidths, pfmts, PCOL_COUNT);
+    add_columns(p, p->start_list, k_scols, SCOL_COUNT);
+    add_columns(p, p->proc_list, k_pcols, PCOL_COUNT);
+    measure_controls(p);
     p->sort_col = PCOL_MEM;
     p->sort_desc = 1;
     EnableWindow(p->disable_btn, FALSE);
@@ -845,6 +992,56 @@ int booster_panel_refresh(HWND panel)
     return 1;
 }
 
+void booster_panel_apply_language(HWND panel, HFONT font)
+{
+    BoosterPanel *p = panel_of(panel);
+    HWND child, h[CONTROL_TEXTS];
+    UiText t[CONTROL_TEXTS];
+    int i;
+
+    if (p == NULL) {
+        return;
+    }
+    if (font != NULL) {
+        p->font = font;
+        for (child = GetWindow(p->hwnd, GW_CHILD); child != NULL; child = GetWindow(child, GW_HWNDNEXT)) {
+            SendMessageW(child, WM_SETFONT, (WPARAM)font, FALSE);
+        }
+    }
+    control_texts(p, h, t);
+    for (i = 0; i < CONTROL_TEXTS; i++) {
+        SetWindowTextW(h[i], ui_text(t[i]));
+    }
+    retitle_columns(p, p->start_list, k_scols, SCOL_COUNT);
+    retitle_columns(p, p->proc_list, k_pcols, PCOL_COUNT);
+    measure_controls(p);
+    /* 요약·정보 줄은 마지막 측정값·결과를 새 언어로(다시 측정하지 않음), 목록 칸은 그릴 때 지금 언어로. */
+    render_summary(p);
+    if (p->started) {
+        render_start_info(p);
+        render_proc_info(p);
+    }
+    panel_layout(p);
+    InvalidateRect(p->start_list, NULL, TRUE);
+    InvalidateRect(p->proc_list, NULL, TRUE);
+    InvalidateRect(p->hwnd, NULL, TRUE);
+}
+
+int booster_panel_min_width(HWND panel)
+{
+    BoosterPanel *p = panel_of(panel);
+    int gap, a, b;
+
+    if (p == NULL) {
+        return 0;
+    }
+    /* 단추 줄 둘(이름표 + 단추 둘, 이름표 + 체크 상자 + 끝내기)과 간격(정보 줄은 남는 폭만 쓴다). */
+    gap = pscale(p, 6);
+    a = p->label_w + p->w_disable + gap + p->w_enable + 2 * gap;
+    b = p->label_w + p->w_background + gap + p->w_end + 2 * gap;
+    return a > b ? a : b;
+}
+
 int booster_panel_start(HWND panel)
 {
     BoosterPanel *p = panel_of(panel);
@@ -882,7 +1079,11 @@ int booster_panel_verify(HWND panel)
     PANEL_CHECK(ListView_GetItemCount(p->proc_list) == (int)p->visible);
     PANEL_CHECK(ListView_GetItemCount(p->start_list) == (int)p->startup.len);
     GetWindowTextW(p->summary, buf, 512);
-    PANEL_CHECK(wcsncmp(buf, L"CPU ", 4) == 0 && wcsstr(buf, L"프로세스 ") != NULL);
+    {
+        wchar_t want[512];
+        summary_text(p, want, 512);
+        PANEL_CHECK(wcsncmp(buf, L"CPU ", 4) == 0 && wcscmp(buf, want) == 0);
+    }
 
     /* 기본 정렬: 메모리 내림차순 */
     for (row = 1; row < p->visible; row++) {
@@ -896,7 +1097,7 @@ int booster_panel_verify(HWND panel)
             found_self = 1;
             PANEL_CHECK(pr->protect == BOOSTER_PROTECT_SELF && !proc_can_check(p, idx));
             ListView_GetItemText(p->proc_list, (int)row, PCOL_STATE, buf, 512);
-            PANEL_CHECK(wcsstr(buf, booster_protect_text(BOOSTER_PROTECT_SELF)) != NULL);
+            PANEL_CHECK(wcsstr(buf, gui_booster_protect_text(BOOSTER_PROTECT_SELF)) != NULL);
             ListView_GetItemText(p->proc_list, (int)row, PCOL_NAME, buf, 512);
             PANEL_CHECK(_wcsicmp(buf, pr->name) == 0);
         }
@@ -924,8 +1125,109 @@ int booster_panel_verify(HWND panel)
         ListView_GetItemText(p->start_list, (int)i, SCOL_NAME, buf, 512);
         PANEL_CHECK(wcscmp(buf, p->startup.items[i].name) == 0);
         ListView_GetItemText(p->start_list, (int)i, SCOL_STATE, buf, 512);
-        PANEL_CHECK(wcscmp(buf, p->startup.items[i].enabled ? L"사용" : L"사용 안 함") == 0);
+        PANEL_CHECK(wcscmp(buf, ui_text(p->startup.items[i].enabled ? UI_T_B_STATE_ON : UI_T_B_STATE_OFF)) ==
+                    0);
     }
     PANEL_CHECK(!IsWindowEnabled(p->end_btn));
+    return failures;
+}
+
+/* 한글(가-힣)이 들어 있는지. */
+static int has_hangul(const wchar_t *s)
+{
+    for (; *s != L'\0'; s++) {
+        if (*s >= 0xAC00 && *s <= 0xD7A3) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* 열 머리글이 cols 의 지금 언어 문구이고 잘리지 않는지. 실패 수. */
+static int verify_columns(BoosterPanel *p, HWND list, const ColumnDef *cols, int count)
+{
+    wchar_t buf[128];
+    int failures = 0, i;
+
+    for (i = 0; i < count; i++) {
+        LVCOLUMNW col;
+        memset(&col, 0, sizeof(col));
+        col.mask = LVCF_TEXT;
+        col.pszText = buf;
+        col.cchTextMax = 128;
+        buf[0] = L'\0';
+        SendMessageW(list, LVM_GETCOLUMNW, (WPARAM)i, (LPARAM)&col);
+        PANEL_CHECK(wcscmp(buf, ui_text(cols[i].title)) == 0);
+        PANEL_CHECK(ListView_GetColumnWidth(list, i) > theme_text_width(list, p->font, buf));
+    }
+    return failures;
+}
+
+int booster_panel_verify_lang(HWND panel)
+{
+    BoosterPanel *p = panel_of(panel);
+    wchar_t buf[512], want[512];
+    HWND h[CONTROL_TEXTS];
+    UiText t[CONTROL_TEXTS];
+    RECT r;
+    size_t i, row;
+    int failures = 0, other = ui_lang_current() != UI_LANG_KO;
+
+    PANEL_CHECK(p != NULL);
+    if (p == NULL) {
+        return failures;
+    }
+    /* 단추·이름표·체크 상자: 지금 언어 문구이고 잘리지 않는다 */
+    control_texts(p, h, t);
+    for (i = 0; i < CONTROL_TEXTS; i++) {
+        int need;
+        GetWindowTextW(h[i], buf, 512);
+        PANEL_CHECK(wcscmp(buf, ui_text(t[i])) == 0);
+        if (h[i] == p->start_label || h[i] == p->proc_label) {
+            need = theme_text_width(p->hwnd, p->font, buf);
+        } else if (h[i] == p->background) {
+            need = theme_check_width(p->hwnd, p->font, buf, p->dpi, 0);
+        } else {
+            need = theme_button_width(p->hwnd, p->font, buf, p->dpi, 0);
+        }
+        GetWindowRect(h[i], &r);
+        PANEL_CHECK(r.right - r.left >= need);
+    }
+    failures += verify_columns(p, p->start_list, k_scols, SCOL_COUNT);
+    failures += verify_columns(p, p->proc_list, k_pcols, PCOL_COUNT);
+    /* 요약·정보 줄: 마지막 측정값·결과를 지금 언어로 쓴 것 */
+    summary_text(p, want, 512);
+    GetWindowTextW(p->summary, buf, 512);
+    PANEL_CHECK(wcscmp(buf, want) == 0 && (!other || !has_hangul(buf)));
+    if (p->started) {
+        start_info_text(p, want, 512);
+        GetWindowTextW(p->start_info, buf, 512);
+        PANEL_CHECK(wcscmp(buf, want) == 0 && (!other || !has_hangul(buf)));
+        proc_info_text(p, want, 512);
+        GetWindowTextW(p->proc_info, buf, 512);
+        PANEL_CHECK(wcscmp(buf, want) == 0 && (!other || !has_hangul(buf)));
+    }
+    /* 목록: 시작 프로그램의 상태·위치·결과, 프로세스의 종류·상태 칸(이름·명령·경로는 번역 대상이 아님) */
+    for (i = 0; p->srows != NULL && i < p->startup.len; i++) {
+        ListView_GetItemText(p->start_list, (int)i, SCOL_STATE, buf, 512);
+        PANEL_CHECK(wcscmp(buf, ui_text(p->startup.items[i].enabled ? UI_T_B_STATE_ON : UI_T_B_STATE_OFF)) == 0);
+        PANEL_CHECK(!other || !has_hangul(buf));
+        ListView_GetItemText(p->start_list, (int)i, SCOL_SOURCE, buf, 512);
+        PANEL_CHECK(wcscmp(buf, gui_booster_source_text(p->startup.items[i].source)) == 0);
+        PANEL_CHECK(!other || !has_hangul(buf));
+        ListView_GetItemText(p->start_list, (int)i, SCOL_RESULT, buf, 512);
+        startup_result_text(p, i, want, 512);
+        PANEL_CHECK(wcscmp(buf, want) == 0 && (!other || !has_hangul(buf)));
+    }
+    for (row = 0; p->order != NULL && row < p->visible; row++) {
+        size_t idx = p->order[row];
+        ListView_GetItemText(p->proc_list, (int)row, PCOL_KIND, buf, 512);
+        PANEL_CHECK(wcscmp(buf, ui_text(p->procs.items[idx].has_window ? UI_T_B_KIND_APP
+                                                                        : UI_T_B_KIND_BACKGROUND)) == 0);
+        PANEL_CHECK(!other || !has_hangul(buf));
+        ListView_GetItemText(p->proc_list, (int)row, PCOL_STATE, buf, 512);
+        proc_state_text(p, idx, want, 512);
+        PANEL_CHECK(wcscmp(buf, want) == 0 && (!other || !has_hangul(buf)));
+    }
     return failures;
 }

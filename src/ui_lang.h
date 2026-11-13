@@ -543,6 +543,137 @@ typedef enum {
     UI_T_CL_MOVE_FAILED,
     UI_T_CL_RESULT_TITLE,
 
+    /* 부스터 페이지: 단추·안내·열 머리글 */
+    UI_T_B_REFRESH,
+    UI_T_B_START_LABEL,
+    UI_T_B_DISABLE,
+    UI_T_B_ENABLE,
+    UI_T_B_PROC_LABEL,
+    UI_T_B_BACKGROUND_ONLY,
+    UI_T_B_END,
+    UI_T_B_COL_NAME,
+    UI_T_B_COL_STATE,
+    UI_T_B_COL_SOURCE,
+    UI_T_B_COL_COMMAND,
+    UI_T_B_COL_RESULT,
+    UI_T_B_COL_PID,
+    UI_T_B_COL_KIND,
+    UI_T_B_COL_CPU,
+    UI_T_B_COL_MEMORY,
+    UI_T_B_COL_PATH,
+    /* 부스터: 요약·안내 줄과 칸 */
+    UI_T_B_MEASURING,
+    UI_T_B_SUMMARY,          /* %ls CPU, %ls 사용, %ls 전체, %u 사용률, %u 프로세스, %u 백그라운드 */
+    UI_T_B_SUMMARY_MEM_FAIL, /* %ls CPU */
+    UI_T_B_START_INFO,       /* %u 전체, %u 사용, %u 선택, %ls 읽기 실패 표시 */
+    UI_T_B_START_READ_ERRORS,
+    UI_T_B_APPLIED_ON,       /* %u, %ls 일부 실패 표시 */
+    UI_T_B_APPLIED_OFF,      /* %u, %ls 일부 실패 표시 */
+    UI_T_B_PARTIAL_FAIL,
+    UI_T_B_RES_CHANGED,
+    UI_T_B_RES_DENIED,
+    UI_T_B_RES_FAILED,       /* %lu */
+    UI_T_B_RES_NEEDS_ADMIN,
+    UI_T_B_STATE_ON,
+    UI_T_B_STATE_OFF,
+    UI_T_B_KIND_APP,
+    UI_T_B_KIND_BACKGROUND,
+    UI_T_B_PROC_INFO,        /* %u 선택, %ls 메모리 */
+    UI_T_B_PROC_READING,
+    UI_T_B_END_RESULT,       /* %u 끝냄, %ls 메모리, %u 실패 */
+    UI_T_B_STATE_ERROR,      /* %ls 결과, %lu 오류 */
+    UI_T_B_PROTECTED,        /* %ls 보호 이유 */
+    /* 부스터: 끝내기 확인 창 */
+    UI_T_B_CONFIRM_HEAD,     /* %u, %ls 메모리 */
+    UI_T_B_CONFIRM_MORE,     /* %u */
+    UI_T_B_CONFIRM_WARN,     /* 안내와 "계속할까요?" */
+    UI_T_B_CONFIRM_TITLE,
+    /* core 상태 문구: 시작 프로그램 위치(BoosterStartupSource 순서) */
+    UI_T_B_SRC_RUN_USER,
+    UI_T_B_SRC_RUN_MACHINE,
+    UI_T_B_SRC_RUN_MACHINE32,
+    UI_T_B_SRC_FOLDER_USER,
+    UI_T_B_SRC_FOLDER_COMMON,
+    /* core 상태 문구: 보호 이유(BoosterProtect 순서) */
+    UI_T_B_PROT_NONE,
+    UI_T_B_PROT_SYSTEM,
+    UI_T_B_PROT_SESSION,
+    UI_T_B_PROT_CRITICAL,
+    UI_T_B_PROT_WINDOWS,
+    UI_T_B_PROT_SELF,
+    UI_T_B_PROT_NO_ACCESS,
+    /* core 상태 문구: 끝내기 결과(BoosterEndStatus 순서) */
+    UI_T_B_END_OK,
+    UI_T_B_END_PROTECTED,
+    UI_T_B_END_GONE,
+    UI_T_B_END_CHANGED,
+    UI_T_B_END_DENIED,
+    UI_T_B_END_FAILED,
+
+    /* 드라이브 페이지 */
+    UI_T_DR_REFRESH,
+    UI_T_DR_HINT,
+    UI_T_DR_LOADING,
+    UI_T_DR_LIST_FAILED,     /* %lu */
+    UI_T_DR_SUMMARY,         /* %u 드라이브, %ls 전체, %ls 사용, %ls 여유, %u 실패, %u/%u 암호화, %02u:%02u:%02u */
+    UI_T_DR_START_NOMEM,
+    UI_T_DR_START_NOTHREAD,
+    UI_T_DR_COL_ROOT,
+    UI_T_DR_COL_LABEL,
+    UI_T_DR_COL_TYPE,
+    UI_T_DR_COL_FS,
+    UI_T_DR_COL_ENCRYPTION,
+    UI_T_DR_COL_TOTAL,
+    UI_T_DR_COL_USED,
+    UI_T_DR_COL_FREE,
+    UI_T_DR_COL_USAGE,
+    UI_T_DR_TYPE_REMOVABLE,
+    UI_T_DR_TYPE_FIXED,
+    UI_T_DR_TYPE_REMOTE,
+    UI_T_DR_TYPE_CDROM,
+    UI_T_DR_TYPE_RAMDISK,
+    UI_T_DR_TYPE_NO_ROOT,
+    UI_T_DR_TYPE_UNKNOWN,
+    UI_T_DR_ST_OK,
+    UI_T_DR_ST_NOT_READY,
+    UI_T_DR_ST_ACCESS_DENIED,
+    UI_T_DR_ST_MISSING,
+    UI_T_DR_ST_DISCONNECTED,
+    UI_T_DR_ST_FAILED,
+    UI_T_DR_ENC_RAW,         /* %ls 상태, %ld 원래 값 */
+    UI_T_DR_LOCKED,
+    UI_T_DR_STATUS_ERROR,    /* %ls 상태, %lu 오류 */
+    /* core 상태 문구: BitLocker 상태(DriveEncryption 순서) */
+    UI_T_DR_ENC_NOT_QUERIED,
+    UI_T_DR_ENC_NONE,
+    UI_T_DR_ENC_OFF,
+    UI_T_DR_ENC_ON,
+    UI_T_DR_ENC_LOCKED,
+    UI_T_DR_ENC_ENCRYPTING,
+    UI_T_DR_ENC_DECRYPTING,
+    UI_T_DR_ENC_SUSPENDED,
+    UI_T_DR_ENC_PENDING,
+    UI_T_DR_ENC_UNKNOWN,
+    UI_T_DR_ENC_FAILED,
+
+    /* 모니터 페이지 */
+    UI_T_M_HINT,
+    UI_T_M_STARTING,
+    UI_T_M_SUMMARY,          /* %u 초, %02u:%02u:%02u, %ls 일부 실패 표시 */
+    UI_T_M_PARTIAL,
+    UI_T_M_START_NOEVENT,
+    UI_T_M_START_NOTHREAD,
+    UI_T_M_RAM_TITLE,
+    UI_T_M_MEM_TEXT,         /* %ls 사용, %ls 전체, %ls 사용 가능, %u.%u 사용률 */
+    UI_T_M_FAILED,           /* %lu */
+    UI_T_M_MEM_INVALID,
+    UI_T_M_CPU_TEXT,         /* %u.%u 사용률, %u 논리 프로세서 */
+    UI_T_M_CPU_USAGE,        /* %u.%u */
+    UI_T_M_MEASURING,
+    UI_T_M_CPU_INVALID,
+    UI_T_M_GRAPH_TITLE,
+    UI_T_M_LEGEND_MEMORY,
+
     UI_T_COUNT
 } UiText;
 

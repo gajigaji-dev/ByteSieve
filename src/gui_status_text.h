@@ -3,6 +3,7 @@
 
 #include <wchar.h>
 
+#include "booster.h"
 #include "clean_plan.h"
 #include "cleaner.h"
 #include "cleanup_trash.h"
@@ -38,6 +39,16 @@ const wchar_t *gui_dev_cache_note(DevCacheKind kind);
 const wchar_t *gui_dev_cache_status_text(DevCacheStatus status);
 /* 개발 캐시 위치 근거("환경 변수 X" 등, dev_cache_source_text 와 같은 형식). */
 void gui_dev_cache_source_text(DevCacheSource source, const wchar_t *origin, wchar_t *buf, size_t len);
+/* Booster 시작 프로그램 위치·보호 이유·끝내기 결과(booster_source_text·booster_protect_text·
+ * booster_end_text 와 같은 분류). */
+const wchar_t *gui_booster_source_text(BoosterStartupSource source);
+const wchar_t *gui_booster_protect_text(BoosterProtect protect);
+const wchar_t *gui_booster_end_text(BoosterEndStatus status);
+/*
+ * 드라이브 BitLocker 상태(drive_encryption_text 와 같은 분류, 범위 밖은 "알 수 없음"). enc 는 DriveEncryption 값.
+ * drive.h 의 DriveType 이 <shlobj.h> 의 DriveType 함수와 이름이 겹쳐 이 헤더에서는 drive.h 를 넣지 않는다.
+ */
+const wchar_t *gui_drive_encryption_text(int enc);
 
 /*
  * 자체 검사: 모든 상태에 지금 언어 문구가 있고(PENDING 제외), 지금 언어가 한국어면 core 문구와 같은지.

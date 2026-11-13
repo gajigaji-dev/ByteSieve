@@ -12,6 +12,7 @@
 #include "gui_theme.h"
 #include "size_format.h"
 #include "sysmon.h"
+#include "ui_lang.h"
 
 #define MONITOR_PANEL_CLASS L"ByteSieveMonitorPanel"
 #define WM_APP_MONITOR_SAMPLE (WM_APP + 1)
@@ -36,10 +37,16 @@ enum {
     IDC_CPU_BAR
 };
 
+/* 측정을 시작하지 못한 이유(상태 줄, 언어를 바꾸면 이것으로 다시 쓴다). */
+typedef enum { START_OK, START_NOEVENT, START_NOTHREAD } StartError;
+
 typedef struct {
     HWND hwnd, summary, ram_title, ram_text, ram_bar, cpu_title, cpu_text, cpu_bar;
     HFONT font;
     int dpi;
+    int title_w;           /* 왼쪽 이름표(메모리(RAM)·CPU) 폭(문구에 맞춤) */
+    StartError start_error;
+    SYSTEMTIME sampled_at; /* 화면에 반영한 마지막 측정 시각(상태 줄) */
     RECT graph;            /* 그래프 영역(패널 클라이언트 좌표) */
     unsigned processors;   /* 논리 프로세서 수(모르면 0) */
 
@@ -145,14 +152,14 @@ static void memory_text(const SysmonMemory *m, wchar_t *buf, size_t len)
         format_size(m->used_bytes, used, 32);
         format_size(m->total_bytes, total, 32);
         format_size(m->available_bytes, avail, 32);
-        swprintf(buf, len, L"사용 %ls / 전체 %ls · 사용 가능 %ls · 사용률 %u.%u%%", used, total,
-                 avail, m->usage_permille / 10, m->usage_permille % 10);
+        swprintf(buf, len, ui_text(UI_T_M_MEM_TEXT), used, total, avail, m->usage_permille / 10,
+                 m->usage_permille % 10);
         break;
     case SYSMON_ERROR:
-        swprintf(buf, len, L"측정 실패 (Windows 오류 %lu)", m->error);
+        swprintf(buf, len, ui_text(UI_T_M_FAILED), m->error);
         break;
     default:
-        swprintf(buf, len, L"측정값이 올바르지 않습니다");
+        swprintf(buf, len, L"%ls", ui_text(UI_T_M_MEM_INVALID));
         break;
     }
 }
@@ -162,21 +169,21 @@ static void cpu_text(const SysmonCpu *c, unsigned processors, wchar_t *buf, size
     switch (c->status) {
     case SYSMON_OK:
         if (processors > 0) {
-            swprintf(buf, len, L"사용률 %u.%u%% · 논리 프로세서 %u개", c->usage_permille / 10,
+            swprintf(buf, len, ui_text(UI_T_M_CPU_TEXT), c->usage_permille / 10,
                      c->usage_permille % 10, processors);
         } else {
-            swprintf(buf, len, L"사용률 %u.%u%%", c->usage_permille / 10,
+            swprintf(buf, len, ui_text(UI_T_M_CPU_USAGE), c->usage_permille / 10,
                      c->usage_permille % 10);
         }
         break;
     case SYSMON_PENDING:
-        swprintf(buf, len, L"측정 중...");
+        swprintf(buf, len, L"%ls", ui_text(UI_T_M_MEASURING));
         break;
     case SYSMON_ERROR:
-        swprintf(buf, len, L"측정 실패 (Windows 오류 %lu)", c->error);
+        swprintf(buf, len, ui_text(UI_T_M_FAILED), c->error);
         break;
     default:
-        swprintf(buf, len, L"측정값이 올바르지 않아 다시 측정합니다");
+        swprintf(buf, len, L"%ls", ui_text(UI_T_M_CPU_INVALID));
         break;
     }
 }
@@ -208,37 +215,54 @@ static short history_at(const MonitorPanel *p, const short *h, int i)
     return h[(p->history_head - p->history_len + i + HISTORY_LEN) % HISTORY_LEN];
 }
 
+/* 상태 줄 문구: 시작 실패·안내·시작 중·마지막 측정 결과를 지금 언어로. */
+static void summary_text(const MonitorPanel *p, wchar_t *text, size_t len)
+{
+    if (p->start_error == START_NOEVENT) {
+        swprintf(text, len, L"%ls", ui_text(UI_T_M_START_NOEVENT));
+    } else if (p->start_error == START_NOTHREAD) {
+        swprintf(text, len, L"%ls", ui_text(UI_T_M_START_NOTHREAD));
+    } else if (!p->has_current) {
+        swprintf(text, len, L"%ls", ui_text(p->thread != NULL ? UI_T_M_STARTING : UI_T_M_HINT));
+    } else {
+        swprintf(text, len, ui_text(UI_T_M_SUMMARY), MONITOR_INTERVAL_MS / 1000,
+                 (unsigned)p->sampled_at.wHour, (unsigned)p->sampled_at.wMinute,
+                 (unsigned)p->sampled_at.wSecond,
+                 p->current.memory.status == SYSMON_OK &&
+                         (p->current.cpu.status == SYSMON_OK || p->current.cpu.status == SYSMON_PENDING)
+                     ? L""
+                     : ui_text(UI_T_M_PARTIAL));
+    }
+}
+
 static void update_summary(MonitorPanel *p)
 {
-    wchar_t text[160];
-    SYSTEMTIME now;
+    wchar_t text[256];
+
+    summary_text(p, text, sizeof(text) / sizeof(text[0]));
+    SetWindowTextW(p->summary, text);
+}
+
+/* RAM·CPU 문구(마지막 측정값을 지금 언어로). */
+static void render_texts(MonitorPanel *p)
+{
+    wchar_t text[256];
 
     if (!p->has_current) {
-        SetWindowTextW(p->summary, L"측정을 시작하는 중...");
         return;
     }
-    GetLocalTime(&now);
-    swprintf(text, sizeof(text) / sizeof(text[0]),
-             L"%u초마다 갱신 · %02u:%02u:%02u 측정%ls", MONITOR_INTERVAL_MS / 1000,
-             (unsigned)now.wHour, (unsigned)now.wMinute, (unsigned)now.wSecond,
-             p->current.memory.status == SYSMON_OK &&
-                     (p->current.cpu.status == SYSMON_OK ||
-                      p->current.cpu.status == SYSMON_PENDING)
-                 ? L""
-                 : L" · 일부 값을 측정하지 못했습니다");
-    SetWindowTextW(p->summary, text);
+    memory_text(&p->current.memory, text, sizeof(text) / sizeof(text[0]));
+    SetWindowTextW(p->ram_text, text);
+    cpu_text(&p->current.cpu, p->processors, text, sizeof(text) / sizeof(text[0]));
+    SetWindowTextW(p->cpu_text, text);
 }
 
 static void apply_sample(MonitorPanel *p, const SysmonSample *s)
 {
-    wchar_t text[160];
-
     p->current = *s;
     p->has_current = 1;
-    memory_text(&s->memory, text, sizeof(text) / sizeof(text[0]));
-    SetWindowTextW(p->ram_text, text);
-    cpu_text(&s->cpu, p->processors, text, sizeof(text) / sizeof(text[0]));
-    SetWindowTextW(p->cpu_text, text);
+    GetLocalTime(&p->sampled_at);
+    render_texts(p);
     set_bar(p->ram_bar, s->memory.status == SYSMON_OK, s->memory.usage_permille);
     set_bar(p->cpu_bar, s->cpu.status == SYSMON_OK, s->cpu.usage_permille);
     history_push(p, s);
@@ -325,7 +349,7 @@ static void legend_item(MonitorPanel *p, HDC dc, int *x, int y, COLORREF color,
 
 static void paint_graph(MonitorPanel *p, HDC dc, const RECT *rc)
 {
-    static const wchar_t title[] = L"최근 60초 사용률";
+    const wchar_t *title = ui_text(UI_T_M_GRAPH_TITLE);
     RECT plot;
     HGDIOBJ old_font;
     HPEN grid;
@@ -343,7 +367,7 @@ static void paint_graph(MonitorPanel *p, HDC dc, const RECT *rc)
     GetTextExtentPoint32W(dc, title, (int)wcslen(title), &size);
     x += size.cx + pscale(p, 16);
     legend_item(p, dc, &x, rc->top + pscale(p, 4), CPU_COLOR, L"CPU");
-    legend_item(p, dc, &x, rc->top + pscale(p, 4), RAM_COLOR, L"메모리");
+    legend_item(p, dc, &x, rc->top + pscale(p, 4), RAM_COLOR, ui_text(UI_T_M_LEGEND_MEMORY));
 
     GetTextExtentPoint32W(dc, L"100%", 4, &size);
     label_w = size.cx + pscale(p, 12);
@@ -419,7 +443,7 @@ static void panel_layout(MonitorPanel *p)
 {
     RECT rc;
     int line = pscale(p, 20), bar_h = pscale(p, 18), gap = pscale(p, 6);
-    int title_w = pscale(p, 96);
+    int title_w = p->title_w;
     int w, y;
 
     GetClientRect(p->hwnd, &rc);
@@ -453,13 +477,24 @@ static HWND panel_child(MonitorPanel *p, const wchar_t *cls, const wchar_t *text
     return h;
 }
 
+/* 이름표 폭: 예전 고정 폭(96)을 최소로 두고, 지금 글꼴로 잰 문구가 더 길면 넓힌다. */
+static void measure_titles(MonitorPanel *p)
+{
+    int w = theme_text_width(p->hwnd, p->font, ui_text(UI_T_M_RAM_TITLE)) + pscale(p, 12);
+    int cpu = theme_text_width(p->hwnd, p->font, L"CPU") + pscale(p, 12);
+
+    if (cpu > w) {
+        w = cpu;
+    }
+    p->title_w = w > pscale(p, 96) ? w : pscale(p, 96);
+}
+
 static void panel_create_controls(MonitorPanel *p)
 {
     DWORD text_style = SS_LEFTNOWORDWRAP | SS_ENDELLIPSIS;
 
-    p->summary = panel_child(p, L"STATIC", L"탭을 열면 RAM·CPU 사용률 측정을 시작합니다.",
-                             text_style, IDC_SUMMARY);
-    p->ram_title = panel_child(p, L"STATIC", L"메모리(RAM)", text_style, IDC_RAM_TITLE);
+    p->summary = panel_child(p, L"STATIC", ui_text(UI_T_M_HINT), text_style, IDC_SUMMARY);
+    p->ram_title = panel_child(p, L"STATIC", ui_text(UI_T_M_RAM_TITLE), text_style, IDC_RAM_TITLE);
     p->ram_text = panel_child(p, L"STATIC", L"-", text_style, IDC_RAM_TEXT);
     p->ram_bar = panel_child(p, PROGRESS_CLASSW, L"", PBS_SMOOTH, IDC_RAM_BAR);
     p->cpu_title = panel_child(p, L"STATIC", L"CPU", text_style, IDC_CPU_TITLE);
@@ -467,6 +502,7 @@ static void panel_create_controls(MonitorPanel *p)
     p->cpu_bar = panel_child(p, PROGRESS_CLASSW, L"", PBS_SMOOTH, IDC_CPU_BAR);
     SendMessageW(p->ram_bar, PBM_SETRANGE32, 0, 1000);
     SendMessageW(p->cpu_bar, PBM_SETRANGE32, 0, 1000);
+    measure_titles(p);
 }
 
 static LRESULT CALLBACK panel_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
@@ -591,16 +627,19 @@ int monitor_panel_start(HWND panel)
     if (p->stop == NULL) {
         p->stop = CreateEventW(NULL, TRUE, FALSE, NULL);
         if (p->stop == NULL) {
-            SetWindowTextW(p->summary, L"측정을 시작하지 못했습니다(이벤트 생성 실패).");
+            p->start_error = START_NOEVENT;
+            update_summary(p);
             return 0;
         }
     }
     ResetEvent(p->stop);
     p->thread = (HANDLE)_beginthreadex(NULL, 0, sample_thread, p, 0, NULL);
     if (p->thread == NULL) {
-        SetWindowTextW(p->summary, L"측정을 시작하지 못했습니다(스레드 생성 실패).");
+        p->start_error = START_NOTHREAD;
+        update_summary(p);
         return 0;
     }
+    p->start_error = START_OK;
     update_summary(p);
     return 1;
 }
@@ -610,6 +649,28 @@ unsigned monitor_panel_samples(HWND panel)
     MonitorPanel *p = panel_of(panel);
 
     return p != NULL ? p->samples : 0;
+}
+
+void monitor_panel_apply_language(HWND panel, HFONT font)
+{
+    MonitorPanel *p = panel_of(panel);
+    HWND child;
+
+    if (p == NULL) {
+        return;
+    }
+    if (font != NULL) {
+        p->font = font;
+        for (child = GetWindow(p->hwnd, GW_CHILD); child != NULL; child = GetWindow(child, GW_HWNDNEXT)) {
+            SendMessageW(child, WM_SETFONT, (WPARAM)font, FALSE);
+        }
+    }
+    SetWindowTextW(p->ram_title, ui_text(UI_T_M_RAM_TITLE));
+    render_texts(p);
+    update_summary(p);
+    measure_titles(p);
+    /* 그래프 제목·범례는 그릴 때 지금 언어로 만든다(panel_layout 이 다시 그림). */
+    panel_layout(p);
 }
 
 #define PANEL_CHECK(cond)                                                         \
@@ -623,7 +684,7 @@ unsigned monitor_panel_samples(HWND panel)
 
 static int text_is(HWND h, const wchar_t *expect)
 {
-    wchar_t buf[160];
+    wchar_t buf[256];
 
     GetWindowTextW(h, buf, (int)(sizeof(buf) / sizeof(buf[0])));
     return wcscmp(buf, expect) == 0;
@@ -633,7 +694,7 @@ int monitor_panel_verify(HWND panel)
 {
     MonitorPanel *p = panel_of(panel);
     const SysmonSample *s;
-    wchar_t expect[160];
+    wchar_t expect[256];
     MEMORYSTATUSEX ms;
     SysmonSample fail;
     unsigned avg;
@@ -699,8 +760,10 @@ int monitor_panel_verify(HWND panel)
     fail.sequence = s->sequence;
     before = p->history_len;
     apply_sample(p, &fail);
-    PANEL_CHECK(text_is(p->ram_text, L"측정 실패 (Windows 오류 5)"));
-    PANEL_CHECK(text_is(p->cpu_text, L"측정 실패 (Windows 오류 1)"));
+    swprintf(expect, sizeof(expect) / sizeof(expect[0]), ui_text(UI_T_M_FAILED), 5UL);
+    PANEL_CHECK(text_is(p->ram_text, expect));
+    swprintf(expect, sizeof(expect) / sizeof(expect[0]), ui_text(UI_T_M_FAILED), 1UL);
+    PANEL_CHECK(text_is(p->cpu_text, expect));
     PANEL_CHECK(SendMessageW(p->ram_bar, PBM_GETPOS, 0, 0) == 0);
     PANEL_CHECK(SendMessageW(p->cpu_bar, PBM_GETPOS, 0, 0) == 0);
     PANEL_CHECK(p->history_len == (before < HISTORY_LEN ? before + 1 : HISTORY_LEN));
@@ -708,5 +771,49 @@ int monitor_panel_verify(HWND panel)
     PANEL_CHECK(history_at(p, p->cpu_history, p->history_len - 1) == HISTORY_GAP);
     /* 그래프가 빈 칸을 포함해도 그릴 수 있어야 한다. */
     UpdateWindow(p->hwnd);
+    return failures;
+}
+
+/* 한글(가-힣)이 들어 있는지. */
+static int has_hangul(const wchar_t *s)
+{
+    for (; *s != L'\0'; s++) {
+        if (*s >= 0xAC00 && *s <= 0xD7A3) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+int monitor_panel_verify_lang(HWND panel)
+{
+    MonitorPanel *p = panel_of(panel);
+    wchar_t buf[256], want[256];
+    RECT r;
+    int failures = 0, other = ui_lang_current() != UI_LANG_KO;
+
+    PANEL_CHECK(p != NULL);
+    if (p == NULL) {
+        return failures;
+    }
+    /* 이름표: 지금 언어이고 잘리지 않는다 */
+    GetWindowTextW(p->ram_title, buf, 256);
+    PANEL_CHECK(wcscmp(buf, ui_text(UI_T_M_RAM_TITLE)) == 0 && (!other || !has_hangul(buf)));
+    GetWindowRect(p->ram_title, &r);
+    PANEL_CHECK(r.right - r.left >= theme_text_width(p->hwnd, p->font, buf));
+    /* 상태 줄: 마지막에 보인 내용을 지금 언어로 쓴 것 */
+    summary_text(p, want, 256);
+    GetWindowTextW(p->summary, buf, 256);
+    PANEL_CHECK(wcscmp(buf, want) == 0 && (!other || !has_hangul(buf)));
+    /* RAM·CPU 문구: 마지막 측정값을 지금 언어로 쓴 것 */
+    if (p->has_current) {
+        memory_text(&p->current.memory, want, 256);
+        PANEL_CHECK(text_is(p->ram_text, want) && (!other || !has_hangul(want)));
+        cpu_text(&p->current.cpu, p->processors, want, 256);
+        PANEL_CHECK(text_is(p->cpu_text, want) && (!other || !has_hangul(want)));
+    }
+    /* 그래프 제목·범례(그릴 때 쓰는 문구) */
+    PANEL_CHECK(!other || (!has_hangul(ui_text(UI_T_M_GRAPH_TITLE)) &&
+                           !has_hangul(ui_text(UI_T_M_LEGEND_MEMORY))));
     return failures;
 }
