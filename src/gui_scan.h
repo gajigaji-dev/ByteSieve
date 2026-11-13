@@ -44,6 +44,15 @@ int scan_panel_set_autosave(HWND panel, int on);
 /* 내보내기 단추가 하나라도 켜져 있으면 1. */
 int scan_panel_export_enabled(HWND panel);
 
+/*
+ * 표시 언어를 바꾼 뒤(ui_lang_set) 부른다. 패널의 모든 문구(단추·체크 상자·입력 칸 안내·보기 목록·열 머리글,
+ * 트리·순위 목록·트리맵, 분석 줄, 상태 줄)를 지금 언어로 다시 쓰고, 글꼴을 font 로 바꿔(NULL 이면 그대로)
+ * 문구 폭에 맞게 다시 배치한다. 스캔 결과·고른 보기·순위 목록에서 고른 줄은 그대로다. 상태 줄은 마지막에
+ * 보인 내용(진행률·결과·안내)을 새 언어로 다시 쓴다. 스캔 중에 불러도 된다(진행률은 다음 알림부터 새 언어).
+ * 글꼴은 호출자가 소유하며 패널보다 오래 살아야 한다.
+ */
+void scan_panel_apply_language(HWND panel, HFONT font);
+
 /* ---- 자체 검사 ---- */
 
 typedef enum {
@@ -64,8 +73,9 @@ int scan_panel_verify(HWND panel, ScanVerifyMode mode, const wchar_t *export_pre
                       int export_enabled_before);
 
 /*
- * 자체 검사(--self-test-lang): 지금 언어의 번역 문구가 컨트롤·보기·열 머리글에 들어갔는지,
- * 단추·체크 상자 문구가 잘리지 않고 패널 안에 있는지 확인한다. 실패 수.
+ * 자체 검사(--self-test-lang, --self-test-lang-switch): 지금 언어의 번역 문구가 컨트롤·보기·열 머리글에
+ * 들어갔는지, 상태 줄·분석 줄·트리·변화 열이 지금 언어로 쓰였는지(한국어가 아니면 경로 밖에 한글이 없는지),
+ * 단추·체크 상자 문구가 잘리지 않고 패널 안에 있는지 확인한다. 스캔 중에는 부르지 않는다. 실패 수.
  */
 int scan_panel_verify_lang(HWND panel);
 

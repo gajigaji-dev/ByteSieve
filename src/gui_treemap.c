@@ -14,6 +14,7 @@
 #include "gui_treemap.h"
 #include "size_format.h"
 #include "treemap.h"
+#include "ui_lang.h"
 
 #define TREEMAP_CLASS L"ByteSieveTreemap"
 #define NO_BLOCK ((size_t)-1)
@@ -95,11 +96,11 @@ const wchar_t *treemap_color_text(TreemapColorMode mode)
 {
     switch (mode) {
     case TREEMAP_COLOR_DEPTH:
-        return L"깊이";
+        return ui_text(UI_T_MAP_COLOR_DEPTH);
     case TREEMAP_COLOR_TOP:
-        return L"최상위 폴더";
+        return ui_text(UI_T_MAP_COLOR_TOP);
     case TREEMAP_COLOR_CLEANUP:
-        return L"정리 후보";
+        return ui_text(UI_T_MAP_COLOR_CLEANUP);
     default:
         return L"";
     }
@@ -165,11 +166,11 @@ static const wchar_t *category_label(CleanupCategory cat)
     case CLEANUP_NODE_MODULES:
         return L"node_modules";
     case CLEANUP_BUILD:
-        return L"빌드 결과물";
+        return ui_text(UI_T_MAP_CAT_BUILD);
     case CLEANUP_CACHE:
-        return L"캐시";
+        return ui_text(UI_T_MAP_CAT_CACHE);
     case CLEANUP_TEMP:
-        return L"임시";
+        return ui_text(UI_T_MAP_CAT_TEMP);
     default:
         return L"";
     }
@@ -486,10 +487,10 @@ static void block_name(const TreemapView *t, const Block *b, wchar_t *buf, size_
 {
     switch (b->kind) {
     case BLOCK_FILES:
-        swprintf(buf, len, L"파일 %llu개", (unsigned long long)b->count);
+        swprintf(buf, len, ui_text(UI_T_MAP_FILES), (unsigned long long)b->count);
         break;
     case BLOCK_OTHER:
-        swprintf(buf, len, L"그 밖의 폴더 %llu개", (unsigned long long)b->count);
+        swprintf(buf, len, ui_text(UI_T_MAP_OTHER), (unsigned long long)b->count);
         break;
     default:
         swprintf(buf, len, L"%ls", t->model->nodes[b->node].name);
@@ -568,7 +569,7 @@ static void draw_strip(const TreemapView *t, HDC dc)
             right = box.left - tscale(t, 12);
         }
     } else {
-        const wchar_t *hint = L"더블클릭: 확대 · Backspace: 상위 폴더 · 우클릭: 메뉴";
+        const wchar_t *hint = ui_text(UI_T_MAP_HINT);
         SIZE ext;
         GetTextExtentPoint32W(dc, hint, (int)wcslen(hint), &ext);
         tr = r;
@@ -583,7 +584,7 @@ static void draw_strip(const TreemapView *t, HDC dc)
         return;
     }
     format_size(t->model->nodes[t->root].total_bytes, size, 32);
-    swprintf(text, 256, L"  ·  %ls  ·  하위 폴더 %llu개", size,
+    swprintf(text, 256, ui_text(UI_T_MAP_ROOT_INFO), size,
              (unsigned long long)t->model->nodes[t->root].child_count);
     {
         SIZE ext;
@@ -621,9 +622,8 @@ static void paint(TreemapView *t, HDC dc, const RECT *client)
         RECT r = t->map;
         SetTextColor(dc, THEME_COLOR_TEXT_2ND);
         DrawTextW(dc,
-                  t->model == NULL || t->model->len == 0
-                      ? L"스캔하면 폴더 용량을 사각형 크기로 보여 줍니다."
-                      : L"이 폴더에는 용량이 있는 하위 항목이 없습니다.",
+                  t->model == NULL || t->model->len == 0 ? ui_text(UI_T_MAP_EMPTY)
+                                                         : ui_text(UI_T_MAP_NO_CHILDREN),
                   -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
     } else {
         for (i = 0; i < t->len; i++) {
@@ -697,27 +697,27 @@ static wchar_t *tip_for(const TreemapView *t, const Block *b)
         return NULL;
     }
     format_size(b->bytes, size, 32);
-    swprintf(ratio, 96, L"%ls · 기준 폴더의 %.1f%% · 전체의 %.1f%%", size,
+    swprintf(ratio, 96, ui_text(UI_T_MAP_TIP_RATIO), size,
              percent(b->bytes, t->model->nodes[t->root].total_bytes),
              percent(b->bytes, t->model->nodes[0].total_bytes));
     if (b->kind == BLOCK_FILES) {
-        len = swprintf(text, cap, L"%ls 바로 아래 파일 %llu개\n%ls", path,
+        len = swprintf(text, cap, ui_text(UI_T_MAP_TIP_FILES), path,
                        (unsigned long long)b->count, ratio);
     } else if (b->kind == BLOCK_OTHER) {
-        len = swprintf(text, cap, L"%ls 안의 작은 폴더 %llu개(묶음)\n%ls", path,
+        len = swprintf(text, cap, ui_text(UI_T_MAP_TIP_OTHER), path,
                        (unsigned long long)b->count, ratio);
     } else {
         CleanupCategory cat = category_of(t, b->node);
-        len = swprintf(text, cap, L"%ls\n%ls\n하위 폴더 %llu개 · 파일 %llu개", path, ratio,
+        len = swprintf(text, cap, ui_text(UI_T_MAP_TIP_NODE), path, ratio,
                        (unsigned long long)n->total_dirs, (unsigned long long)n->total_files);
         if (len > 0 && cat != CLEANUP_NONE) {
-            int m = swprintf(text + len, cap - (size_t)len,
-                             L"\n정리 후보일 수 있음(이름 기준): %ls", category_label(cat));
+            int m = swprintf(text + len, cap - (size_t)len, ui_text(UI_T_MAP_TIP_CLEANUP),
+                             category_label(cat));
             len += m > 0 ? m : 0;
         }
         if (len > 0 && (n->flags & (SCAN_NODE_FAILED | SCAN_NODE_INCOMPLETE |
                                     SCAN_NODE_CANCELLED | SCAN_NODE_DEPTH_LIMIT))) {
-            swprintf(text + len, cap - (size_t)len, L"\n일부 하위 내용을 읽지 못해 집계에서 빠짐");
+            swprintf(text + len, cap - (size_t)len, L"%ls", ui_text(UI_T_MAP_TIP_INCOMPLETE));
         }
     }
     free(path);
@@ -918,19 +918,19 @@ static void on_context_menu(TreemapView *t, int sx, int sy)
         return;
     }
     AppendMenuW(menu, MF_STRING | (below_root(t, target) ? 0 : MF_GRAYED), IDM_ZOOM,
-                L"이 폴더로 확대(&Z)\tEnter");
+                ui_text(UI_T_MAP_MENU_ZOOM));
     AppendMenuW(menu,
                 MF_STRING | (t->model->nodes[t->root].parent != SCAN_NODE_NONE ? 0 : MF_GRAYED),
-                IDM_UP, L"상위 폴더로(&U)\tBackspace");
+                IDM_UP, ui_text(UI_T_MAP_MENU_UP));
     AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
-    AppendMenuW(menu, MF_STRING, IDM_OPEN, L"탐색기에서 열기(&O)");
-    AppendMenuW(menu, MF_STRING, IDM_COPY, L"경로 복사(&C)");
+    AppendMenuW(menu, MF_STRING, IDM_OPEN, ui_text(UI_T_MAP_MENU_OPEN));
+    AppendMenuW(menu, MF_STRING, IDM_COPY, ui_text(UI_T_MAP_MENU_COPY));
     AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
     for (m = 0; m < TREEMAP_COLOR_COUNT; m++) {
         AppendMenuW(colors, MF_STRING | ((int)t->color == m ? MF_CHECKED : 0),
                     IDM_COLOR_BASE + m, treemap_color_text((TreemapColorMode)m));
     }
-    AppendMenuW(menu, MF_POPUP, (UINT_PTR)colors, L"색 구분(&L)");
+    AppendMenuW(menu, MF_POPUP, (UINT_PTR)colors, ui_text(UI_T_MAP_MENU_COLOR));
 
     cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, t->hwnd, NULL);
     DestroyMenu(menu); /* 하위 메뉴도 함께 해제된다 */
@@ -1108,6 +1108,41 @@ HWND treemap_view_create(HWND parent, int id, HFONT font, int dpi)
     return CreateWindowExW(WS_EX_CLIENTEDGE, TREEMAP_CLASS, L"",
                            WS_CHILD | WS_TABSTOP | WS_CLIPSIBLINGS, 0, 0, 0, 0, parent,
                            (HMENU)(INT_PTR)id, GetModuleHandleW(NULL), &params);
+}
+
+void treemap_view_set_font(HWND view, HFONT font)
+{
+    TreemapView *t = view_of(view);
+    TEXTMETRICW tm;
+    LOGFONTW lf;
+    HGDIOBJ old;
+    HDC dc;
+
+    if (t == NULL || font == NULL) {
+        return;
+    }
+    if (t->bold != NULL && t->bold != t->font) {
+        DeleteObject(t->bold);
+    }
+    t->font = font;
+    t->bold = NULL;
+    if (GetObjectW(font, sizeof(lf), &lf) == sizeof(lf)) {
+        lf.lfWeight = FW_BOLD;
+        t->bold = CreateFontIndirectW(&lf);
+    }
+    if (t->bold == NULL) {
+        t->bold = t->font;
+    }
+    dc = GetDC(view);
+    old = SelectObject(dc, font);
+    t->line_h = GetTextMetricsW(dc, &tm) ? tm.tmHeight : tscale(t, 16);
+    SelectObject(dc, old);
+    ReleaseDC(view, dc);
+    if (t->tip != NULL) {
+        SendMessageW(t->tip, WM_SETFONT, (WPARAM)font, FALSE);
+    }
+    relayout(t);
+    InvalidateRect(view, NULL, FALSE);
 }
 
 void treemap_view_set_model(HWND view, const ScanModel *model)

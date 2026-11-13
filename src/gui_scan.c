@@ -56,6 +56,20 @@ typedef struct {
     int dpi;
 } PanelParams;
 
+/*
+ * 상태 줄에 보인 내용의 종류. 문구를 저장하지 않고 종류와 값만 기억해 두었다가 render_status 가 지금
+ * 언어로 만든다(처음 쓸 때와 표시 언어를 바꿀 때 같은 함수를 쓴다).
+ */
+typedef enum {
+    SCAN_STATUS_TEXT,          /* 인자 없는 문구(status_text) */
+    SCAN_STATUS_ERROR,         /* 오류 번호 하나를 넣는 문구(status_text, status_error) */
+    SCAN_STATUS_PROGRESS,      /* 스캔 진행률(작업에서 읽음) */
+    SCAN_STATUS_FINISHED,      /* 스캔 결과(모델·finished·scan_info) */
+    SCAN_STATUS_CLEARED,       /* 기록 삭제 결과(cleared) */
+    SCAN_STATUS_CLEAR_PARTIAL, /* 기록 일부를 지우지 못함(cleared) */
+    SCAN_STATUS_EXPORT         /* 내보내기 결과(export_*) */
+} ScanStatusKind;
+
 typedef struct {
     HWND hwnd; /* 패널 */
     HWND path, browse, scan, cancel, progress, status, tree, list, view, analysis;
@@ -83,6 +97,16 @@ typedef struct {
     size_t *change_of_node;  /* 노드 → diff 항목 번호(없으면 SCAN_NODE_NONE) */
     int autosave_on;         /* 스캔 기록 자동 저장(설정 파일에 저장된 값과 같게 유지) */
     HistoryClearResult cleared; /* 마지막 [기록 삭제] 결과 */
+
+    /* 상태 줄(render_status) */
+    ScanStatusKind status_kind;
+    UiText status_text;         /* SCAN_STATUS_TEXT·SCAN_STATUS_ERROR 의 문구 */
+    unsigned long status_error; /* SCAN_STATUS_ERROR 의 오류 번호 */
+    ScanStatus finished;        /* SCAN_STATUS_FINISHED: scan_job_finish 결과 */
+    ExportKind export_kind;     /* SCAN_STATUS_EXPORT */
+    int export_ok;
+    unsigned long export_error;
+    wchar_t *export_file;       /* malloc */
 
     /* 자체 검사(scan_panel_verify 인자) */
     ScanVerifyMode self_test;
@@ -279,7 +303,7 @@ static wchar_t *tree_item_text(size_t index)
     used = wcslen(buf);
     if (precise_result() && n->total_dup_bytes > 0) {
         format_size(unique_bytes(n), size, 32);
-        swprintf(buf + used, len - used, L" · 중복 제외 %ls", size);
+        swprintf(buf + used, len - used, ui_text(UI_T_TREE_UNIQUE), size);
         used = wcslen(buf);
     }
     swprintf(buf + used, len - used, L"%ls", flag_label(n->flags));
@@ -366,6 +390,30 @@ static int current_view(void)
 
 /* 부호 있는 용량("+1.20 GiB", "-300 B"). */
 
+/*
+ * 변화 열 문구("새 폴더 +1.2 MiB", "삭제됨 -300 B (?)"). history_change_text 와 같은 내용을 지금 언어로 쓴다
+ * (변화량 숫자·단위는 언어와 관계없음).
+ */
+static void change_text(const HistoryChange *c, wchar_t *buf, size_t len)
+{
+    wchar_t delta[48];
+    const wchar_t *unsure;
+
+    if (c == NULL) {
+        buf[0] = L'\0';
+        return;
+    }
+    history_format_delta(c->delta, delta, 48);
+    unsure = c->uncertain ? L" (?)" : L"";
+    if (c->kind == HISTORY_ADDED) {
+        swprintf(buf, len, ui_text(UI_T_CHANGE_ADDED), delta, unsure);
+    } else if (c->kind == HISTORY_REMOVED) {
+        swprintf(buf, len, ui_text(UI_T_CHANGE_REMOVED), delta, unsure);
+    } else {
+        swprintf(buf, len, L"%ls%ls", delta, unsure);
+    }
+}
+
 /* 한 줄을 넣는다. node 가 SCAN_NODE_NONE 이면(삭제된 폴더) 용량 열을 비운다. */
 static void insert_row(int index, size_t node, const wchar_t *path, const wchar_t *flags,
                        const HistoryChange *change, uint64_t whole)
@@ -410,7 +458,8 @@ static void insert_row(int index, size_t node, const wchar_t *path, const wchar_
             if (n->total_dup_bytes > 0 || n->total_dup_files > 0) {
                 wchar_t size[32];
                 format_size(n->total_dup_bytes, size, 32);
-                swprintf(buf, 96, L"-%ls (%llu개)", size, (unsigned long long)n->total_dup_files);
+                swprintf(buf, 96, ui_text(UI_T_LIST_DUP), size,
+                         (unsigned long long)n->total_dup_files);
                 list_set(row, COL_DUP, buf);
             }
         }
@@ -421,7 +470,7 @@ static void insert_row(int index, size_t node, const wchar_t *path, const wchar_
         list_set(row, COL_SHARE, L"-");
     }
     if (change != NULL) {
-        history_change_text(change, buf, 96);
+        change_text(change, buf, 96);
         list_set(row, COL_CHANGE, buf);
     }
 }
@@ -495,17 +544,20 @@ static void fill_rank(void)
     SendMessageW(g_scan.list, WM_SETREDRAW, TRUE, 0);
 }
 
-/* 디스크 사용량 분석과 직전 스캔 대비 변화를 둘째 상태 줄에 쓴다. */
-static void update_analysis(void)
+/*
+ * 디스크 사용량 분석과 직전 스캔 대비 변화 문구를 지금 언어로 text 에 쓴다(결과가 없으면 빈 문자열).
+ * len 은 1024 이상을 쓴다.
+ */
+static void analysis_text(wchar_t *text, size_t len)
 {
     const ScanReport *r = &g_scan.model.report;
-    wchar_t text[1024], a[32], b[32], c[32];
+    wchar_t a[32], b[32], c[32];
     size_t used = 0;
     int n;
 
 #define APPEND(...)                                                                          \
     do {                                                                                     \
-        n = swprintf(text + used, sizeof(text) / sizeof(text[0]) - used, __VA_ARGS__);       \
+        n = swprintf(text + used, len - used, __VA_ARGS__);                                  \
         if (n > 0) {                                                                         \
             used += (size_t)n;                                                               \
         }                                                                                    \
@@ -513,47 +565,44 @@ static void update_analysis(void)
 
     text[0] = L'\0';
     if (!g_scan.has_model || g_scan.model.status == SCAN_FATAL) {
-        SetWindowTextW(g_scan.analysis, L"");
         return;
     }
     format_size(r->alloc_bytes, a, 32);
     history_format_delta((int64_t)(r->alloc_bytes - r->total_bytes), b, 32);
-    APPEND(L"디스크 사용 %ls(논리 크기 대비 %ls)", a, b);
+    APPEND(ui_text(UI_T_AN_DISK), a, b);
     /* 정밀 스캔: 기본 집계(경로마다)와 하드 링크 중복을 뺀 집계의 차이 */
     if (precise_result() && r->hardlinks_unsupported) {
-        APPEND(L" · 정밀 스캔: 하드 링크가 없는 파일 시스템이라 보정할 것이 없음");
+        APPEND(L"%ls", ui_text(UI_T_AN_PRECISE_NONE));
     } else if (precise_result()) {
         format_size(r->total_bytes - r->hardlink_dup_bytes, a, 32);
         format_size(r->total_bytes, b, 32);
         format_size(r->hardlink_dup_bytes, c, 32);
-        APPEND(L" · 정밀 스캔: 중복 제외 %ls(기본 %ls, 하드 링크 중복 %llu개 -%ls)", a, b,
-               (unsigned long long)r->hardlink_dup_files, c);
+        APPEND(ui_text(UI_T_AN_PRECISE), a, b, (unsigned long long)r->hardlink_dup_files, c);
         format_size(r->alloc_bytes - r->hardlink_dup_alloc, a, 32);
-        APPEND(L" · 실제 디스크 사용 %ls", a);
+        APPEND(ui_text(UI_T_AN_REAL_DISK), a);
         if (r->hardlink_unknown_files > 0) {
-            APPEND(L" · 파일 ID 모름 %llu개(경로마다 셈)",
-                   (unsigned long long)r->hardlink_unknown_files);
+            APPEND(ui_text(UI_T_AN_UNKNOWN_ID), (unsigned long long)r->hardlink_unknown_files);
         }
     }
     if (r->slack_bytes > 0) {
         format_size(r->slack_bytes, a, 32);
-        APPEND(L" · 클러스터 낭비 +%ls", a);
+        APPEND(ui_text(UI_T_AN_SLACK), a);
     }
     if (r->compressed_saved_bytes > 0) {
         format_size(r->compressed_saved_bytes, a, 32);
-        APPEND(L" · 압축 -%ls(%llu개)", a, (unsigned long long)r->compressed_files);
+        APPEND(ui_text(UI_T_AN_COMPRESSED), a, (unsigned long long)r->compressed_files);
     }
     if (r->sparse_saved_bytes > 0) {
         format_size(r->sparse_saved_bytes, a, 32);
-        APPEND(L" · 스파스 -%ls(%llu개)", a, (unsigned long long)r->sparse_files);
+        APPEND(ui_text(UI_T_AN_SPARSE), a, (unsigned long long)r->sparse_files);
     }
     if (r->cloud_saved_bytes > 0) {
         format_size(r->cloud_saved_bytes, a, 32);
-        APPEND(L" · 클라우드 전용 -%ls(%llu개)", a, (unsigned long long)r->cloud_files);
+        APPEND(ui_text(UI_T_AN_CLOUD), a, (unsigned long long)r->cloud_files);
     }
     if (r->other_saved_bytes > 0) {
         format_size(r->other_saved_bytes, a, 32);
-        APPEND(L" · 기타 -%ls(%llu개)", a, (unsigned long long)r->other_saved_files);
+        APPEND(ui_text(UI_T_AN_OTHER), a, (unsigned long long)r->other_saved_files);
     }
     APPEND(L"   |   ");
     if (g_scan.has_diff) {
@@ -567,34 +616,39 @@ static void update_analysis(void)
         history_format_delta((int64_t)(g_scan.diff.new_total - g_scan.diff.old_total), a, 32);
         format_size(g_scan.diff.old_total, b, 32);
         format_size(g_scan.diff.new_total, c, 32);
-        APPEND(L"직전 스캔(%02u-%02u %02u:%02u) 대비 %ls(%ls → %ls) · 늘어남 %u · 줄어듦 %u · "
-               L"새 폴더 %u · 삭제 %u",
-               (unsigned)st.wMonth, (unsigned)st.wDay, (unsigned)st.wHour, (unsigned)st.wMinute,
-               a, b, c, (unsigned)g_scan.diff.grown, (unsigned)g_scan.diff.shrunk,
-               (unsigned)g_scan.diff.added, (unsigned)g_scan.diff.removed);
+        APPEND(ui_text(UI_T_AN_CHANGES), (unsigned)st.wMonth, (unsigned)st.wDay,
+               (unsigned)st.wHour, (unsigned)st.wMinute, a, b, c, (unsigned)g_scan.diff.grown,
+               (unsigned)g_scan.diff.shrunk, (unsigned)g_scan.diff.added,
+               (unsigned)g_scan.diff.removed);
     }
     if (g_scan.history_cleared) {
-        APPEND(L"저장된 스캔 기록을 삭제했습니다(직전 스캔과 비교한 변화 표시도 지움)");
+        APPEND(L"%ls", ui_text(UI_T_AN_HISTORY_CLEARED));
     }
     switch (g_scan.history_cleared ? HISTORY_TRACK_NONE : g_scan.history) {
     case HISTORY_TRACK_BASELINE:
-        APPEND(L"첫 스캔: 기준으로 저장했습니다(다음 스캔부터 변화를 비교)");
+        APPEND(L"%ls", ui_text(UI_T_AN_BASELINE));
         break;
     case HISTORY_TRACK_CANCELLED:
-        APPEND(L"%ls취소되어 기록하지 않았습니다", g_scan.has_diff ? L" · " : L"");
+        APPEND(ui_text(UI_T_AN_CANCELLED), g_scan.has_diff ? L" · " : L"");
         break;
     case HISTORY_TRACK_FAILED:
-        APPEND(L"%ls변화 기록을 저장하지 못했습니다(오류 %lu)", g_scan.has_diff ? L" · " : L"",
-               g_scan.history_error);
+        APPEND(ui_text(UI_T_AN_SAVE_FAILED), g_scan.has_diff ? L" · " : L"", g_scan.history_error);
         break;
     case HISTORY_TRACK_DISABLED:
-        APPEND(L"%ls자동 저장이 꺼져 있어 이번 스캔은 기록하지 않았습니다",
-               g_scan.has_diff ? L" · " : L"");
+        APPEND(ui_text(UI_T_AN_AUTOSAVE_OFF), g_scan.has_diff ? L" · " : L"");
         break;
     default:
         break;
     }
 #undef APPEND
+}
+
+/* 분석 줄(둘째 상태 줄)을 지금 결과·언어로 다시 쓴다. */
+static void update_analysis(void)
+{
+    wchar_t text[1024];
+
+    analysis_text(text, sizeof(text) / sizeof(text[0]));
     SetWindowTextW(g_scan.analysis, text);
 }
 
@@ -776,9 +830,178 @@ static void set_scanning(int scanning)
     update_clear_button();
 }
 
-static void set_status(const wchar_t *text)
+/* ---- 상태 줄 ---- */
+
+/* 내보내기 형식 이름(상태 줄·알림 창의 %ls). */
+static const wchar_t *export_what(ExportKind kind)
 {
+    return kind == EXPORT_KIND_CSV ? L"CSV" : ui_text(UI_T_SCAN_EXPORT_WHAT_HTML);
+}
+
+/* 내보내기 실패 이유를 지금 언어로(분류는 scan_export 의 export_error_text 와 같다). */
+static const wchar_t *export_reason(unsigned long error)
+{
+    switch (error) {
+    case ERROR_ACCESS_DENIED:
+    case ERROR_WRITE_PROTECT:
+        return ui_text(UI_T_EXPORT_ERR_ACCESS);
+    case ERROR_SHARING_VIOLATION:
+    case ERROR_LOCK_VIOLATION:
+        return ui_text(UI_T_EXPORT_ERR_IN_USE);
+    case ERROR_DISK_FULL:
+    case ERROR_HANDLE_DISK_FULL:
+        return ui_text(UI_T_EXPORT_ERR_DISK_FULL);
+    case ERROR_PATH_NOT_FOUND:
+    case ERROR_FILE_NOT_FOUND:
+    case ERROR_INVALID_NAME:
+        return ui_text(UI_T_EXPORT_ERR_PATH);
+    case ERROR_NOT_ENOUGH_MEMORY:
+    case ERROR_OUTOFMEMORY:
+        return ui_text(UI_T_EXPORT_ERR_MEMORY);
+    case ERROR_INVALID_PARAMETER:
+        return ui_text(UI_T_EXPORT_ERR_NO_RESULT);
+    default:
+        return ui_text(UI_T_EXPORT_ERR_OTHER);
+    }
+}
+
+/* 스캔 진행률 문구(SCAN_STATUS_PROGRESS). 작업이 없으면 빈 문자열. */
+static void progress_text(wchar_t *text, size_t len)
+{
+    ScanJobSnapshot snap;
+    wchar_t size[32];
+
+    text[0] = L'\0';
+    if (g_scan.job == NULL) {
+        return;
+    }
+    scan_job_progress(g_scan.job, &snap);
+    format_size(snap.progress.bytes, size, 32);
+    if (snap.progress.precise) {
+        /* 정밀 스캔: 지금까지 찾은 하드 링크 중복도 보여 준다. */
+        wchar_t dup[32];
+        format_size(snap.progress.dup_bytes, dup, 32);
+        swprintf(text, len, ui_text(UI_T_SCAN_PROGRESS_PRECISE),
+                 (unsigned long long)snap.progress.files, (unsigned long long)snap.progress.dirs,
+                 size, (unsigned long long)snap.progress.dup_files, dup,
+                 (unsigned long long)snap.progress.errors, snap.current_dir);
+    } else {
+        swprintf(text, len, ui_text(UI_T_SCAN_PROGRESS), (unsigned long long)snap.progress.files,
+                 (unsigned long long)snap.progress.dirs, size,
+                 (unsigned long long)snap.progress.errors, snap.current_dir);
+    }
+}
+
+/* 스캔 결과 문구(SCAN_STATUS_FINISHED): 끝난 방식과 집계. */
+static void finished_text(wchar_t *text, size_t len)
+{
+    const ScanReport *r = &g_scan.model.report;
+    wchar_t size[32];
+    UiText head;
+
+    if (r->cancelled) {
+        head = UI_T_SCAN_HEAD_CANCELLED;
+    } else if (g_scan.finished == SCAN_COMPLETE) {
+        head = UI_T_SCAN_HEAD_DONE;
+    } else if (g_scan.finished == SCAN_PARTIAL) {
+        head = UI_T_SCAN_HEAD_PARTIAL;
+    } else {
+        head = UI_T_SCAN_HEAD_FAILED;
+    }
+    if (g_scan.finished == SCAN_FATAL) {
+        const wchar_t *kind = r->errors_len > 0 ? scan_error_kind_name(r->errors[0].kind)
+                                                : L"other";
+        swprintf(text, len, ui_text(UI_T_SCAN_FATAL), ui_text(head), kind);
+        return;
+    }
+    format_size(r->total_bytes, size, 32);
+    swprintf(text, len,
+             ui_text(r->hardlinks_checked ? UI_T_SCAN_FINISHED_PRECISE : UI_T_SCAN_FINISHED),
+             ui_text(head), (unsigned long long)r->file_count, (unsigned long long)r->dir_count,
+             size, (unsigned long long)r->error_count, (unsigned long long)r->skipped_dir_count,
+             (double)g_scan.scan_info.elapsed_ms / 1000.0);
+}
+
+/* 상태 줄 문구를 기억해 둔 종류·값과 지금 언어로 만든다. */
+static void status_line(wchar_t *text, size_t len)
+{
+    switch (g_scan.status_kind) {
+    case SCAN_STATUS_TEXT:
+        swprintf(text, len, L"%ls", ui_text(g_scan.status_text));
+        break;
+    case SCAN_STATUS_ERROR:
+        swprintf(text, len, ui_text(g_scan.status_text), g_scan.status_error);
+        break;
+    case SCAN_STATUS_PROGRESS:
+        progress_text(text, len);
+        break;
+    case SCAN_STATUS_FINISHED:
+        finished_text(text, len);
+        break;
+    case SCAN_STATUS_CLEARED:
+        swprintf(text, len, ui_text(UI_T_SCAN_HISTORY_CLEARED), (unsigned)g_scan.cleared.removed);
+        break;
+    case SCAN_STATUS_CLEAR_PARTIAL:
+        swprintf(text, len, ui_text(UI_T_SCAN_HISTORY_PARTIAL), (unsigned)g_scan.cleared.removed,
+                 (unsigned)g_scan.cleared.failed, g_scan.cleared.error);
+        break;
+    case SCAN_STATUS_EXPORT: {
+        const wchar_t *file = g_scan.export_file != NULL ? g_scan.export_file : L"";
+        if (g_scan.export_ok) {
+            swprintf(text, len, ui_text(UI_T_SCAN_EXPORTED), export_what(g_scan.export_kind),
+                     (unsigned)g_scan.model.len, file);
+        } else {
+            swprintf(text, len, ui_text(UI_T_SCAN_EXPORT_FAILED), export_what(g_scan.export_kind),
+                     g_scan.export_error, export_reason(g_scan.export_error));
+        }
+        break;
+    }
+    default:
+        text[0] = L'\0';
+        break;
+    }
+}
+
+/* 상태 줄 문구 버퍼 크기(진행 중 폴더·내보낸 파일 경로가 들어갈 만큼). */
+static size_t status_capacity(void)
+{
+    return 1024 + SCAN_JOB_DIR_LEN +
+           (g_scan.export_file != NULL ? wcslen(g_scan.export_file) : 0);
+}
+
+/* 기억해 둔 상태를 지금 언어로 상태 줄에 쓴다(언어를 바꾼 뒤에도 부른다). */
+static void render_status(void)
+{
+    size_t len = status_capacity();
+    wchar_t *text = malloc(len * sizeof(*text));
+
+    if (text == NULL) {
+        return;
+    }
+    status_line(text, len);
     SetWindowTextW(g_scan.status, text);
+    free(text);
+}
+
+static void show_status(ScanStatusKind kind)
+{
+    g_scan.status_kind = kind;
+    render_status();
+}
+
+/* 인자 없는 문구를 상태 줄에 보인다. */
+static void show_text(UiText id)
+{
+    g_scan.status_text = id;
+    show_status(SCAN_STATUS_TEXT);
+}
+
+/* 오류 번호 하나(%lu 또는 %lx)를 넣는 문구를 상태 줄에 보인다. */
+static void show_error(UiText id, unsigned long error)
+{
+    g_scan.status_text = id;
+    g_scan.status_error = error;
+    show_status(SCAN_STATUS_ERROR);
 }
 
 /* ---- 기록 설정 ---- */
@@ -789,7 +1012,7 @@ static void set_status(const wchar_t *text)
  */
 static int apply_autosave(int on)
 {
-    wchar_t dir[MAX_PATH * 2], text[256];
+    wchar_t dir[MAX_PATH * 2];
     unsigned long error = ERROR_PATH_NOT_FOUND;
 
     on = on != 0;
@@ -797,15 +1020,11 @@ static int apply_autosave(int on)
         history_set_autosave(dir, on, &error) == 0) {
         g_scan.autosave_on = on;
         SendMessageW(g_scan.autosave, BM_SETCHECK, on ? BST_CHECKED : BST_UNCHECKED, 0);
-        set_status(on ? L"스캔 기록 자동 저장을 켰습니다. 다음 스캔부터 결과를 기록합니다."
-                      : L"스캔 기록 자동 저장을 껐습니다. 이후 스캔 결과는 저장하지 않습니다"
-                        L"(이미 저장된 기록은 그대로 둡니다).");
+        show_text(on ? UI_T_SCAN_AUTOSAVE_ON : UI_T_SCAN_AUTOSAVE_OFF);
         return 1;
     }
     SendMessageW(g_scan.autosave, BM_SETCHECK, g_scan.autosave_on ? BST_CHECKED : BST_UNCHECKED, 0);
-    swprintf(text, 256, L"자동 저장 설정을 저장하지 못했습니다(오류 %lu). 설정은 바뀌지 않았습니다.",
-             error);
-    set_status(text);
+    show_error(UI_T_SCAN_AUTOSAVE_SAVE_FAILED, error);
     return 0;
 }
 
@@ -825,26 +1044,21 @@ static int clear_history(int confirm)
         return 0;
     }
     if (history_default_dir(dir, sizeof(dir) / sizeof(dir[0])) != 0) {
-        set_status(L"기록 폴더를 정하지 못해 기록을 삭제할 수 없습니다.");
+        show_text(UI_T_SCAN_HISTORY_NO_DIR);
         return 0;
     }
     count = history_count(dir);
     if (count == 0) {
-        set_status(L"삭제할 스캔 기록이 없습니다.");
+        show_text(UI_T_SCAN_HISTORY_EMPTY);
         update_clear_button();
         return 0;
     }
     if (confirm) {
-        swprintf(text, sizeof(text) / sizeof(text[0]),
-                 L"저장된 스캔 기록 %u개를 삭제할까요?\n\n기록 폴더: %ls\n\n"
-                 L"삭제하면 직전 스캔과 비교한 변화를 더 볼 수 없고, 다음 스캔은 새 기준이 됩니다. "
-                 L"같은 폴더를 쓰는 CLI --track 기록도 함께 삭제됩니다.\n"
-                 L"스캔한 폴더와 파일은 건드리지 않으며, 자동 저장 설정은 그대로 둡니다.\n\n"
-                 L"삭제한 기록은 되돌릴 수 없습니다.",
+        swprintf(text, sizeof(text) / sizeof(text[0]), ui_text(UI_T_SCAN_CLEAR_CONFIRM),
                  (unsigned)count, dir);
-        if (MessageBoxW(GetAncestor(g_scan.hwnd, GA_ROOT), text, L"스캔 기록 삭제",
+        if (MessageBoxW(GetAncestor(g_scan.hwnd, GA_ROOT), text, ui_text(UI_T_SCAN_CLEAR_TITLE),
                         MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) != IDYES) {
-            set_status(L"기록 삭제를 취소했습니다. 아무것도 바뀌지 않았습니다.");
+            show_text(UI_T_SCAN_HISTORY_CLEAR_CANCELLED);
             return 0;
         }
     }
@@ -863,20 +1077,12 @@ static int clear_history(int confirm)
         free(file);
     }
     if (rc == 0) {
-        swprintf(text, sizeof(text) / sizeof(text[0]), L"스캔 기록 %u개를 삭제했습니다.",
-                 (unsigned)g_scan.cleared.removed);
+        show_status(SCAN_STATUS_CLEARED);
     } else if (g_scan.cleared.failed == 0) {
-        swprintf(text, sizeof(text) / sizeof(text[0]),
-                 L"기록 폴더를 읽지 못해 기록을 삭제하지 못했습니다(오류 %lu).",
-                 g_scan.cleared.error);
+        show_error(UI_T_SCAN_HISTORY_READ_FAILED, g_scan.cleared.error);
     } else {
-        swprintf(text, sizeof(text) / sizeof(text[0]),
-                 L"스캔 기록 %u개를 삭제했고 %u개는 삭제하지 못했습니다(오류 %lu: 사용 중이거나 "
-                 L"권한이 없을 수 있음). 다시 시도하세요.",
-                 (unsigned)g_scan.cleared.removed, (unsigned)g_scan.cleared.failed,
-                 g_scan.cleared.error);
+        show_status(SCAN_STATUS_CLEAR_PARTIAL);
     }
-    set_status(text);
     update_analysis();
     fill_rank();
     update_clear_button();
@@ -884,15 +1090,14 @@ static int clear_history(int confirm)
 }
 
 /*
- * 지금 스캔 결과를 kind 형식으로 file 에 쓴다. 결과는 상태 줄에 쓰고, 실패했고 show_error 가 1 이면
+ * 지금 스캔 결과를 kind 형식으로 file 에 쓴다. 결과는 상태 줄에 쓰고, 실패했고 show_error_box 가 1 이면
  * 원인을 창으로도 알린다(기존 파일은 바뀌지 않음). 성공하면 1.
  */
-static int export_to(ExportKind kind, const wchar_t *file, int show_error)
+static int export_to(ExportKind kind, const wchar_t *file, int show_error_box)
 {
-    const wchar_t *what = kind == EXPORT_KIND_CSV ? L"CSV" : L"HTML 보고서";
     unsigned long error = ERROR_INVALID_PARAMETER;
-    size_t len = wcslen(file) + 256;
-    wchar_t *text;
+    size_t len = wcslen(file) + 1024;
+    wchar_t *text, *copy;
     int ok = 0;
 
     if (can_export()) {
@@ -900,40 +1105,62 @@ static int export_to(ExportKind kind, const wchar_t *file, int show_error)
                   ? export_csv(&g_scan.model, file, &error)
                   : export_html(&g_scan.model, &g_scan.scan_info, file, &error)) == 0;
     }
-    text = malloc(len * sizeof(*text));
-    if (text == NULL) {
-        return ok;
+    copy = _wcsdup(file);
+    if (copy != NULL) {
+        free(g_scan.export_file);
+        g_scan.export_file = copy;
     }
-    if (ok) {
-        swprintf(text, len, L"%ls(으)로 내보냈습니다(폴더 %u개): %ls", what,
-                 (unsigned)g_scan.model.len, file);
-        set_status(text);
-    } else {
-        swprintf(text, len, L"%ls 내보내기 실패(오류 %lu): %ls", what, error,
-                 export_error_text(error));
-        set_status(text);
-        if (show_error) {
-            swprintf(text, len,
-                     L"%ls(으)로 내보내지 못했습니다.\n\n%ls\n(오류 %lu)\n\n파일: %ls\n\n"
-                     L"이미 있던 파일은 바뀌지 않았습니다.",
-                     what, export_error_text(error), error, file);
-            MessageBoxW(GetAncestor(g_scan.hwnd, GA_ROOT), text, L"내보내기 실패",
-                        MB_OK | MB_ICONWARNING);
+    g_scan.export_kind = kind;
+    g_scan.export_ok = ok;
+    g_scan.export_error = error;
+    show_status(SCAN_STATUS_EXPORT);
+    if (!ok && show_error_box) {
+        text = malloc(len * sizeof(*text));
+        if (text != NULL) {
+            swprintf(text, len, ui_text(UI_T_SCAN_EXPORT_FAILED_MSG), export_what(kind),
+                     export_reason(error), error, file);
+            MessageBoxW(GetAncestor(g_scan.hwnd, GA_ROOT), text,
+                        ui_text(UI_T_SCAN_EXPORT_FAILED_TITLE), MB_OK | MB_ICONWARNING);
+            free(text);
         }
     }
-    free(text);
     return ok;
+}
+
+/*
+ * 저장 대화 상자의 파일 형식 목록("이름\0패턴\0모든 파일\0*.*\0\0")을 만든다. 이름은 번역 문구라
+ * 문자열 표에 \0 을 넣지 않고 여기서 잇는다. 넘치면 뒤를 자른다(목록 끝 \0\0 은 지킨다).
+ */
+static void make_filter(wchar_t *buf, size_t cap, const wchar_t *name, const wchar_t *pattern)
+{
+    const wchar_t *parts[4];
+    size_t used = 0, i, n;
+
+    parts[0] = name;
+    parts[1] = pattern;
+    parts[2] = ui_text(UI_T_SCAN_ALL_FILTER);
+    parts[3] = L"*.*";
+    for (i = 0; i < 4; i++) {
+        n = wcslen(parts[i]);
+        if (used + n + 2 > cap) {
+            break;
+        }
+        wmemcpy(buf + used, parts[i], n);
+        used += n;
+        buf[used++] = L'\0';
+    }
+    buf[used] = L'\0';
 }
 
 /* 저장 위치를 고르게 한 뒤(덮어쓰기는 대화 상자가 확인) 내보낸다. */
 static void export_results(ExportKind kind)
 {
     OPENFILENAMEW ofn;
-    wchar_t file[MAX_PATH * 4];
+    wchar_t file[MAX_PATH * 4], filter[256];
     DWORD dlg_error;
 
     if (!can_export()) {
-        set_status(L"내보낼 스캔 결과가 없습니다. 먼저 폴더를 스캔하세요.");
+        show_text(UI_T_SCAN_NOTHING_TO_EXPORT);
         return;
     }
     export_default_name(g_scan.model.nodes[0].name, kind, NULL, file,
@@ -944,23 +1171,23 @@ static void export_results(ExportKind kind)
     ofn.lpstrFile = file;
     ofn.nMaxFile = (DWORD)(sizeof(file) / sizeof(file[0]));
     if (kind == EXPORT_KIND_CSV) {
-        ofn.lpstrFilter = L"CSV 파일 (*.csv)\0*.csv\0모든 파일 (*.*)\0*.*\0";
+        make_filter(filter, sizeof(filter) / sizeof(filter[0]), ui_text(UI_T_SCAN_CSV_FILTER),
+                    L"*.csv");
         ofn.lpstrDefExt = L"csv";
-        ofn.lpstrTitle = L"스캔 결과를 CSV로 내보내기";
+        ofn.lpstrTitle = ui_text(UI_T_SCAN_CSV_TITLE);
     } else {
-        ofn.lpstrFilter = L"HTML 보고서 (*.html)\0*.html;*.htm\0모든 파일 (*.*)\0*.*\0";
+        make_filter(filter, sizeof(filter) / sizeof(filter[0]), ui_text(UI_T_SCAN_HTML_FILTER),
+                    L"*.html;*.htm");
         ofn.lpstrDefExt = L"html";
-        ofn.lpstrTitle = L"스캔 결과를 HTML 보고서로 저장";
+        ofn.lpstrTitle = ui_text(UI_T_SCAN_HTML_TITLE);
     }
+    ofn.lpstrFilter = filter;
     ofn.Flags = OFN_EXPLORER | OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY |
                 OFN_NOCHANGEDIR;
     if (!GetSaveFileNameW(&ofn)) {
         dlg_error = CommDlgExtendedError();
         if (dlg_error != 0) {
-            wchar_t text[128];
-            swprintf(text, 128, L"저장 위치 대화 상자를 열지 못했습니다(오류 0x%lx).",
-                     (unsigned long)dlg_error);
-            set_status(text);
+            show_error(UI_T_SCAN_DIALOG_FAILED, (unsigned long)dlg_error);
         }
         return; /* 취소 */
     }
@@ -991,7 +1218,7 @@ static void start_scan(void)
     GetWindowTextW(g_scan.path, target, len + 1);
     if (target[0] == L'\0') {
         free(target);
-        set_status(L"스캔할 폴더를 입력하거나 [찾아보기]로 선택하세요.");
+        show_text(UI_T_SCAN_NEED_PATH);
         return;
     }
 
@@ -1005,11 +1232,11 @@ static void start_scan(void)
                                   PROGRESS_INTERVAL_MS, on_job_notify, g_scan.hwnd);
     free(target);
     if (g_scan.job == NULL) {
-        set_status(L"스캔을 시작하지 못했습니다(메모리 또는 스레드 생성 실패).");
+        show_text(UI_T_SCAN_START_FAILED);
         return;
     }
     set_scanning(1);
-    set_status(precise ? L"정밀 스캔 중(하드 링크 확인)..." : L"스캔 중...");
+    show_text(precise ? UI_T_SCAN_STARTING_PRECISE : UI_T_SCAN_STARTING);
 }
 
 static void cancel_scan(void)
@@ -1017,14 +1244,13 @@ static void cancel_scan(void)
     if (g_scan.job != NULL) {
         scan_job_cancel(g_scan.job);
         EnableWindow(g_scan.cancel, FALSE);
-        set_status(L"취소하는 중...");
+        show_text(UI_T_SCAN_CANCELLING);
     }
 }
 
 static void update_progress(void)
 {
     ScanJobSnapshot snap;
-    wchar_t size[32], text[SCAN_JOB_DIR_LEN + 160];
     int pos;
 
     if (g_scan.job == NULL) {
@@ -1040,24 +1266,7 @@ static void update_progress(void)
         g_scan.progress_pos = pos;
         progress_set(g_scan.progress, PROGRESS_RUNNING, pos, PROGRESS_RANGE);
     }
-    format_size(snap.progress.bytes, size, 32);
-    if (snap.progress.precise) {
-        /* 정밀 스캔: 지금까지 찾은 하드 링크 중복도 보여 준다. */
-        wchar_t dup[32];
-        format_size(snap.progress.dup_bytes, dup, 32);
-        swprintf(text, sizeof(text) / sizeof(text[0]),
-                 L"정밀 스캔 중... 파일 %llu · 폴더 %llu · %ls · 하드 링크 중복 %llu개(-%ls) · "
-                 L"오류 %llu  |  %ls",
-                 (unsigned long long)snap.progress.files, (unsigned long long)snap.progress.dirs,
-                 size, (unsigned long long)snap.progress.dup_files, dup,
-                 (unsigned long long)snap.progress.errors, snap.current_dir);
-    } else {
-        swprintf(text, sizeof(text) / sizeof(text[0]),
-                 L"스캔 중... 파일 %llu · 폴더 %llu · %ls · 오류 %llu  |  %ls",
-                 (unsigned long long)snap.progress.files, (unsigned long long)snap.progress.dirs,
-                 size, (unsigned long long)snap.progress.errors, snap.current_dir);
-    }
-    set_status(text);
+    show_status(SCAN_STATUS_PROGRESS);
 }
 
 static void finish_scan(void)
@@ -1065,8 +1274,6 @@ static void finish_scan(void)
     ScanJobSnapshot snap;
     ScanStatus status;
     const ScanReport *r;
-    wchar_t size[32], text[512];
-    const wchar_t *head;
 
     if (g_scan.job == NULL) {
         return;
@@ -1083,34 +1290,15 @@ static void finish_scan(void)
         g_scan.scan_info.elapsed_ms = snap.elapsed_ms;
     }
 
-    if (r->cancelled) {
-        head = L"취소됨(그때까지 집계)";
-    } else if (status == SCAN_COMPLETE) {
-        head = L"완료";
-    } else if (status == SCAN_PARTIAL) {
-        head = L"완료(일부 폴더를 읽지 못함)";
-    } else {
-        head = L"스캔 실패";
-    }
-
     if (status == SCAN_FATAL) {
-        const wchar_t *kind = r->errors_len > 0 ? scan_error_kind_name(r->errors[0].kind)
-                                                : L"other";
-        swprintf(text, sizeof(text) / sizeof(text[0]), L"%ls: 폴더를 열 수 없습니다 (%ls).",
-                 head, kind);
         progress_set(g_scan.progress, PROGRESS_FAILED, 0, PROGRESS_RANGE);
     } else {
-        format_size(r->total_bytes, size, 32);
-        swprintf(text, sizeof(text) / sizeof(text[0]),
-                 L"%ls%ls: 파일 %llu · 폴더 %llu · %ls · 오류 %llu · 건너뛴 폴더 %llu · %.1f초",
-                 r->hardlinks_checked ? L"정밀 스캔 " : L"", head,
-                 (unsigned long long)r->file_count, (unsigned long long)r->dir_count, size,
-                 (unsigned long long)r->error_count, (unsigned long long)r->skipped_dir_count,
-                 (double)snap.elapsed_ms / 1000.0);
         progress_set(g_scan.progress, r->cancelled ? PROGRESS_CANCELLED : PROGRESS_DONE, 0,
                      PROGRESS_RANGE);
     }
-    set_status(text);
+    /* 결과 문구는 finished_text 가 지금 언어로 만든다(걸린 시간은 scan_info.elapsed_ms). */
+    g_scan.finished = status;
+    show_status(SCAN_STATUS_FINISHED);
     set_scanning(0);
     track_history();
     update_clear_button();
@@ -1126,7 +1314,7 @@ static void browse_folder(void)
 
     memset(&bi, 0, sizeof(bi));
     bi.hwndOwner = GetAncestor(g_scan.hwnd, GA_ROOT);
-    bi.lpszTitle = L"스캔할 폴더를 선택하세요.";
+    bi.lpszTitle = ui_text(UI_T_SCAN_BROWSE_TITLE);
     bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
     pidl = SHBrowseForFolderW(&bi);
     if (pidl == NULL) {
@@ -1164,6 +1352,19 @@ static int count_tree_children(HTREEITEM item)
     } while (0)
 
 /* 보기 콤보 상자: 디스크 사용 순위·변화 순위 목록이 모델·비교 결과와 맞는지. 실패 수. */
+/* 자체 검사: 번역 문구 id 의 첫 서식 지정자(%) 앞부분(문구가 시작하는 고정 글자)을 buf 에 쓴다. */
+static void format_head(UiText id, wchar_t *buf, size_t len)
+{
+    const wchar_t *s = ui_text(id);
+    size_t n = 0;
+
+    while (s[n] != L'\0' && s[n] != L'%' && n + 1 < len) {
+        buf[n] = s[n];
+        n++;
+    }
+    buf[n] = L'\0';
+}
+
 static int verify_views(void)
 {
     int failures = 0, rows;
@@ -1200,8 +1401,13 @@ static int verify_views(void)
         SendMessageW(g_scan.list, LVM_GETITEMW, 0, (LPARAM)&lv);
         SELF_CHECK((size_t)lv.lParam == c->node);
         ListView_GetItemText(g_scan.list, (int)i, COL_CHANGE, cell, 96);
-        history_change_text(c, want, 96);
+        change_text(c, want, 96);
         SELF_CHECK(wcscmp(cell, want) == 0);
+        /* 한국어 화면은 core 의 문구(history_change_text)와 같다. */
+        if (ui_lang_current() == UI_LANG_KO) {
+            history_change_text(c, want, 96);
+            SELF_CHECK(wcscmp(cell, want) == 0);
+        }
         if (c->node != SCAN_NODE_NONE) {
             SELF_CHECK(g_scan.change_of_node == NULL || g_scan.change_of_node[c->node] == i);
         }
@@ -1369,7 +1575,7 @@ static void print_changes(void)
 static int verify_history_settings(void)
 {
     int failures = 0, rows;
-    wchar_t dir[MAX_PATH * 2], text[512], cell[96];
+    wchar_t dir[MAX_PATH * 2], text[512], cell[96], want[96];
     size_t before;
 
     SELF_CHECK(g_scan.model.report.cancelled == 0);
@@ -1382,7 +1588,8 @@ static int verify_history_settings(void)
         SELF_CHECK(!g_scan.autosave_on);
         SELF_CHECK(g_scan.history == HISTORY_TRACK_DISABLED);
         GetWindowTextW(g_scan.analysis, text, 512);
-        SELF_CHECK(wcsstr(text, L"자동 저장이 꺼져") != NULL);
+        /* 문구 앞의 %ls(앞 항목 구분)를 빼고 찾는다. */
+        SELF_CHECK(wcsstr(text, ui_text(UI_T_AN_AUTOSAVE_OFF) + 3) != NULL);
         return failures;
     }
 
@@ -1398,9 +1605,11 @@ static int verify_history_settings(void)
     SELF_CHECK(g_scan.history_cleared);
     SELF_CHECK(!IsWindowEnabled(g_scan.clear_history));
     GetWindowTextW(g_scan.analysis, text, 512);
-    SELF_CHECK(wcsstr(text, L"기록을 삭제했습니다") != NULL && wcsstr(text, L"직전 스캔(") == NULL);
+    format_head(UI_T_AN_CHANGES, want, 96);
+    SELF_CHECK(wcsstr(text, ui_text(UI_T_AN_HISTORY_CLEARED)) != NULL && wcsstr(text, want) == NULL);
     GetWindowTextW(g_scan.status, text, 512);
-    SELF_CHECK(wcsstr(text, L"삭제했습니다") != NULL);
+    swprintf(want, 96, ui_text(UI_T_SCAN_HISTORY_CLEARED), (unsigned)before);
+    SELF_CHECK(g_scan.status_kind == SCAN_STATUS_CLEARED && wcscmp(text, want) == 0);
     rows = ListView_GetItemCount(g_scan.list);
     if (rows > 0) {
         ListView_GetItemText(g_scan.list, 0, COL_CHANGE, cell, 96);
@@ -1427,7 +1636,7 @@ static int verify_export(void)
 {
     int failures = 0;
     size_t len = wcslen(g_scan.export_prefix) + 32;
-    wchar_t *file = malloc(len * sizeof(*file)), text[512];
+    wchar_t *file = malloc(len * sizeof(*file)), text[512], want[512];
 
     SELF_CHECK(!g_scan.export_enabled_before_scan);
     SELF_CHECK(IsWindowEnabled(g_scan.export_csv) && IsWindowEnabled(g_scan.export_html));
@@ -1437,17 +1646,22 @@ static int verify_export(void)
     swprintf(file, len, L"%ls.csv", g_scan.export_prefix);
     SELF_CHECK(export_to(EXPORT_KIND_CSV, file, 0));
     GetWindowTextW(g_scan.status, text, 512);
-    SELF_CHECK(wcsstr(text, L"CSV(으)로 내보냈습니다") == text);
+    swprintf(want, 512, ui_text(UI_T_SCAN_EXPORTED), L"CSV", (unsigned)g_scan.model.len, file);
+    SELF_CHECK(wcscmp(text, want) == 0);
     swprintf(file, len, L"%ls.html", g_scan.export_prefix);
     SELF_CHECK(export_to(EXPORT_KIND_HTML, file, 0));
     GetWindowTextW(g_scan.status, text, 512);
-    SELF_CHECK(wcsstr(text, L"HTML 보고서(으)로 내보냈습니다") == text);
+    swprintf(want, 512, ui_text(UI_T_SCAN_EXPORTED), ui_text(UI_T_SCAN_EXPORT_WHAT_HTML),
+             (unsigned)g_scan.model.len, file);
+    SELF_CHECK(wcscmp(text, want) == 0);
 
     /* 없는 폴더: 실패를 상태 줄에 알리고 아무 파일도 남기지 않는다. */
     swprintf(file, len, L"%ls-missing\\out.csv", g_scan.export_prefix);
     SELF_CHECK(!export_to(EXPORT_KIND_CSV, file, 0));
     GetWindowTextW(g_scan.status, text, 512);
-    SELF_CHECK(wcsstr(text, L"내보내기 실패") != NULL);
+    swprintf(want, 512, ui_text(UI_T_SCAN_EXPORT_FAILED), L"CSV", g_scan.export_error,
+             export_reason(g_scan.export_error));
+    SELF_CHECK(wcscmp(text, want) == 0);
     SELF_CHECK(GetFileAttributesW(file) == INVALID_FILE_ATTRIBUTES);
     free(file);
 
@@ -1465,7 +1679,7 @@ static int verify_precise(void)
     const ScanReport *r = &g_scan.model.report;
     const ScanNode *root = &g_scan.model.nodes[0];
     int failures = 0;
-    wchar_t text[1024], want[64], size[32];
+    wchar_t text[1024], want[512], size[32];
     TVITEMW tv;
     HTREEITEM item = TreeView_GetRoot(g_scan.tree);
 
@@ -1475,14 +1689,25 @@ static int verify_precise(void)
                root->total_dup_files == r->hardlink_dup_files);
     GetWindowTextW(g_scan.status, text, 1024);
     /* "정밀 스캔 완료: …" 또는 "정밀 스캔 완료(일부 폴더를 읽지 못함): …" */
-    SELF_CHECK(wcsstr(text, L"정밀 스캔 완료") == text);
+    SELF_CHECK(g_scan.status_kind == SCAN_STATUS_FINISHED && r->hardlinks_checked);
+    finished_text(want, 512);
+    SELF_CHECK(wcscmp(text, want) == 0);
+    if (ui_lang_current() == UI_LANG_KO) {
+        SELF_CHECK(wcsstr(text, L"정밀 스캔 완료") == text);
+    }
     /* 분석 줄: 중복 제외(기본 대비 차이)와 실제 디스크 사용 */
     GetWindowTextW(g_scan.analysis, text, 1024);
-    format_size(r->total_bytes - r->hardlink_dup_bytes, size, 32);
-    swprintf(want, 64, L"중복 제외 %ls(기본 ", size);
-    SELF_CHECK(wcsstr(text, want) != NULL);
+    {
+        wchar_t a[32], b[32], c[32];
+        format_size(r->total_bytes - r->hardlink_dup_bytes, a, 32);
+        format_size(r->total_bytes, b, 32);
+        format_size(r->hardlink_dup_bytes, c, 32);
+        swprintf(want, 512, ui_text(UI_T_AN_PRECISE), a, b, (unsigned long long)r->hardlink_dup_files,
+                 c);
+        SELF_CHECK(wcsstr(text, want) != NULL);
+    }
     format_size(r->alloc_bytes - r->hardlink_dup_alloc, size, 32);
-    swprintf(want, 64, L"실제 디스크 사용 %ls", size);
+    swprintf(want, 512, ui_text(UI_T_AN_REAL_DISK), size);
     SELF_CHECK(wcsstr(text, want) != NULL);
     /* 트리 루트에 중복 제외 용량이 덧붙는다(중복이 있을 때) */
     memset(&tv, 0, sizeof(tv));
@@ -1491,7 +1716,9 @@ static int verify_precise(void)
     tv.pszText = text;
     tv.cchTextMax = 1024;
     SELF_CHECK(item != NULL && TreeView_GetItem(g_scan.tree, &tv));
-    SELF_CHECK((wcsstr(text, L" · 중복 제외 ") != NULL) == (root->total_dup_bytes > 0));
+    format_size(unique_bytes(root), size, 32);
+    swprintf(want, 512, ui_text(UI_T_TREE_UNIQUE), size);
+    SELF_CHECK((wcsstr(text, want) != NULL) == (root->total_dup_bytes > 0));
 
     wprintf(L"precise: files %llu bytes %llu dup_files %llu dup_bytes %llu unique %llu "
             L"unknown %llu\n",
@@ -1583,11 +1810,20 @@ static int verify_screen(void)
         SELF_CHECK(g_scan.history == HISTORY_TRACK_BASELINE ||
                    g_scan.history == HISTORY_TRACK_COMPARED);
         SELF_CHECK((g_scan.history == HISTORY_TRACK_COMPARED) == (g_scan.has_diff != 0));
+        wchar_t head[96];
         GetWindowTextW(g_scan.analysis, text, 1024);
-        SELF_CHECK(wcsstr(text, L"디스크 사용 ") == text);
-        SELF_CHECK(wcsstr(text, g_scan.has_diff ? L"직전 스캔(" : L"첫 스캔") != NULL);
+        format_head(UI_T_AN_DISK, head, 96);
+        SELF_CHECK(wcsstr(text, head) == text);
+        if (g_scan.has_diff) {
+            format_head(UI_T_AN_CHANGES, head, 96);
+            SELF_CHECK(wcsstr(text, head) != NULL);
+        } else {
+            SELF_CHECK(wcsstr(text, ui_text(UI_T_AN_BASELINE)) != NULL);
+        }
         /* 정밀 스캔 요약은 정밀 스캔 결과에만 */
-        SELF_CHECK((wcsstr(text, L"정밀 스캔: ") != NULL) == precise_result());
+        format_head(UI_T_AN_PRECISE, head, 96);
+        SELF_CHECK((wcsstr(text, head) != NULL ||
+                    wcsstr(text, ui_text(UI_T_AN_PRECISE_NONE)) != NULL) == precise_result());
         SELF_CHECK(precise_result() == (g_scan.self_test == SCAN_VERIFY_PRECISE));
         if (g_scan.self_test == SCAN_VERIFY_CHANGES) {
             SELF_CHECK(g_scan.has_diff);
@@ -1642,90 +1878,52 @@ static HWND make_child(const wchar_t *cls, const wchar_t *text, DWORD style, DWO
     return h;
 }
 
-static void create_controls(void)
+/* 순위 목록 열: 96 DPI 기준 기본 폭(머리글 문구가 더 길면 넓힌다, column_width)과 정렬. */
+static const struct {
+    int width;
+    int fmt;
+} k_cols[COL_COUNT] = {
+    {48, LVCFMT_RIGHT},  /* 순위 */
+    {220, LVCFMT_LEFT},  /* 폴더 */
+    {80, LVCFMT_RIGHT},  /* 용량 */
+    {0, LVCFMT_RIGHT},   /* 중복 제외: 정밀 스캔일 때만 보인다 */
+    {0, LVCFMT_RIGHT},   /* 하드 링크 중복: 정밀 스캔일 때만 보인다 */
+    {110, LVCFMT_RIGHT}, /* 변화 */
+    {84, LVCFMT_RIGHT},  /* 디스크 사용 */
+    {64, LVCFMT_RIGHT},  /* 파일 수 */
+    {56, LVCFMT_RIGHT},  /* 비율 */
+};
+
+/* 보기 콤보 상자 문구(VIEW_* 순서). */
+static const UiText k_view_text[VIEW_COUNT] = {UI_T_VIEW_SIZE,   UI_T_VIEW_ALLOC, UI_T_VIEW_CHANGE,
+                                              UI_T_VIEW_UNIQUE, UI_T_VIEW_DUP,
+                                              UI_T_VIEW_TREEMAP};
+
+/* 보기 콤보 상자에 지금 언어의 보기 이름을 넣는다(고른 보기는 그대로). */
+static void fill_view_combo(void)
 {
-    static const struct {
-        int width; /* 96 DPI 기준 기본 폭. 머리글 문구가 더 길면 넓힌다(column_width). */
-        int fmt;
-    } cols[COL_COUNT] = {
-        {48, LVCFMT_RIGHT},  /* 순위 */
-        {220, LVCFMT_LEFT},  /* 폴더 */
-        {80, LVCFMT_RIGHT},  /* 용량 */
-        {0, LVCFMT_RIGHT},   /* 중복 제외: 정밀 스캔일 때만 보인다 */
-        {0, LVCFMT_RIGHT},   /* 하드 링크 중복: 정밀 스캔일 때만 보인다 */
-        {110, LVCFMT_RIGHT}, /* 변화 */
-        {84, LVCFMT_RIGHT},  /* 디스크 사용 */
-        {64, LVCFMT_RIGHT},  /* 파일 수 */
-        {56, LVCFMT_RIGHT},  /* 비율 */
-    };
-    static const UiText views[VIEW_COUNT] = {UI_T_VIEW_SIZE,   UI_T_VIEW_ALLOC, UI_T_VIEW_CHANGE,
-                                             UI_T_VIEW_UNIQUE, UI_T_VIEW_DUP,
-                                             UI_T_VIEW_TREEMAP};
+    LRESULT sel = SendMessageW(g_scan.view, CB_GETCURSEL, 0, 0);
     int i, view_text_w = 0;
 
-    g_scan.path = make_child(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE,
-                            IDC_PATH);
-    g_scan.browse = make_child(L"BUTTON", ui_text(UI_T_SCAN_BROWSE), BS_PUSHBUTTON | WS_TABSTOP,
-                              0, IDC_BROWSE);
-    g_scan.scan = make_child(L"BUTTON", ui_text(UI_T_SCAN_START), BS_DEFPUSHBUTTON | WS_TABSTOP,
-                            0, IDC_SCAN);
-    g_scan.cancel = make_child(L"BUTTON", ui_text(UI_T_SCAN_CANCEL), BS_PUSHBUTTON | WS_TABSTOP,
-                              0, IDC_CANCEL);
-    /* 정밀 스캔: 하드 링크로 같은 실제 파일을 여러 번 세지 않게 보정한다(조금 느리고 메모리를 더 씀). */
-    g_scan.precise = make_child(L"BUTTON", ui_text(UI_T_SCAN_PRECISE),
-                               BS_AUTOCHECKBOX | WS_TABSTOP, 0, IDC_PRECISE);
-    g_scan.progress = make_child(PROGRESS_CLASSW, L"", PBS_SMOOTH, 0, IDC_PROGRESS);
-    g_scan.status = make_child(L"STATIC", ui_text(UI_T_SCAN_READY),
-                              SS_LEFTNOWORDWRAP | SS_PATHELLIPSIS, 0, IDC_STATUS);
-    g_scan.analysis = make_child(L"STATIC", L"", SS_LEFTNOWORDWRAP | SS_ENDELLIPSIS, 0,
-                                IDC_ANALYSIS);
-    g_scan.view = make_child(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 0,
-                            IDC_VIEW);
+    SendMessageW(g_scan.view, CB_RESETCONTENT, 0, 0);
     for (i = 0; i < VIEW_COUNT; i++) {
-        int tw = theme_text_width(g_scan.view, g_scan.font, ui_text(views[i]));
+        int tw = theme_text_width(g_scan.view, g_scan.font, ui_text(k_view_text[i]));
         if (tw > view_text_w) {
             view_text_w = tw;
         }
-        SendMessageW(g_scan.view, CB_ADDSTRING, 0, (LPARAM)ui_text(views[i]));
+        SendMessageW(g_scan.view, CB_ADDSTRING, 0, (LPARAM)ui_text(k_view_text[i]));
     }
-    SendMessageW(g_scan.view, CB_SETCURSEL, VIEW_SIZE, 0);
+    SendMessageW(g_scan.view, CB_SETCURSEL, sel >= 0 && sel < VIEW_COUNT ? (WPARAM)sel : VIEW_SIZE, 0);
     /* 펼친 목록은 가장 긴 보기 이름이 다 보이게(스크롤 막대·여백 포함). */
     SendMessageW(g_scan.view, CB_SETDROPPEDWIDTH,
                  (WPARAM)(view_text_w + scale(32) > scale(240) ? view_text_w + scale(32)
                                                                 : scale(240)),
                  0);
-    g_scan.tree = make_child(WC_TREEVIEWW, L"",
-                            TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT |
-                                TVS_SHOWSELALWAYS | WS_TABSTOP,
-                            WS_EX_CLIENTEDGE, IDC_TREE);
-    g_scan.list = make_child(WC_LISTVIEWW, L"",
-                            LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | WS_TABSTOP,
-                            WS_EX_CLIENTEDGE, IDC_LIST);
-    g_scan.treemap = treemap_view_create(g_scan.hwnd, IDC_TREEMAP, g_scan.font, g_scan.dpi);
+}
 
-    SendMessageW(g_scan.path, EM_SETCUEBANNER, TRUE, (LPARAM)ui_text(UI_T_SCAN_PATH_CUE));
-    SendMessageW(g_scan.progress, PBM_SETRANGE32, 0, PROGRESS_RANGE);
-    ListView_SetExtendedListViewStyle(g_scan.list, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
-    for (i = 0; i < COL_COUNT; i++) {
-        LVCOLUMNW col;
-        memset(&col, 0, sizeof(col));
-        col.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_FMT;
-        col.pszText = (wchar_t *)ui_text(k_col_text[i]);
-        col.cx = cols[i].width > 0 ? column_width(i, cols[i].width) : 0;
-        col.fmt = cols[i].fmt;
-        SendMessageW(g_scan.list, LVM_INSERTCOLUMNW, (WPARAM)i, (LPARAM)&col);
-    }
-    /* 탭 순서가 화면 순서와 같도록 왼쪽 것부터 만든다. */
-    g_scan.export_csv = make_child(L"BUTTON", ui_text(UI_T_SCAN_EXPORT_CSV),
-                                  BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_EXPORT_CSV);
-    g_scan.export_html = make_child(L"BUTTON", ui_text(UI_T_SCAN_EXPORT_HTML),
-                                   BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_EXPORT_HTML);
-    g_scan.autosave = make_child(L"BUTTON", ui_text(UI_T_SCAN_AUTOSAVE),
-                                BS_AUTOCHECKBOX | WS_TABSTOP, 0, IDC_AUTOSAVE);
-    g_scan.clear_history = make_child(L"BUTTON", ui_text(UI_T_SCAN_CLEAR_HISTORY),
-                                     BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_CLEAR_HISTORY);
-
-    /* 컨트롤 폭: 예전 고정 폭을 최소로 두고(한국어 화면은 그대로), 문구가 더 길면 넓힌다. */
+/* 컨트롤 폭: 예전 고정 폭을 최소로 두고(한국어 화면은 그대로), 지금 글꼴로 잰 문구가 더 길면 넓힌다. */
+static void measure_controls(void)
+{
     g_scan.w_browse = theme_button_width(g_scan.hwnd, g_scan.font, ui_text(UI_T_SCAN_BROWSE),
                                         g_scan.dpi, scale(84));
     g_scan.w_scan = theme_button_width(g_scan.hwnd, g_scan.font, ui_text(UI_T_SCAN_START),
@@ -1744,6 +1942,65 @@ static void create_controls(void)
                                          g_scan.dpi, scale(150));
     /* 보기 콤보 상자는 고른 보기 이름이 보통 다 보이는 폭(긴 이름은 펼친 목록에서 다 보임). */
     g_scan.w_view = scale(170);
+}
+
+static void create_controls(void)
+{
+    int i;
+
+    g_scan.path = make_child(L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE,
+                            IDC_PATH);
+    g_scan.browse = make_child(L"BUTTON", ui_text(UI_T_SCAN_BROWSE), BS_PUSHBUTTON | WS_TABSTOP,
+                              0, IDC_BROWSE);
+    g_scan.scan = make_child(L"BUTTON", ui_text(UI_T_SCAN_START), BS_DEFPUSHBUTTON | WS_TABSTOP,
+                            0, IDC_SCAN);
+    g_scan.cancel = make_child(L"BUTTON", ui_text(UI_T_SCAN_CANCEL), BS_PUSHBUTTON | WS_TABSTOP,
+                              0, IDC_CANCEL);
+    /* 정밀 스캔: 하드 링크로 같은 실제 파일을 여러 번 세지 않게 보정한다(조금 느리고 메모리를 더 씀). */
+    g_scan.precise = make_child(L"BUTTON", ui_text(UI_T_SCAN_PRECISE),
+                               BS_AUTOCHECKBOX | WS_TABSTOP, 0, IDC_PRECISE);
+    g_scan.progress = make_child(PROGRESS_CLASSW, L"", PBS_SMOOTH, 0, IDC_PROGRESS);
+    g_scan.status_kind = SCAN_STATUS_TEXT;
+    g_scan.status_text = UI_T_SCAN_READY;
+    g_scan.status = make_child(L"STATIC", ui_text(UI_T_SCAN_READY),
+                              SS_LEFTNOWORDWRAP | SS_PATHELLIPSIS, 0, IDC_STATUS);
+    g_scan.analysis = make_child(L"STATIC", L"", SS_LEFTNOWORDWRAP | SS_ENDELLIPSIS, 0,
+                                IDC_ANALYSIS);
+    g_scan.view = make_child(WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 0,
+                            IDC_VIEW);
+    fill_view_combo();
+    g_scan.tree = make_child(WC_TREEVIEWW, L"",
+                            TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT |
+                                TVS_SHOWSELALWAYS | WS_TABSTOP,
+                            WS_EX_CLIENTEDGE, IDC_TREE);
+    g_scan.list = make_child(WC_LISTVIEWW, L"",
+                            LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | WS_TABSTOP,
+                            WS_EX_CLIENTEDGE, IDC_LIST);
+    g_scan.treemap = treemap_view_create(g_scan.hwnd, IDC_TREEMAP, g_scan.font, g_scan.dpi);
+
+    SendMessageW(g_scan.path, EM_SETCUEBANNER, TRUE, (LPARAM)ui_text(UI_T_SCAN_PATH_CUE));
+    SendMessageW(g_scan.progress, PBM_SETRANGE32, 0, PROGRESS_RANGE);
+    ListView_SetExtendedListViewStyle(g_scan.list, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
+    for (i = 0; i < COL_COUNT; i++) {
+        LVCOLUMNW col;
+        memset(&col, 0, sizeof(col));
+        col.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_FMT;
+        col.pszText = (wchar_t *)ui_text(k_col_text[i]);
+        col.cx = k_cols[i].width > 0 ? column_width(i, k_cols[i].width) : 0;
+        col.fmt = k_cols[i].fmt;
+        SendMessageW(g_scan.list, LVM_INSERTCOLUMNW, (WPARAM)i, (LPARAM)&col);
+    }
+    /* 탭 순서가 화면 순서와 같도록 왼쪽 것부터 만든다. */
+    g_scan.export_csv = make_child(L"BUTTON", ui_text(UI_T_SCAN_EXPORT_CSV),
+                                  BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_EXPORT_CSV);
+    g_scan.export_html = make_child(L"BUTTON", ui_text(UI_T_SCAN_EXPORT_HTML),
+                                   BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_EXPORT_HTML);
+    g_scan.autosave = make_child(L"BUTTON", ui_text(UI_T_SCAN_AUTOSAVE),
+                                BS_AUTOCHECKBOX | WS_TABSTOP, 0, IDC_AUTOSAVE);
+    g_scan.clear_history = make_child(L"BUTTON", ui_text(UI_T_SCAN_CLEAR_HISTORY),
+                                     BS_PUSHBUTTON | WS_TABSTOP, 0, IDC_CLEAR_HISTORY);
+
+    measure_controls();
     {
         /* 저장된 설정을 읽는다(없거나 읽을 수 없으면 켬). */
         wchar_t dir[MAX_PATH * 2];
@@ -1891,6 +2148,8 @@ static LRESULT CALLBACK panel_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_DESTROY:
         stop_job();
         clear_results();
+        free(g_scan.export_file);
+        g_scan.export_file = NULL;
         return 0;
     case WM_NCDESTROY:
         if (g_scan.hwnd == hwnd) {
@@ -1984,6 +2243,94 @@ int scan_panel_export_enabled(HWND panel)
            (IsWindowEnabled(g_scan.export_csv) || IsWindowEnabled(g_scan.export_html));
 }
 
+/* 트리에 이미 넣은 항목(펼친 적 있는 것)의 문구를 지금 언어로 다시 쓴다. */
+static void retext_tree(HTREEITEM item)
+{
+    for (; item != NULL; item = TreeView_GetNextSibling(g_scan.tree, item)) {
+        size_t index = tree_item_index(item);
+        wchar_t *text = index < g_scan.model.len ? tree_item_text(index) : NULL;
+        if (text != NULL) {
+            TVITEMW tv;
+            memset(&tv, 0, sizeof(tv));
+            tv.mask = TVIF_TEXT;
+            tv.hItem = item;
+            tv.pszText = text;
+            SendMessageW(g_scan.tree, TVM_SETITEMW, 0, (LPARAM)&tv);
+            free(text);
+        }
+        retext_tree(TreeView_GetChild(g_scan.tree, item));
+    }
+}
+
+void scan_panel_apply_language(HWND panel, HFONT font)
+{
+    const struct {
+        HWND h;
+        UiText text;
+    } labels[] = {
+        {g_scan.browse, UI_T_SCAN_BROWSE},         {g_scan.scan, UI_T_SCAN_START},
+        {g_scan.cancel, UI_T_SCAN_CANCEL},         {g_scan.precise, UI_T_SCAN_PRECISE},
+        {g_scan.export_csv, UI_T_SCAN_EXPORT_CSV}, {g_scan.export_html, UI_T_SCAN_EXPORT_HTML},
+        {g_scan.autosave, UI_T_SCAN_AUTOSAVE},     {g_scan.clear_history, UI_T_SCAN_CLEAR_HISTORY},
+    };
+    HWND child;
+    int i, row;
+
+    if (!is_panel(panel)) {
+        return;
+    }
+    if (font != NULL) {
+        g_scan.font = font;
+        for (child = GetWindow(g_scan.hwnd, GW_CHILD); child != NULL;
+             child = GetWindow(child, GW_HWNDNEXT)) {
+            if (child != g_scan.treemap) {
+                SendMessageW(child, WM_SETFONT, (WPARAM)font, FALSE);
+            }
+        }
+        treemap_view_set_font(g_scan.treemap, font);
+    }
+
+    /* 단추·체크 상자·입력 칸 안내·보기 목록·열 머리글 */
+    for (i = 0; i < (int)(sizeof(labels) / sizeof(labels[0])); i++) {
+        SetWindowTextW(labels[i].h, ui_text(labels[i].text));
+    }
+    SendMessageW(g_scan.path, EM_SETCUEBANNER, TRUE, (LPARAM)ui_text(UI_T_SCAN_PATH_CUE));
+    fill_view_combo();
+    for (i = 0; i < COL_COUNT; i++) {
+        LVCOLUMNW col;
+        memset(&col, 0, sizeof(col));
+        col.mask = LVCF_TEXT;
+        col.pszText = (wchar_t *)ui_text(k_col_text[i]);
+        SendMessageW(g_scan.list, LVM_SETCOLUMNW, (WPARAM)i, (LPARAM)&col);
+        /* 보이는 열은 새 머리글이 잘리지 않게 넓힌다(사용자가 넓힌 폭은 줄이지 않음). */
+        if (k_cols[i].width > 0) {
+            int need = column_width(i, k_cols[i].width);
+            if (ListView_GetColumnWidth(g_scan.list, i) < need) {
+                ListView_SetColumnWidth(g_scan.list, i, need);
+            }
+        }
+    }
+    update_precise_columns();
+    measure_controls();
+
+    /* 결과: 트리·순위 목록(고른 줄 유지)·분석 줄·상태 줄 */
+    if (g_scan.has_model) {
+        retext_tree(TreeView_GetRoot(g_scan.tree));
+        row = ListView_GetNextItem(g_scan.list, -1, LVNI_SELECTED);
+        fill_rank();
+        if (row >= 0 && row < ListView_GetItemCount(g_scan.list)) {
+            ListView_SetItemState(g_scan.list, row, LVIS_SELECTED | LVIS_FOCUSED,
+                                  LVIS_SELECTED | LVIS_FOCUSED);
+            ListView_EnsureVisible(g_scan.list, row, FALSE);
+        }
+    }
+    update_analysis();
+    render_status();
+
+    layout();
+    InvalidateRect(g_scan.hwnd, NULL, TRUE);
+}
+
 int scan_panel_verify(HWND panel, ScanVerifyMode mode, const wchar_t *export_prefix,
                       int export_enabled_before)
 {
@@ -2001,6 +2348,87 @@ int scan_panel_verify(HWND panel, ScanVerifyMode mode, const wchar_t *export_pre
         return failures;
     }
     return verify_screen();
+}
+
+/* 한글(가-힣)이 들어 있는지. */
+static int has_hangul(const wchar_t *s)
+{
+    for (; *s != L'\0'; s++) {
+        if (*s >= 0xAC00 && *s <= 0xD7A3) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/*
+ * 상태 줄·분석 줄·트리(펼친 항목)·순위 목록의 변화 열이 기억해 둔 내용을 지금 언어로 쓴 것과 같은지
+ * (언어를 바꾸면 다시 써야 한다). 한국어가 아니면 경로가 들어가지 않는 문구에 한글이 없는지도 본다.
+ * 스캔 중에는 부르지 않는다. 실패 수.
+ */
+static int verify_result_lang(void)
+{
+    size_t cap = status_capacity();
+    wchar_t *want = malloc(cap * sizeof(*want)), *got = malloc(cap * sizeof(*got));
+    int failures = 0, other = ui_lang_current() != UI_LANG_KO;
+
+    SELF_CHECK(want != NULL && got != NULL && g_scan.job == NULL);
+    if (want == NULL || got == NULL || g_scan.job != NULL) {
+        free(want);
+        free(got);
+        return failures;
+    }
+    status_line(want, cap);
+    GetWindowTextW(g_scan.status, got, (int)cap);
+    SELF_CHECK(wcscmp(got, want) == 0);
+    /* 내보내기 결과에는 파일 경로가 들어간다(경로의 한글은 번역 대상이 아님). */
+    if (other && g_scan.status_kind != SCAN_STATUS_EXPORT) {
+        SELF_CHECK(!has_hangul(got));
+    }
+    analysis_text(want, cap);
+    GetWindowTextW(g_scan.analysis, got, (int)cap);
+    SELF_CHECK(wcscmp(got, want) == 0);
+    if (other) {
+        SELF_CHECK(!has_hangul(got));
+    }
+    if (g_scan.has_model && g_scan.model.len > 0) {
+        HTREEITEM root = TreeView_GetRoot(g_scan.tree);
+        wchar_t *expect = tree_item_text(0);
+        TVITEMW tv;
+        int row, rows = ListView_GetItemCount(g_scan.list);
+
+        memset(&tv, 0, sizeof(tv));
+        tv.mask = TVIF_TEXT;
+        tv.hItem = root;
+        tv.pszText = got;
+        tv.cchTextMax = (int)cap;
+        SELF_CHECK(root != NULL && expect != NULL && TreeView_GetItem(g_scan.tree, &tv) &&
+                   wcscmp(got, expect) == 0);
+        free(expect);
+        for (row = 0; row < rows; row++) {
+            LVITEMW lv;
+            memset(&lv, 0, sizeof(lv));
+            lv.mask = LVIF_PARAM;
+            lv.iItem = row;
+            SendMessageW(g_scan.list, LVM_GETITEMW, 0, (LPARAM)&lv);
+            ListView_GetItemText(g_scan.list, row, COL_CHANGE, got, (int)cap);
+            want[0] = L'\0';
+            if (current_view() != VIEW_CHANGE && (size_t)lv.lParam < g_scan.model.len &&
+                g_scan.change_of_node != NULL &&
+                g_scan.change_of_node[(size_t)lv.lParam] != SCAN_NODE_NONE) {
+                change_text(&g_scan.diff.items[g_scan.change_of_node[(size_t)lv.lParam]], want, cap);
+            } else if (current_view() == VIEW_CHANGE && (size_t)row < g_scan.diff.len) {
+                change_text(&g_scan.diff.items[row], want, cap);
+            }
+            SELF_CHECK(wcscmp(got, want) == 0);
+            if (other) {
+                SELF_CHECK(!has_hangul(got));
+            }
+        }
+    }
+    free(want);
+    free(got);
+    return failures;
 }
 
 int scan_panel_verify_lang(HWND panel)
@@ -2051,7 +2479,10 @@ int scan_panel_verify_lang(HWND panel)
                        theme_text_width(g_scan.list, g_scan.font, buf));
         }
     }
-    SELF_CHECK(text_is(g_scan.status, ui_text(UI_T_SCAN_READY)));
+    if (!g_scan.has_model) {
+        SELF_CHECK(text_is(g_scan.status, ui_text(UI_T_SCAN_READY)));
+    }
+    failures += verify_result_lang();
 
     /* 단추·체크 상자 문구가 잘리지 않고 패널 안에 있다(호출 전에 최소 창 크기로 배치되어 있어야 함). */
     GetClientRect(panel, &area);

@@ -212,11 +212,12 @@ bytesieve_configure(bytesieve_settings)
 # gui_nav: 왼쪽 사이드바(목적별 메뉴, 직접 그림). gui_scan: 폴더 스캔 페이지 패널.
 # gui_theme: Windows 11 창 외곽(DWM), 밝게·어둡게 색 토큰과 다크 모드 적용(uxtheme), 언어별 UI 글꼴,
 # 글자 폭에 맞춘 컨트롤 크기. gui_settings: 설정 페이지(테마·표시 언어·스캔 기록).
+# gui_status_text: core 상태 번호(휴지통 이동 결과·복구 가능성 등)를 지금 언어의 화면 문구로 연결.
 # 시스템 정리·개발 캐시 페이지(gui_cleaner 패널 둘, 분석 범위만 다름)·프로젝트 정리(gui_cleanup)·부스터(gui_booster).
 add_executable(bytesieve-gui WIN32 src/gui_main.c src/gui_nav.c src/gui_scan.c src/gui_theme.c
                src/gui_drives.c src/gui_cleanup.c src/gui_quarantine.c src/gui_monitor.c
                src/gui_treemap.c src/gui_cleaner.c src/gui_booster.c src/gui_settings.c
-               src/gui_progress.c)
+               src/gui_progress.c src/gui_status_text.c)
 target_link_libraries(bytesieve-gui PRIVATE bytesieve_job bytesieve_history bytesieve_export
                       bytesieve_treemap bytesieve_ui_lang bytesieve_nav bytesieve_settings
                       bytesieve_cleaner bytesieve_booster
@@ -605,8 +606,8 @@ add_test(NAME gui_theme
                  $<TARGET_FILE:bytesieve-gui> --self-test-theme)
 set_tests_properties(gui_theme PROPERTIES PASS_REGULAR_EXPRESSION
                      "theme: light dark system-dark system-light light-fixed")
-# 설정 페이지: 표시 언어 저장(다음 실행 언어, 지금 화면은 그대로)과 자동 저장 끄고 켜기(폴더 스캔 페이지·
-# 설정 파일과 일치)를 테스트 레지스트리 키·테스트 기록 폴더에서 확인한다.
+# 설정 페이지: 표시 언어 저장(다음 실행 언어)과 즉시 적용(지금 화면 언어·번역 문구), 자동 저장 끄고 켜기
+# (폴더 스캔 페이지·설정 파일과 일치)를 테스트 레지스트리 키·테스트 기록 폴더에서 확인한다.
 add_test(NAME gui_settings
          COMMAND ${CMAKE_COMMAND} -E env --unset=BYTESIEVE_LANG
                  "BYTESIEVE_SETTINGS_KEY=Software\\ByteSieveTest\\gui_settings"
@@ -620,6 +621,13 @@ foreach(lang ko en ja zh-Hans)
     add_test(NAME gui_lang_${lang} COMMAND bytesieve-gui --self-test-lang ${lang})
     set_tests_properties(gui_lang_${lang} PROPERTIES PASS_REGULAR_EXPRESSION "lang: ${lang}, font: ")
 endforeach()
+# 실행 중 언어 바꾸기: 소스 트리를 한국어로 스캔한 뒤 en → ja → zh-Hans → ko 로 바꾸며, 사이드바·제목·
+# 폴더 스캔(상태 줄의 스캔 결과·분석 줄·트리·변화 열·단추·열 머리글)·설정 페이지가 새 언어로 다시 쓰이고
+# 잘리지 않는지(한국어가 아니면 경로 밖에 한글이 없는지) 확인한다.
+add_test(NAME gui_lang_switch COMMAND bytesieve-gui --self-test-lang-switch ${CMAKE_CURRENT_SOURCE_DIR})
+set_tests_properties(gui_lang_switch PROPERTIES
+                     PASS_REGULAR_EXPRESSION "lang-switch: en ja zh-Hans ko" TIMEOUT 120
+                     ENVIRONMENT "BYTESIEVE_HISTORY_DIR=${CMAKE_CURRENT_BINARY_DIR}/gui_lang_switch_history")
 set_tests_properties(gui_scan gui_cancel gui_missing_dir gui_drives gui_cleanup
                      gui_cleanup_cancel gui_trash gui_quarantine gui_monitor gui_history
                      gui_export gui_precise PROPERTIES TIMEOUT 120)
