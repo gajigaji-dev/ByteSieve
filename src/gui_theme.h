@@ -36,6 +36,9 @@ HFONT theme_create_ui_font(UiLang lang);
 /* font 로 그린 text 의 폭(픽셀). ref 는 DC 를 얻을 창(숨긴 창도 됨). 실패하면 0. */
 int theme_text_width(HWND ref, HFONT font, const wchar_t *text);
 
+/* font 로 그린 text 를 width 픽셀 폭에서 낱말 단위로 줄을 바꿨을 때의 높이(픽셀). 실패하면 0. */
+int theme_text_wrap_height(HWND ref, HFONT font, const wchar_t *text, int width);
+
 /* 누름 단추: 글자 폭 + 좌우 여백. min_px 보다 작으면 min_px. */
 int theme_button_width(HWND ref, HFONT font, const wchar_t *text, int dpi, int min_px);
 

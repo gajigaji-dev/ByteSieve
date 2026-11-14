@@ -1399,3 +1399,12 @@ int quarantine_panel_verify_lang(HWND panel)
     }
     return failures;
 }
+
+void quarantine_panel_set_dpi(HWND panel, int dpi)
+{
+    QuarantinePanel *p = panel_of(panel);
+
+    if (p != NULL && dpi > 0) {
+        p->dpi = dpi;
+    }
+}

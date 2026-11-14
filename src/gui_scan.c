@@ -2504,3 +2504,12 @@ int scan_panel_verify_lang(HWND panel)
     SELF_CHECK(r.right <= area.right);
     return failures;
 }
+
+void scan_panel_set_dpi(HWND panel, int dpi)
+{
+    if (panel == NULL || panel != g_scan.hwnd || dpi <= 0) {
+        return;
+    }
+    g_scan.dpi = dpi;
+    treemap_view_set_dpi(g_scan.treemap, dpi); /* 트리맵 여백·글자 자리도 새 DPI 로 */
+}

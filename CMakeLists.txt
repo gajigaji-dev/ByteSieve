@@ -629,6 +629,26 @@ endforeach()
 # 실행 중 언어 바꾸기: 소스 트리를 한국어로 스캔한 뒤 en → ja → zh-Hans → ko 로 바꾸며, 사이드바·제목·
 # 폴더 스캔(상태 줄의 스캔 결과·분석 줄·트리·변화 열·단추·열 머리글)·설정 페이지가 새 언어로 다시 쓰이고
 # 잘리지 않는지(한국어가 아니면 경로 밖에 한글이 없는지) 확인한다.
+# 창 크기·DPI 배율: 네 언어 × 여러 창 크기(최소·기본·넓고 낮음·좁고 높음)에서 모든 페이지의 문구 잘림·
+# 컨트롤 겹침·패널 밖 넘침·목록이 접히지 않는지와 입력 칸 값 유지를 DPI 100·125·150·200%로 확인한다.
+foreach(dpi 96 120 144 192)
+    add_test(NAME gui_layout_${dpi} COMMAND bytesieve-gui --self-test-layout)
+    set_tests_properties(gui_layout_${dpi} PROPERTIES ENVIRONMENT "BYTESIEVE_TEST_DPI=${dpi}"
+                         PASS_REGULAR_EXPRESSION "layout: dpi ${dpi}, " TIMEOUT 120)
+endforeach()
+# 작은 작업 영역: 1920×1080 화면의 200%(작업 표시줄 제외 1920×984), 1366×768 화면의 150%. 최소 창 크기가 작업 영역
+# 안이고, 모자란 자리는 페이지·사이드바 스크롤로 끝까지 갈 수 있는지 확인한다.
+add_test(NAME gui_layout_192_1080p COMMAND bytesieve-gui --self-test-layout)
+set_tests_properties(gui_layout_192_1080p PROPERTIES
+                     ENVIRONMENT "BYTESIEVE_TEST_DPI=192;BYTESIEVE_TEST_WORKAREA=1920x984"
+                     PASS_REGULAR_EXPRESSION "layout: dpi 192, min window 1894x984, " TIMEOUT 120)
+add_test(NAME gui_layout_144_768p COMMAND bytesieve-gui --self-test-layout)
+set_tests_properties(gui_layout_144_768p PROPERTIES
+                     ENVIRONMENT "BYTESIEVE_TEST_DPI=144;BYTESIEVE_TEST_WORKAREA=1366x728"
+                     PASS_REGULAR_EXPRESSION "layout: dpi 144, min window 1366x728, " TIMEOUT 120)
+# 실행 중 DPI 변경(모니터 이동·배율 변경과 같은 WM_DPICHANGED): 모니터별 DPI 인식 V2, 글꼴·열 폭·배치·입력값·고른 페이지.
+add_test(NAME gui_dpi_change COMMAND bytesieve-gui --self-test-dpi-change)
+set_tests_properties(gui_dpi_change PROPERTIES PASS_REGULAR_EXPRESSION "dpi-change: ok" TIMEOUT 120)
 add_test(NAME gui_lang_switch COMMAND bytesieve-gui --self-test-lang-switch ${CMAKE_CURRENT_SOURCE_DIR})
 set_tests_properties(gui_lang_switch PROPERTIES
                      PASS_REGULAR_EXPRESSION "lang-switch: en ja zh-Hans ko" TIMEOUT 120

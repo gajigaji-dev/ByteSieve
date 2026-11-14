@@ -2114,3 +2114,12 @@ size_t cleanup_panel_restore_quarantined(HWND panel)
     fflush(stdout);
     return restored;
 }
+
+void cleanup_panel_set_dpi(HWND panel, int dpi)
+{
+    CleanupPanel *p = panel_of(panel);
+
+    if (p != NULL && dpi > 0) {
+        p->dpi = dpi;
+    }
+}

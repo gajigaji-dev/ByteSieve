@@ -770,3 +770,12 @@ int drive_panel_verify_lang(HWND panel)
     }
     return failures;
 }
+
+void drive_panel_set_dpi(HWND panel, int dpi)
+{
+    DrivePanel *p = panel_of(panel);
+
+    if (p != NULL && dpi > 0) {
+        p->dpi = dpi;
+    }
+}

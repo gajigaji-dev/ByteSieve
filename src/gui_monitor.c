@@ -817,3 +817,12 @@ int monitor_panel_verify_lang(HWND panel)
                            !has_hangul(ui_text(UI_T_M_LEGEND_MEMORY))));
     return failures;
 }
+
+void monitor_panel_set_dpi(HWND panel, int dpi)
+{
+    MonitorPanel *p = panel_of(panel);
+
+    if (p != NULL && dpi > 0) {
+        p->dpi = dpi;
+    }
+}

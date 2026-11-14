@@ -28,6 +28,7 @@ typedef struct {
     NavPage selected;
     NavPage hover; /* NAV_PAGE_COUNT 이면 없음 */
     int tracking;  /* WM_MOUSELEAVE 를 기다리는 중 */
+    int scroll;    /* 세로 스크롤 위치(픽셀). 창이 항목보다 낮을 때만 0 보다 크다 */
 } NavView;
 
 typedef struct {
@@ -50,14 +51,72 @@ static NavMetrics metrics(const NavView *v)
     NavMetrics m;
     RECT client;
 
+    m.top = nscale(v, NAV_TOP) - v->scroll;
+    m.header_h = nscale(v, NAV_HEADER_H);
+    m.item_h = nscale(v, NAV_ITEM_H);
+    m.group_gap = nscale(v, NAV_GROUP_GAP);
+    /* [설정](footer)은 사이드바 아래 끝에 붙인다(자리가 모자라면 다른 항목 뒤에 이어지고 스크롤한다). */
+    GetClientRect(v->hwnd, &client);
+    m.bottom = client.bottom - nscale(v, NAV_TOP) - v->scroll;
+    return m;
+}
+
+/* 모든 항목을 그리는 데 필요한 높이. */
+static int content_height(const NavView *v)
+{
+    NavMetrics m;
+
     m.top = nscale(v, NAV_TOP);
     m.header_h = nscale(v, NAV_HEADER_H);
     m.item_h = nscale(v, NAV_ITEM_H);
     m.group_gap = nscale(v, NAV_GROUP_GAP);
-    /* [설정](footer)은 사이드바 아래 끝에 붙인다. */
+    m.bottom = 0;
+    return nav_total_height(&m) + nscale(v, NAV_TOP);
+}
+
+/* 창 높이가 항목보다 낮으면 세로 스크롤 막대를 보이고 위치를 범위 안으로 맞춘다(높으면 막대를 숨긴다). */
+static void update_scroll(NavView *v)
+{
+    SCROLLINFO si;
+    RECT client;
+    int content = content_height(v), max_pos;
+
     GetClientRect(v->hwnd, &client);
-    m.bottom = client.bottom - nscale(v, NAV_TOP);
-    return m;
+    max_pos = content - client.bottom;
+    if (max_pos < 0) {
+        max_pos = 0;
+    }
+    if (v->scroll > max_pos) {
+        v->scroll = max_pos;
+    }
+    memset(&si, 0, sizeof(si));
+    si.cbSize = sizeof(si);
+    si.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+    si.nMin = 0;
+    si.nMax = max_pos > 0 ? content - 1 : 0;
+    si.nPage = max_pos > 0 ? (UINT)client.bottom : 0;
+    si.nPos = v->scroll;
+    SetScrollInfo(v->hwnd, SB_VERT, &si, TRUE);
+}
+
+static void scroll_to(NavView *v, int pos)
+{
+    RECT client;
+    int max_pos;
+
+    GetClientRect(v->hwnd, &client);
+    max_pos = content_height(v) - client.bottom;
+    if (pos > max_pos) {
+        pos = max_pos;
+    }
+    if (pos < 0) {
+        pos = 0;
+    }
+    if (pos != v->scroll) {
+        v->scroll = pos;
+        SetScrollPos(v->hwnd, SB_VERT, pos, TRUE);
+        InvalidateRect(v->hwnd, NULL, FALSE);
+    }
 }
 
 /* 행 사각형(항목은 좌우 여백 안쪽). */
@@ -159,6 +218,18 @@ static int select_page(NavView *v, NavPage page, int notify)
     invalidate_page(v, v->selected);
     v->selected = page;
     invalidate_page(v, v->selected);
+    {
+        /* 스크롤해 있으면 고른 항목이 보이게 옮긴다(키보드로 고를 때). */
+        RECT r, client;
+        if (row_rect(v, nav_row_of_page(page), &r)) {
+            GetClientRect(v->hwnd, &client);
+            if (r.top < 0) {
+                scroll_to(v, v->scroll + r.top - nscale(v, 4));
+            } else if (r.bottom > client.bottom) {
+                scroll_to(v, v->scroll + r.bottom - client.bottom + nscale(v, 4));
+            }
+        }
+    }
     if (notify) {
         SendMessageW(GetParent(v->hwnd), WM_COMMAND,
                      MAKEWPARAM(GetDlgCtrlID(v->hwnd), NVN_SELCHANGE), (LPARAM)v->hwnd);
@@ -227,7 +298,54 @@ static LRESULT CALLBACK nav_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     }
     case WM_SIZE:
+        if (v != NULL) {
+            update_scroll(v);
+        }
         InvalidateRect(hwnd, NULL, FALSE);
+        return 0;
+    case WM_VSCROLL:
+        if (v != NULL) {
+            SCROLLINFO si;
+            RECT client;
+            int pos = v->scroll, line = nscale(v, NAV_ITEM_H);
+            GetClientRect(hwnd, &client);
+            memset(&si, 0, sizeof(si));
+            si.cbSize = sizeof(si);
+            si.fMask = SIF_TRACKPOS;
+            GetScrollInfo(hwnd, SB_VERT, &si);
+            switch (LOWORD(wp)) {
+            case SB_LINEUP:
+                pos -= line;
+                break;
+            case SB_LINEDOWN:
+                pos += line;
+                break;
+            case SB_PAGEUP:
+                pos -= client.bottom;
+                break;
+            case SB_PAGEDOWN:
+                pos += client.bottom;
+                break;
+            case SB_THUMBTRACK:
+            case SB_THUMBPOSITION:
+                pos = si.nTrackPos;
+                break;
+            case SB_TOP:
+                pos = 0;
+                break;
+            case SB_BOTTOM:
+                pos = content_height(v);
+                break;
+            default:
+                break;
+            }
+            scroll_to(v, pos);
+        }
+        return 0;
+    case WM_MOUSEWHEEL:
+        if (v != NULL) {
+            scroll_to(v, v->scroll - MulDiv(GET_WHEEL_DELTA_WPARAM(wp), nscale(v, NAV_ITEM_H), WHEEL_DELTA));
+        }
         return 0;
     case WM_SETFOCUS:
     case WM_KILLFOCUS:
@@ -343,19 +461,15 @@ void nav_view_set_font(HWND nav, HFONT font)
         return;
     }
     v->font = font;
+    update_scroll(v);
     InvalidateRect(nav, NULL, FALSE);
 }
 
 int nav_view_min_height(HWND nav)
 {
     NavView *v = nav_of(nav);
-    NavMetrics m;
 
-    if (v == NULL) {
-        return 0;
-    }
-    m = metrics(v);
-    return nav_total_height(&m) + nscale(v, NAV_TOP);
+    return v != NULL ? content_height(v) : 0;
 }
 
 int nav_view_width(HWND nav)
@@ -379,7 +493,14 @@ int nav_view_width(HWND nav)
         }
     }
     w += nscale(v, NAV_PAD_X + NAV_TEXT_X + 16);
-    return w > nscale(v, NAV_MIN_W) ? w : nscale(v, NAV_MIN_W);
+    if (w < nscale(v, NAV_MIN_W)) {
+        w = nscale(v, NAV_MIN_W);
+    }
+    /* 세로 스크롤 막대가 보이면 그 폭만큼 넓혀 항목 문구 자리를 그대로 둔다. */
+    if (GetWindowLongPtrW(nav, GWL_STYLE) & WS_VSCROLL) {
+        w += GetSystemMetricsForDpi(SM_CXVSCROLL, (UINT)v->dpi);
+    }
+    return w;
 }
 
 NavPage nav_view_selected(HWND nav)
@@ -402,4 +523,15 @@ int nav_view_item_rect(HWND nav, NavPage page, RECT *out)
     size_t row = nav_row_of_page(page);
 
     return v != NULL && out != NULL && row < nav_row_count() && row_rect(v, row, out);
+}
+
+void nav_view_set_dpi(HWND nav, int dpi)
+{
+    NavView *v = nav_of(nav);
+
+    if (v != NULL && dpi > 0) {
+        v->dpi = dpi;
+        update_scroll(v);
+        InvalidateRect(nav, NULL, FALSE);
+    }
 }

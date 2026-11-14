@@ -156,7 +156,7 @@ GUI는 왼쪽 사이드바에서 목적별로 묶은 여덟 페이지와 아래 
 ctest --test-dir build -C Debug --output-on-failure
 ```
 
-단위 테스트 30개, CLI·도구 검사 32개, GUI 자체 검사 24개(총 86개)가 등록되어 있습니다.
+단위 테스트 30개, CLI·도구 검사 32개, GUI 자체 검사 31개(총 93개)가 등록되어 있습니다.
 GitHub Actions(`.github/workflows/ci.yml`)가 `main`·`dev`에 올리거나 PR을 열 때 Release 구성으로 빌드·테스트합니다.
 
 ## 문서
@@ -239,7 +239,7 @@ ByteSieve/
 
 **UI·버그 수정**
 - Windows 11 Fluent 디자인 나머지 단계([docs/ui-design.md](docs/ui-design.md)): 사이드바 아이콘·좁은 창에서 접기,
-  트리맵·그래프·드라이브 막대를 Direct2D로 다시 그리기, 모니터마다 다른 배율(Per-Monitor DPI) 지원
+  트리맵·그래프·드라이브 막대를 Direct2D로 다시 그리기
 - 다크 모드 남은 부분: 확인 창(MessageBox)·오른쪽 클릭 메뉴·진행 막대는 아직 밝게 그려짐(Windows가 그리는 부분), 어둡게일 때 체크 상자는 비주얼 스타일 없이 그려짐
 - 번역 범위 확대: HTML 보고서를 영어·일본어·중국어 간체로(GUI 화면은 모든 페이지 번역 완료, CLI 출력은 한국어)
 

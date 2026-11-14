@@ -137,6 +137,27 @@ int theme_text_width(HWND ref, HFONT font, const wchar_t *text)
     return (int)size.cx;
 }
 
+int theme_text_wrap_height(HWND ref, HFONT font, const wchar_t *text, int width)
+{
+    HDC dc;
+    HGDIOBJ old;
+    RECT r = {0, 0, 0, 0};
+
+    if (text == NULL || text[0] == L'\0' || width <= 0) {
+        return 0;
+    }
+    dc = GetDC(ref);
+    if (dc == NULL) {
+        return 0;
+    }
+    r.right = width;
+    old = SelectObject(dc, font != NULL ? (HGDIOBJ)font : GetStockObject(DEFAULT_GUI_FONT));
+    DrawTextW(dc, text, -1, &r, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+    SelectObject(dc, old);
+    ReleaseDC(ref, dc);
+    return (int)(r.bottom - r.top);
+}
+
 int theme_button_width(HWND ref, HFONT font, const wchar_t *text, int dpi, int min_px)
 {
     int w = theme_text_width(ref, font, text) + MulDiv(THEME_BUTTON_PAD, dpi, 96);

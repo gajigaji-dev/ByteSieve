@@ -1231,3 +1231,12 @@ int booster_panel_verify_lang(HWND panel)
     }
     return failures;
 }
+
+void booster_panel_set_dpi(HWND panel, int dpi)
+{
+    BoosterPanel *p = panel_of(panel);
+
+    if (p != NULL && dpi > 0) {
+        p->dpi = dpi;
+    }
+}
