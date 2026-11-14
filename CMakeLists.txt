@@ -648,11 +648,12 @@ foreach(dpi 96 120 144 192)
                          PASS_REGULAR_EXPRESSION "layout: dpi ${dpi}, " TIMEOUT 120)
 endforeach()
 # 작은 작업 영역: 1920×1080 화면의 200%(작업 표시줄 제외 1920×984), 1366×768 화면의 150%. 최소 창 크기가 작업 영역
+# (1080p 는 폭이 글꼴·스크롤 막대에 따라 달라 높이만 비교)
 # 안이고, 모자란 자리는 페이지·사이드바 스크롤로 끝까지 갈 수 있는지 확인한다.
 add_test(NAME gui_layout_192_1080p COMMAND bytesieve-gui --self-test-layout)
 set_tests_properties(gui_layout_192_1080p PROPERTIES
                      ENVIRONMENT "BYTESIEVE_TEST_DPI=192;BYTESIEVE_TEST_WORKAREA=1920x984"
-                     PASS_REGULAR_EXPRESSION "layout: dpi 192, min window 1894x984, " TIMEOUT 120)
+                     PASS_REGULAR_EXPRESSION "layout: dpi 192, min window [0-9]+x984, " TIMEOUT 120)
 # GitHub 러너처럼 작은 화면(작업 영역 1024×720)에서 200%: 페이지마다 가로·세로 스크롤로 모든 컨트롤에 닿는지.
 add_test(NAME gui_layout_192_small COMMAND bytesieve-gui --self-test-layout)
 set_tests_properties(gui_layout_192_small PROPERTIES
