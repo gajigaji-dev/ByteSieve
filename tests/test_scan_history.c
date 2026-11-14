@@ -325,6 +325,67 @@ static void test_uncertain_and_depth(void)
     history_snapshot_free(&b);
 }
 
+/*
+ * 대소문자만 다른 경로는 같은 폴더다. 비교는 모든 키를 한 버퍼에서 한꺼번에 대문자로 바꾸므로, 항목마다
+ * 바꾼 것과 같은지(빈 경로·한글·라틴 확장·서로게이트 쌍 포함) 많은 항목에서 확인한다.
+ */
+static void test_case_insensitive_keys(void)
+{
+    static const wchar_t *const extra[] = {L"Ärger\\straße", L"Ǆemo",
+                                           L"\U0001F600smile", L"한글 폴더\\sub"};
+    HistorySnapshot a, b;
+    HistoryDiff d;
+    const HistoryChange *c;
+    size_t i, k;
+
+    history_snapshot_init(&a);
+    history_snapshot_init(&b);
+    history_diff_init(&d);
+    CHECK(snapshot_now(&a) == 0);
+    CHECK(snapshot_now(&b) == 0);
+    /* 같은 이름 몇 개를 두 스냅숏에 모두 덧붙이고(깊이 1·2), 한쪽은 모두 소문자, 다른 쪽은 모두 대문자로 */
+    for (k = 0; k < sizeof(extra) / sizeof(extra[0]); k++) {
+        HistorySnapshot *s[2] = {&a, &b};
+        int j;
+        for (j = 0; j < 2; j++) {
+            HistoryEntry *grown = realloc(s[j]->entries, (s[j]->len + 1) * sizeof(*grown));
+            CHECK(grown != NULL);
+            if (grown == NULL) {
+                return;
+            }
+            s[j]->entries = grown;
+            memset(&grown[s[j]->len], 0, sizeof(*grown));
+            grown[s[j]->len].rel = _wcsdup(extra[k]);
+            grown[s[j]->len].depth = wcschr(extra[k], L'\\') != NULL ? 2 : 1;
+            grown[s[j]->len].bytes = 1000 + k;
+            grown[s[j]->len].node = SCAN_NODE_NONE;
+            s[j]->len++;
+        }
+    }
+    for (i = 0; i < a.len; i++) {
+        CharLowerBuffW(a.entries[i].rel, (DWORD)wcslen(a.entries[i].rel));
+    }
+    for (i = 0; i < b.len; i++) {
+        CharUpperBuffW(b.entries[i].rel, (DWORD)wcslen(b.entries[i].rel));
+    }
+    CHECK(history_diff(&a, &b, &d) == 0);
+    CHECK_U64(d.len, 0);
+
+    /* 대소문자가 다른 상태에서도 바뀐 폴더 하나는 정확히 그 폴더(와 위 폴더)로 찾는다 */
+    for (i = 0; i < b.len; i++) {
+        if (_wcsicmp(b.entries[i].rel, L"\U0001F600smile") == 0) {
+            b.entries[i].bytes += 7;
+        }
+    }
+    CHECK(history_diff(&a, &b, &d) == 0);
+    c = find_change(&d, L"\U0001F600SMILE");
+    CHECK(d.len == 1 && c != NULL && c->kind == HISTORY_GROWN && c->delta == 7);
+
+    history_diff_free(&d);
+    history_snapshot_free(&a);
+    history_snapshot_free(&b);
+}
+
 static void test_files_and_errors(void)
 {
     HistorySnapshot s;
@@ -728,6 +789,7 @@ int main(void)
     test_snapshot_and_roundtrip();
     test_diff();
     test_uncertain_and_depth();
+    test_case_insensitive_keys();
     test_files_and_errors();
     test_autosave_setting();
     test_clear();

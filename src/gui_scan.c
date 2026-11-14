@@ -5,6 +5,7 @@
 #include <shellapi.h>
 #include <shlobj.h>
 
+#include <process.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,6 +27,7 @@
 
 #define WM_APP_SCAN_PROGRESS (WM_APP + 1)
 #define WM_APP_SCAN_DONE (WM_APP + 2)
+#define WM_APP_HISTORY_DONE (WM_APP + 3) /* 직전 기록과 비교·저장(작업 스레드)이 끝남 */
 
 /* 진행률 알림 간격과 용량 순위 개수. */
 #define PROGRESS_INTERVAL_MS 100
@@ -83,6 +85,8 @@ typedef struct {
     int w_browse, w_scan, w_cancel, w_precise, w_view, w_export, w_autosave, w_clear;
 
     ScanJob *job;
+    struct HistoryJob *hist; /* 스캔이 끝난 뒤 직전 기록과 비교·저장하는 작업(끝날 때까지 바쁜 상태) */
+    unsigned history_delay_ms; /* 자체 검사: 비교·저장 작업을 이만큼 늦춘다(작업 중 상태를 확실히 보려고) */
     ScanModel model;
     int has_model;
     int progress_pos;
@@ -658,17 +662,15 @@ static void update_analysis(void)
  * 기록 위치: BYTESIEVE_HISTORY_DIR 또는 %LOCALAPPDATA%\ByteSieve\history.
  * 비교했으면 순위 목록의 변화 열을 위해 노드 → 변화 항목 번호 표를 만든다.
  */
-static void track_history(void)
+static void apply_history(HistoryTrackResult *r)
 {
-    HistoryTrackResult r;
     size_t i;
 
     g_scan.history_cleared = 0;
-    history_track(&g_scan.model, NULL, NULL, g_scan.autosave_on, &g_scan.diff, &r);
-    g_scan.history = r.status;
-    g_scan.history_error = r.error;
-    g_scan.has_diff = r.has_diff;
-    history_track_result_free(&r);
+    g_scan.history = r->status;
+    g_scan.history_error = r->error;
+    g_scan.has_diff = r->has_diff;
+    history_track_result_free(r);
     if (g_scan.has_diff) {
         g_scan.change_of_node = malloc(g_scan.model.len * sizeof(*g_scan.change_of_node));
         if (g_scan.change_of_node != NULL) {
@@ -682,6 +684,98 @@ static void track_history(void)
             }
         }
     }
+}
+
+/* 비교·저장을 UI 스레드에서 바로 한다(작업 스레드를 만들지 못했을 때). */
+static void track_history(void)
+{
+    HistoryTrackResult r;
+
+    history_track(&g_scan.model, NULL, NULL, g_scan.autosave_on, &g_scan.diff, &r);
+    apply_history(&r);
+}
+
+/*
+ * 직전 기록과 비교·저장하는 작업. 폴더 17만 개에서 140~170 ms(직전 기록 읽기가 느리면 수백 ms) 걸려
+ * UI 스레드 밖에서 한다. 작업 스레드는 모델을 읽기만 하고(그동안 UI 는 모델을 바꾸지 않는다: 바쁜 상태라
+ * 새 스캔·기록 삭제를 막음), 결과(diff·result)는 끝난 뒤 UI 스레드가 가져간다(finish_history).
+ * 저장 여부(save)는 시작할 때 값으로 정한다.
+ */
+typedef struct HistoryJob {
+    HWND hwnd;              /* 끝나면 WM_APP_HISTORY_DONE 을 받을 패널 */
+    const ScanModel *model; /* g_scan.model(작업이 끝날 때까지 바뀌지 않음) */
+    int save;
+    unsigned delay_ms; /* 자체 검사용 지연(평소 0) */
+    HistoryDiff diff;
+    HistoryTrackResult result;
+    HANDLE thread;
+} HistoryJob;
+
+static unsigned __stdcall history_thread(void *arg)
+{
+    HistoryJob *job = arg;
+
+    if (job->delay_ms > 0) {
+        Sleep(job->delay_ms);
+    }
+    history_track(job->model, NULL, NULL, job->save, &job->diff, &job->result);
+    PostMessageW(job->hwnd, WM_APP_HISTORY_DONE, 0, 0);
+    return 0;
+}
+
+/* 비교·저장 작업을 시작한다. 시작하지 못하면 0(부르는 쪽이 UI 스레드에서 한다). */
+static int start_history(void)
+{
+    HistoryJob *job = calloc(1, sizeof(*job));
+
+    if (job == NULL) {
+        return 0;
+    }
+    job->hwnd = g_scan.hwnd;
+    job->model = &g_scan.model;
+    job->save = g_scan.autosave_on;
+    job->delay_ms = g_scan.history_delay_ms;
+    history_diff_init(&job->diff);
+    g_scan.hist = job; /* 스레드보다 먼저: 끝 알림을 받을 때 작업이 있어야 한다 */
+    job->thread = (HANDLE)_beginthreadex(NULL, 0, history_thread, job, 0, NULL);
+    if (job->thread == NULL) {
+        g_scan.hist = NULL;
+        free(job);
+        return 0;
+    }
+    return 1;
+}
+
+/* 작업 스레드가 끝날 때까지 기다리고 작업을 떼어 낸다(없으면 NULL). 결과는 부르는 쪽이 가져가거나 버린다. */
+static HistoryJob *join_history(void)
+{
+    HistoryJob *job = g_scan.hist;
+
+    if (job == NULL) {
+        return NULL;
+    }
+    WaitForSingleObject(job->thread, INFINITE);
+    CloseHandle(job->thread);
+    g_scan.hist = NULL;
+    return job;
+}
+
+/* 창을 닫을 때: 저장이 끝나기를 기다리고(파일을 반쯤 쓴 채 끝내지 않음) 결과는 버린다. */
+static void stop_history(void)
+{
+    HistoryJob *job = join_history();
+
+    if (job != NULL) {
+        history_diff_free(&job->diff);
+        history_track_result_free(&job->result);
+        free(job);
+    }
+}
+
+/* 바쁜 상태: 스캔 중이거나, 스캔이 끝나고 직전 기록과 비교·저장하는 중. */
+static int scan_busy(void)
+{
+    return g_scan.job != NULL || g_scan.hist != NULL;
 }
 
 static void clear_results(void)
@@ -805,7 +899,7 @@ static void update_clear_button(void)
     wchar_t dir[MAX_PATH * 2];
     size_t count = 0;
 
-    if (g_scan.job == NULL && history_default_dir(dir, sizeof(dir) / sizeof(dir[0])) == 0) {
+    if (!scan_busy() && history_default_dir(dir, sizeof(dir) / sizeof(dir[0])) == 0) {
         count = history_count(dir);
     }
     EnableWindow(g_scan.clear_history, count > 0);
@@ -814,7 +908,7 @@ static void update_clear_button(void)
 /* 내보낼 스캔 결과가 있는지(스캔 중이 아니고, 결과가 있고, 대상 폴더를 열지 못한 것이 아님). */
 static int can_export(void)
 {
-    return g_scan.job == NULL && g_scan.has_model && g_scan.model.len > 0 &&
+    return !scan_busy() && g_scan.has_model && g_scan.model.len > 0 &&
            g_scan.model.status != SCAN_FATAL;
 }
 
@@ -1040,7 +1134,7 @@ static int clear_history(int confirm)
     size_t count;
     int rc;
 
-    if (g_scan.job != NULL) {
+    if (scan_busy()) {
         return 0;
     }
     if (history_default_dir(dir, sizeof(dir) / sizeof(dir[0])) != 0) {
@@ -1207,7 +1301,7 @@ static void start_scan(void)
     wchar_t *target;
     int len, precise;
 
-    if (g_scan.job != NULL) {
+    if (scan_busy()) {
         return;
     }
     len = GetWindowTextLengthW(g_scan.path);
@@ -1269,20 +1363,60 @@ static void update_progress(void)
     show_status(SCAN_STATUS_PROGRESS);
 }
 
-static void finish_scan(void)
+/*
+ * 비교·저장이 끝난 뒤의 처리(UI 스레드). 순서는 예전과 같다: 진행 막대·상태 줄 → 단추 → (비교 결과는 이미
+ * 반영) → 기록 삭제 단추 → 분석 줄 → 트리맵·트리·순위 목록.
+ */
+static void complete_scan(void)
+{
+    ScanStatus status = g_scan.finished;
+
+    if (status == SCAN_FATAL) {
+        progress_set(g_scan.progress, PROGRESS_FAILED, 0, PROGRESS_RANGE);
+    } else {
+        progress_set(g_scan.progress, g_scan.model.report.cancelled ? PROGRESS_CANCELLED : PROGRESS_DONE,
+                     0, PROGRESS_RANGE);
+    }
+    show_status(SCAN_STATUS_FINISHED);
+    set_scanning(0);
+    update_clear_button();
+    update_analysis();
+    show_results();
+}
+
+/* 비교·저장 작업이 끝났다(WM_APP_HISTORY_DONE): 결과를 가져와 반영하고 남은 처리를 한다. */
+static int finish_history(void)
+{
+    HistoryJob *job = join_history();
+
+    if (job == NULL) {
+        return 0; /* 창을 닫는 중이었거나 이미 처리함 */
+    }
+    history_diff_free(&g_scan.diff);
+    g_scan.diff = job->diff; /* 소유권을 옮긴다 */
+    apply_history(&job->result);
+    free(job);
+    complete_scan();
+    return 1;
+}
+
+/*
+ * 스캔이 끝났다(WM_APP_SCAN_DONE). 모델을 받아 두고, 직전 기록과 비교·저장은 작업 스레드에서 한다.
+ * 그동안은 바쁜 상태(움직이는 막대, 새 스캔·취소·기록 삭제·내보내기 막음)라 끝나지 않은 결과를 완료로 보이지
+ * 않는다. 작업 스레드를 만들지 못하면 예전처럼 여기서 바로 한다. 모든 처리를 마쳤으면 1(완료 알림을 보낸다).
+ */
+static int finish_scan(void)
 {
     ScanJobSnapshot snap;
     ScanStatus status;
-    const ScanReport *r;
 
     if (g_scan.job == NULL) {
-        return;
+        return 0;
     }
     scan_job_progress(g_scan.job, &snap);
     status = scan_job_finish(g_scan.job, &g_scan.model);
     g_scan.job = NULL;
     g_scan.has_model = 1;
-    r = &g_scan.model.report;
     {
         FILETIME now;
         GetSystemTimeAsFileTime(&now);
@@ -1290,20 +1424,17 @@ static void finish_scan(void)
         g_scan.scan_info.elapsed_ms = snap.elapsed_ms;
     }
 
-    if (status == SCAN_FATAL) {
-        progress_set(g_scan.progress, PROGRESS_FAILED, 0, PROGRESS_RANGE);
-    } else {
-        progress_set(g_scan.progress, r->cancelled ? PROGRESS_CANCELLED : PROGRESS_DONE, 0,
-                     PROGRESS_RANGE);
-    }
     /* 결과 문구는 finished_text 가 지금 언어로 만든다(걸린 시간은 scan_info.elapsed_ms). */
     g_scan.finished = status;
-    show_status(SCAN_STATUS_FINISHED);
-    set_scanning(0);
+    g_scan.history_cleared = 0;
+    if (start_history()) {
+        progress_set(g_scan.progress, PROGRESS_BUSY, 0, PROGRESS_RANGE);
+        EnableWindow(g_scan.cancel, FALSE); /* 스캔은 끝났다(비교·저장은 짧고 파일을 반쯤 쓰지 않게 끝까지 한다) */
+        return 0;
+    }
     track_history();
-    update_clear_button();
-    update_analysis();
-    show_results();
+    complete_scan();
+    return 1;
 }
 
 static void browse_folder(void)
@@ -2139,14 +2270,21 @@ static LRESULT CALLBACK panel_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         update_progress();
         return 0;
     case WM_APP_SCAN_DONE:
-        if (g_scan.job != NULL) {
-            finish_scan();
+        if (g_scan.job != NULL && finish_scan()) {
+            SendMessageW(GetParent(hwnd), WM_COMMAND,
+                         MAKEWPARAM(GetDlgCtrlID(hwnd), SPN_FINISHED), (LPARAM)hwnd);
+        }
+        return 0;
+    case WM_APP_HISTORY_DONE:
+        /* 결과 표시까지 마친 뒤에 완료를 알린다(예전과 같은 시점). */
+        if (g_scan.hist != NULL && finish_history()) {
             SendMessageW(GetParent(hwnd), WM_COMMAND,
                          MAKEWPARAM(GetDlgCtrlID(hwnd), SPN_FINISHED), (LPARAM)hwnd);
         }
         return 0;
     case WM_DESTROY:
         stop_job();
+        stop_history(); /* 모델을 해제하기 전에 작업 스레드가 끝나기를 기다린다 */
         clear_results();
         free(g_scan.export_file);
         g_scan.export_file = NULL;
@@ -2193,7 +2331,7 @@ static int is_panel(HWND panel)
 
 int scan_panel_start(HWND panel, const wchar_t *target, int precise)
 {
-    if (!is_panel(panel) || g_scan.job != NULL) {
+    if (!is_panel(panel) || scan_busy()) {
         return 0;
     }
     if (target != NULL) {
@@ -2215,7 +2353,7 @@ void scan_panel_cancel(HWND panel)
 
 int scan_panel_busy(HWND panel)
 {
-    return is_panel(panel) && g_scan.job != NULL;
+    return is_panel(panel) && scan_busy();
 }
 
 int scan_panel_min_width(HWND panel)
@@ -2512,4 +2650,41 @@ void scan_panel_set_dpi(HWND panel, int dpi)
     }
     g_scan.dpi = dpi;
     treemap_view_set_dpi(g_scan.treemap, dpi); /* 트리맵 여백·글자 자리도 새 DPI 로 */
+}
+
+void scan_panel_set_history_delay(HWND panel, unsigned ms)
+{
+    if (is_panel(panel)) {
+        g_scan.history_delay_ms = ms;
+    }
+}
+
+int scan_panel_history_pending(HWND panel)
+{
+    return is_panel(panel) && g_scan.hist != NULL;
+}
+
+int scan_panel_verify_history_pending(HWND panel)
+{
+    int failures = 0;
+
+    SELF_CHECK(is_panel(panel) && g_scan.hist != NULL && g_scan.job == NULL);
+    if (!is_panel(panel) || g_scan.hist == NULL) {
+        return failures;
+    }
+    /* 끝나지 않았다: 바쁜 상태, 움직이는 막대, 완료 문구·결과(트리)는 아직 없음 */
+    SELF_CHECK(scan_panel_busy(panel));
+    SELF_CHECK(progress_state(g_scan.progress) == PROGRESS_BUSY);
+    SELF_CHECK(g_scan.status_kind != SCAN_STATUS_FINISHED);
+    SELF_CHECK(TreeView_GetCount(g_scan.tree) == 0);
+    /* 다시 스캔·취소·기록 삭제·내보내기·경로 바꾸기를 막는다 */
+    SELF_CHECK(!IsWindowEnabled(g_scan.scan) && !IsWindowEnabled(g_scan.browse) &&
+               !IsWindowEnabled(g_scan.path) && !IsWindowEnabled(g_scan.cancel) &&
+               !IsWindowEnabled(g_scan.precise) && !IsWindowEnabled(g_scan.clear_history) &&
+               !IsWindowEnabled(g_scan.export_csv) && !IsWindowEnabled(g_scan.export_html));
+    SELF_CHECK(scan_panel_start(panel, NULL, -1) == 0 && g_scan.job == NULL && g_scan.hist != NULL);
+    SELF_CHECK(clear_history(0) == 0 && g_scan.hist != NULL);
+    cancel_scan(); /* 스캔 작업이 없으므로 아무것도 하지 않는다 */
+    SELF_CHECK(g_scan.hist != NULL && g_scan.status_kind != SCAN_STATUS_FINISHED);
+    return failures;
 }

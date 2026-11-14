@@ -771,78 +771,121 @@ void history_diff_free(HistoryDiff *d)
     history_diff_init(d);
 }
 
-/* 대문자 상대 경로 → 항목 번호 해시표(개방 주소법). */
+/*
+ * 스냅숏 항목마다 대문자 상대 경로 키와 그 해시(깊이 limit 이하만, 나머지는 key NULL).
+ * 해시표와 상대 쪽 조회가 같은 키·해시를 함께 써서 항목마다 대문자 사본·해시를 한 번만 만든다.
+ * 키는 한 버퍼에 이어 두고 CharUpperBuffW 를 한 번만 부른다(글자마다 따로 바꾸므로 키마다 부른 것과 같다).
+ */
 typedef struct {
-    wchar_t **keys;
-    size_t *values;
+    wchar_t *buf;   /* 모든 키(각각 NUL 로 끝남) */
+    wchar_t **key;  /* 항목별 키(buf 안, 깊이 limit 초과는 NULL) */
+    uint64_t *hash; /* 항목별 fnv1a(key) */
+} UpperKeys;
+
+static void keys_free(UpperKeys *k)
+{
+    free(k->buf);
+    free(k->key);
+    free(k->hash);
+    memset(k, 0, sizeof(*k));
+}
+
+static int upper_keys(UpperKeys *k, const HistorySnapshot *s, uint32_t limit)
+{
+    size_t i, total = 0, at = 0, n = s->len > 0 ? s->len : 1;
+
+    memset(k, 0, sizeof(*k));
+    for (i = 0; i < s->len; i++) {
+        if (s->entries[i].depth <= limit) {
+            total += wcslen(s->entries[i].rel) + 1;
+        }
+    }
+    k->buf = malloc((total > 0 ? total : 1) * sizeof(wchar_t));
+    k->key = calloc(n, sizeof(*k->key));
+    k->hash = calloc(n, sizeof(*k->hash));
+    if (k->buf == NULL || k->key == NULL || k->hash == NULL) {
+        keys_free(k);
+        return -1;
+    }
+    for (i = 0; i < s->len; i++) {
+        size_t len;
+        if (s->entries[i].depth > limit) {
+            continue;
+        }
+        len = wcslen(s->entries[i].rel);
+        memcpy(k->buf + at, s->entries[i].rel, len * sizeof(wchar_t));
+        k->buf[at + len] = L'\0';
+        k->key[i] = k->buf + at;
+        at += len + 1;
+    }
+    if (total > 0) {
+        CharUpperBuffW(k->buf, (DWORD)total);
+    }
+    for (i = 0; i < s->len; i++) {
+        if (k->key[i] != NULL) {
+            k->hash[i] = fnv1a(k->key[i]);
+        }
+    }
+    return 0;
+}
+
+/* 대문자 상대 경로 → 항목 번호 해시표(개방 주소법). 칸에는 항목 번호 + 1(0 은 빈 칸), 키·해시는 keys 것을 빌려 쓴다. */
+typedef struct {
+    size_t *slots;
     size_t cap; /* 2 의 거듭제곱 */
+    const UpperKeys *keys;
 } RelMap;
 
 static void map_free(RelMap *m)
 {
-    size_t i;
-
-    for (i = 0; i < m->cap; i++) {
-        free(m->keys[i]);
-    }
-    free(m->keys);
-    free(m->values);
+    free(m->slots);
 }
 
-/* 스냅숏의 상대 경로(깊이 limit 이하)로 해시표를 만든다. 실패하면 -1. */
-static int map_build(RelMap *m, const HistorySnapshot *s, uint32_t limit)
+/* 스냅숏의 항목(keys 는 upper_keys 결과)으로 해시표를 만든다. 실패하면 -1. */
+static int map_build(RelMap *m, const HistorySnapshot *s, const UpperKeys *keys)
 {
     size_t i;
 
+    m->keys = keys;
     m->cap = 64;
     while (m->cap < s->len * 2) {
         m->cap *= 2;
     }
-    m->keys = calloc(m->cap, sizeof(*m->keys));
-    m->values = malloc(m->cap * sizeof(*m->values));
-    if (m->keys == NULL || m->values == NULL) {
-        free(m->keys);
-        free(m->values);
-        m->keys = NULL;
-        m->values = NULL;
+    m->slots = calloc(m->cap, sizeof(*m->slots));
+    if (m->slots == NULL) {
         m->cap = 0;
         return -1;
     }
     for (i = 0; i < s->len; i++) {
         size_t slot;
-        wchar_t *key;
-        if (s->entries[i].depth > limit) {
-            continue;
-        }
-        key = upper_dup(s->entries[i].rel, wcslen(s->entries[i].rel));
+        const wchar_t *key = keys->key[i];
+        uint64_t h = keys->hash[i];
         if (key == NULL) {
-            return -1;
+            continue; /* 깊이 limit 보다 깊음 */
         }
-        for (slot = (size_t)fnv1a(key) & (m->cap - 1); m->keys[slot] != NULL;
-             slot = (slot + 1) & (m->cap - 1)) {
-            if (wcscmp(m->keys[slot], key) == 0) {
+        for (slot = (size_t)h & (m->cap - 1); m->slots[slot] != 0; slot = (slot + 1) & (m->cap - 1)) {
+            size_t j = m->slots[slot] - 1;
+            if (keys->hash[j] == h && wcscmp(keys->key[j], key) == 0) {
                 break;
             }
         }
-        if (m->keys[slot] != NULL) {
-            free(key); /* 같은 경로가 두 번 나오면 처음 것을 쓴다 */
-            continue;
+        if (m->slots[slot] != 0) {
+            continue; /* 같은 경로가 두 번 나오면 처음 것을 쓴다 */
         }
-        m->keys[slot] = key;
-        m->values[slot] = i;
+        m->slots[slot] = i + 1;
     }
     return 0;
 }
 
-/* 없으면 SCAN_NODE_NONE. key 는 대문자여야 한다. */
-static size_t map_get(const RelMap *m, const wchar_t *key)
+/* 없으면 SCAN_NODE_NONE. key 는 대문자, hash 는 fnv1a(key) 여야 한다. */
+static size_t map_get(const RelMap *m, const wchar_t *key, uint64_t hash)
 {
     size_t slot;
 
-    for (slot = (size_t)fnv1a(key) & (m->cap - 1); m->keys[slot] != NULL;
-         slot = (slot + 1) & (m->cap - 1)) {
-        if (wcscmp(m->keys[slot], key) == 0) {
-            return m->values[slot];
+    for (slot = (size_t)hash & (m->cap - 1); m->slots[slot] != 0; slot = (slot + 1) & (m->cap - 1)) {
+        size_t j = m->slots[slot] - 1;
+        if (m->keys->hash[j] == hash && wcscmp(m->keys->key[j], key) == 0) {
+            return j;
         }
     }
     return SCAN_NODE_NONE;
@@ -859,7 +902,7 @@ static int parent_in(const RelMap *m, const wchar_t *rel)
     if (key == NULL) {
         return 1; /* 모르면 상위가 있다고 보고 그대로 넣는다 */
     }
-    found = map_get(m, key);
+    found = map_get(m, key, fnv1a(key));
     free(key);
     return found != SCAN_NODE_NONE;
 }
@@ -936,6 +979,7 @@ static int same_root(const wchar_t *a, const wchar_t *b)
 int history_diff(const HistorySnapshot *old, const HistorySnapshot *cur, HistoryDiff *out)
 {
     RelMap old_map = {0}, cur_map = {0};
+    UpperKeys old_keys = {0}, cur_keys = {0};
     uint32_t limit;
     size_t i;
     int rc = -1;
@@ -946,7 +990,8 @@ int history_diff(const HistorySnapshot *old, const HistorySnapshot *cur, History
         return -1;
     }
     limit = old->depth < cur->depth ? old->depth : cur->depth;
-    if (map_build(&old_map, old, limit) != 0 || map_build(&cur_map, cur, limit) != 0) {
+    if (upper_keys(&old_keys, old, limit) != 0 || upper_keys(&cur_keys, cur, limit) != 0 ||
+        map_build(&old_map, old, &old_keys) != 0 || map_build(&cur_map, cur, &cur_keys) != 0) {
         goto done;
     }
     out->old_time = old->time;
@@ -958,17 +1003,11 @@ int history_diff(const HistorySnapshot *old, const HistorySnapshot *cur, History
     /* 지금 있는 폴더: 늘어남·줄어듦·새로 생김 */
     for (i = 1; i < cur->len; i++) {
         const HistoryEntry *e = &cur->entries[i];
-        wchar_t *key;
         size_t oi;
-        if (e->depth > limit) {
-            continue;
+        if (cur_keys.key[i] == NULL) {
+            continue; /* 깊이 limit 보다 깊음 */
         }
-        key = upper_dup(e->rel, wcslen(e->rel));
-        if (key == NULL) {
-            goto done;
-        }
-        oi = map_get(&old_map, key);
-        free(key);
+        oi = map_get(&old_map, cur_keys.key[i], cur_keys.hash[i]);
         if (oi == SCAN_NODE_NONE) {
             /* 새 폴더 안의 하위 폴더는 새 폴더 하나로 보여 준다. */
             if (parent_in(&old_map, e->rel) &&
@@ -989,17 +1028,11 @@ int history_diff(const HistorySnapshot *old, const HistorySnapshot *cur, History
     /* 사라진 폴더 */
     for (i = 1; i < old->len; i++) {
         const HistoryEntry *o = &old->entries[i];
-        wchar_t *key;
         size_t ci;
-        if (o->depth > limit) {
-            continue;
+        if (old_keys.key[i] == NULL) {
+            continue; /* 깊이 limit 보다 깊음 */
         }
-        key = upper_dup(o->rel, wcslen(o->rel));
-        if (key == NULL) {
-            goto done;
-        }
-        ci = map_get(&cur_map, key);
-        free(key);
+        ci = map_get(&cur_map, old_keys.key[i], old_keys.hash[i]);
         if (ci == SCAN_NODE_NONE && parent_in(&cur_map, o->rel) &&
             add_change(out, o->rel, HISTORY_REMOVED, o->depth, o->bytes, 0,
                        (o->flags & HISTORY_UNCERTAIN) != 0, SCAN_NODE_NONE) != 0) {
@@ -1012,6 +1045,8 @@ int history_diff(const HistorySnapshot *old, const HistorySnapshot *cur, History
 done:
     map_free(&old_map);
     map_free(&cur_map);
+    keys_free(&old_keys);
+    keys_free(&cur_keys);
     if (rc != 0) {
         history_diff_free(out);
     }

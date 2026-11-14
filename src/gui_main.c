@@ -54,6 +54,9 @@
 /* --self-test 의 전체 제한 시간. */
 #define SELF_TEST_TIMEOUT_MS 60000
 #define TIMER_SELF_TEST 1
+#define TIMER_HISTORY_POLL 2 /* 자체 검사: 스캔 뒤 비교·저장 작업이 시작됐는지 살핀다 */
+/* 비교·저장 작업 중 상태를 확실히 보려고 그 작업을 늦추는 시간(자체 검사에서만). */
+#define HISTORY_TEST_DELAY_MS 400
 /* --self-test-monitor 가 검증 전에 기다리는 측정 횟수. */
 #define MONITOR_SELF_TEST_SAMPLES 4
 
@@ -98,6 +101,8 @@ typedef enum {
     SELF_TEST_THEME,  /* 테마 밝게 → 어둡게 → 시스템(어둡게·밝게) → 밝게 고정, 단계마다 컨트롤 색 검증 → 종료 */
     SELF_TEST_SETTINGS, /* [설정]에서 언어 바꾸기(저장 값·즉시 적용)·자동 저장 끄고 켜기 → 저장 값·두 페이지 검증 → 종료 */
     SELF_TEST_LANG_SWITCH, /* 스캔(한국어) → 언어를 en·ja·zh-Hans·ko 로 차례로 바꾸며 결과·상태 줄·문구 다시 쓰기 검증 → 종료 */
+    SELF_TEST_HISTORY_ASYNC, /* 스캔 → 비교·저장 작업 중 상태(바쁨·막힘·완료 아님) 검증 → 끝난 뒤 결과 검증 → 종료 */
+    SELF_TEST_HISTORY_CLOSE, /* 스캔 → 비교·저장 작업 중에 창을 닫음(작업이 끝나기를 기다리고 종료) */
     SELF_TEST_DPI_CHANGE, /* 실행 중 DPI 변경(WM_DPICHANGED) 96→144→192→120→96 마다 글꼴·배치·입력값·화면 상태 검증 → 종료 */
     SELF_TEST_LAYOUT /* 네 언어 × 여러 창 크기에서 모든 페이지의 문구 잘림·겹침·패널 밖 넘침·입력값 유지 검증 → 종료 */
 } SelfTest;
@@ -131,6 +136,8 @@ typedef struct {
     const wchar_t *cleaner_root;   /* SELF_TEST_CLEANER: 분석한 위치가 모두 이 폴더 안이어야 정리한다 */
     size_t cleaner_expect;         /* SELF_TEST_CLEANER: 골라 정리를 시작한 대상 수 */
     int export_enabled_before_scan; /* SELF_TEST_EXPORT: 스캔 전 내보내기 버튼이 켜져 있었으면 1 */
+    int history_pending_seen;       /* SELF_TEST_HISTORY_*: 비교·저장 작업 중 상태를 확인했으면 1 */
+    int history_pending_failures;   /* 그때 실패 수 */
 } App;
 
 static App g_app;
@@ -1869,6 +1876,30 @@ static int on_page_notify(int id, int code)
         finish_self_test(rc != 0 ? rc : verify_lang_switch());
         return 1;
     }
+    if (id == IDC_SCANPAGE && code == SPN_FINISHED && g_app.self_test == SELF_TEST_HISTORY_CLOSE) {
+        /* 작업 중에 창을 닫았으므로 완료 알림이 오면 안 된다(작업 중 상태를 보지 못함). */
+        fwprintf(stderr, L"self-test failed: scan finished before the window was closed\n");
+        finish_self_test(1);
+        return 1;
+    }
+    if (id == IDC_SCANPAGE && code == SPN_FINISHED && g_app.self_test == SELF_TEST_HISTORY_ASYNC) {
+        /* 작업 중 상태를 확인했고, 끝난 뒤의 결과 화면(기록 비교·저장 포함)이 예전과 같은지 */
+        int rc = page_exit(scan_panel_verify(g_app.pages[NAV_PAGE_SCAN], SCAN_VERIFY_SCAN, NULL, 0),
+                           NAV_PAGE_SCAN);
+        KillTimer(g_app.hwnd, TIMER_HISTORY_POLL);
+        if (!g_app.history_pending_seen || g_app.history_pending_failures != 0 ||
+            scan_panel_history_pending(g_app.pages[NAV_PAGE_SCAN]) || scan_panel_busy(g_app.pages[NAV_PAGE_SCAN])) {
+            fwprintf(stderr, L"self-test failed: history pending seen=%d failures=%d\n",
+                     g_app.history_pending_seen, g_app.history_pending_failures);
+            rc = 1;
+        }
+        if (rc == 0) {
+            wprintf(L"history-async: ok\n");
+            fflush(stdout);
+        }
+        finish_self_test(rc);
+        return 1;
+    }
     if (id == IDC_SCANPAGE && code == SPN_FINISHED) {
         finish_self_test(page_exit(scan_panel_verify(g_app.pages[NAV_PAGE_SCAN], scan_verify_mode(),
                                                      g_app.export_prefix,
@@ -2101,6 +2132,19 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         }
         break;
     case WM_TIMER:
+        if (wp == TIMER_HISTORY_POLL && scan_panel_history_pending(g_app.pages[NAV_PAGE_SCAN])) {
+            /* 스캔은 끝났고 비교·저장이 작업 스레드에서 도는 중이다. */
+            KillTimer(hwnd, TIMER_HISTORY_POLL);
+            g_app.history_pending_seen = 1;
+            g_app.history_pending_failures = scan_panel_verify_history_pending(g_app.pages[NAV_PAGE_SCAN]);
+            if (g_app.self_test == SELF_TEST_HISTORY_CLOSE) {
+                /* 그 상태에서 창을 닫는다: 폴더 스캔 패널이 작업이 끝나기를 기다린 뒤 종료한다. */
+                wprintf(L"history-close: closing while saving\n");
+                fflush(stdout);
+                finish_self_test(g_app.history_pending_failures != 0 ? 1 : 0);
+            }
+            return 0;
+        }
         if (wp == TIMER_SELF_TEST) {
             fwprintf(stderr, L"self-test failed: timeout\n");
             finish_self_test(1);
@@ -2146,6 +2190,8 @@ static void parse_args(int argc, wchar_t **argv, const wchar_t **target,
         {L"--self-test-lang-switch", SELF_TEST_LANG_SWITCH, 1},
         {L"--self-test-layout", SELF_TEST_LAYOUT, 0},
         {L"--self-test-dpi-change", SELF_TEST_DPI_CHANGE, 0},
+        {L"--self-test-history-async", SELF_TEST_HISTORY_ASYNC, 1},
+        {L"--self-test-history-close", SELF_TEST_HISTORY_CLOSE, 1},
     };
     size_t i;
 
@@ -2166,6 +2212,8 @@ static void parse_args(int argc, wchar_t **argv, const wchar_t **target,
             case SELF_TEST_CLEAR_HISTORY:
             case SELF_TEST_CANCEL:
             case SELF_TEST_LANG_SWITCH:
+            case SELF_TEST_HISTORY_ASYNC:
+            case SELF_TEST_HISTORY_CLOSE:
                 *target = argv[2];
                 break;
             case SELF_TEST_EXPORT:
@@ -2259,6 +2307,10 @@ static void start_self_test(const wchar_t *target, const wchar_t *cleanup_target
             return;
         }
     }
+    if (g_app.self_test == SELF_TEST_HISTORY_ASYNC || g_app.self_test == SELF_TEST_HISTORY_CLOSE) {
+        scan_panel_set_history_delay(scan, HISTORY_TEST_DELAY_MS);
+        SetTimer(g_app.hwnd, TIMER_HISTORY_POLL, 5, NULL);
+    }
     if (target != NULL) {
         g_app.export_enabled_before_scan = scan_panel_export_enabled(scan);
         if (!scan_panel_start(scan, target, g_app.self_test == SELF_TEST_PRECISE)) {
@@ -2344,6 +2396,11 @@ static void start_self_test(const wchar_t *target, const wchar_t *cleanup_target
  *                                         최소 창 크기에서 문구가 잘리지 않는지 검증하고 종료
  *   bytesieve-gui --self-test-layout      네 언어 × 여러 창 크기에서 모든 페이지의 문구 잘림·컨트롤 겹침·패널 밖
  *                                         넘침과 입력값 유지를 검증하고 종료(BYTESIEVE_TEST_DPI 로 DPI 흉내)
+ *   bytesieve-gui --self-test-history-async <dir>
+ *                                         스캔 뒤 직전 기록과 비교·저장하는 작업(작업 스레드) 중 상태와 끝난 뒤
+ *                                         결과를 검증하고 종료
+ *   bytesieve-gui --self-test-history-close <dir>
+ *                                         그 작업 중에 창을 닫는다(작업이 끝나기를 기다리고 종료)
  *   bytesieve-gui --self-test-dpi-change  실행 중 DPI 변경(WM_DPICHANGED)마다 글꼴·열 폭·배치·입력값·고른
  *                                         페이지가 맞는지 검증하고 종료
  *   bytesieve-gui --self-test-nav         사이드바 키보드·마우스 이동과 페이지 전환을 검증하고 종료

@@ -660,6 +660,16 @@ set_tests_properties(gui_layout_144_768p PROPERTIES
 # 실행 중 DPI 변경(모니터 이동·배율 변경과 같은 WM_DPICHANGED): 모니터별 DPI 인식 V2, 글꼴·열 폭·배치·입력값·고른 페이지.
 add_test(NAME gui_dpi_change COMMAND bytesieve-gui --self-test-dpi-change)
 set_tests_properties(gui_dpi_change PROPERTIES PASS_REGULAR_EXPRESSION "dpi-change: ok" TIMEOUT 120)
+# 스캔 뒤 직전 기록과 비교·저장(작업 스레드): 작업 중에는 바쁜 상태(다시 스캔·취소·기록 삭제·내보내기 막힘, 움직이는
+# 막대, 완료 문구·결과 없음)이고 끝난 뒤 결과가 예전과 같은지, 작업 중에 창을 닫아도 기록 파일이 온전한지 확인한다.
+add_test(NAME gui_history_async COMMAND bytesieve-gui --self-test-history-async ${CMAKE_CURRENT_SOURCE_DIR}/src)
+set_tests_properties(gui_history_async PROPERTIES PASS_REGULAR_EXPRESSION "history-async: ok" TIMEOUT 120
+                     ENVIRONMENT "BYTESIEVE_HISTORY_DIR=${CMAKE_CURRENT_BINARY_DIR}/gui_history_async_history")
+add_test(NAME gui_history_close
+         COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:bytesieve-gui> -DCLI=$<TARGET_FILE:disk-scanner>
+                 -DTARGET=${CMAKE_CURRENT_SOURCE_DIR}/src
+                 -DHISTORY=${CMAKE_CURRENT_BINARY_DIR}/gui_history_close_history
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/gui_history_close_check.cmake)
 add_test(NAME gui_lang_switch COMMAND bytesieve-gui --self-test-lang-switch ${CMAKE_CURRENT_SOURCE_DIR})
 set_tests_properties(gui_lang_switch PROPERTIES
                      PASS_REGULAR_EXPRESSION "lang-switch: en ja zh-Hans ko" TIMEOUT 120
