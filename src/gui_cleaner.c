@@ -98,6 +98,7 @@ typedef struct {
     int recycle_checked;
     size_t caution_checked; /* 체크한 대상 중 주의 수 */
     size_t dev_checked;     /* 체크한 대상 중 직접 골라야 하는 대상(개발 도구 캐시) 수 */
+    size_t auto_count;      /* [모두 선택]이 고르는 대상 수. 0 이면 단추를 끈다(개발 캐시 페이지 등) */
 
     CleanPlanRunJob *run;
     int run_interactive;
@@ -278,6 +279,7 @@ static void recount(CleanerPanel *p)
     p->recycle_checked = s.permanent > 0;
     p->caution_checked = s.caution;
     p->dev_checked = s.manual;
+    p->auto_count = s.auto_selectable;
 }
 
 /* 선택 줄 문구: 선택 수·실제 확보·파일 크기(휴지통 비우기·주의 개수 표시). */
@@ -303,7 +305,9 @@ static void update_selection(CleanerPanel *p)
 
     selection_text(p, text, sizeof(text) / sizeof(text[0]));
     SetWindowTextW(p->selection, p->has_plan ? text : L"");
-    EnableWindow(p->check_all, !busy && p->has_plan);
+    /* [모두 선택]은 고를 대상(MANUAL 이 아닌 고를 수 있는 대상)이 있을 때만 켠다. 개발 캐시 페이지처럼
+     * 모두 직접 골라야 하는 대상이면 눌러도 아무것도 바뀌지 않으므로 끈다(행을 직접 체크). */
+    EnableWindow(p->check_all, !busy && p->has_plan && p->auto_count > 0);
     EnableWindow(p->check_none, !busy && p->checked_count > 0);
     EnableWindow(p->run_btn, !busy && p->checked_count > 0);
 }
@@ -1538,6 +1542,18 @@ int cleaner_panel_verify(HWND panel, const wchar_t *expect_root)
     PANEL_CHECK(ready > 0);
     /* [모두 선택]은 휴지통·개발 도구 캐시를 고르지 않는다(직접 체크해야 함) */
     PANEL_CHECK(dev_ready == manual_ready && (dev_ready > 0) == (has_dev != 0));
+    /* 단추는 [모두 선택]이 고를 대상이 있을 때만 켜진다(개발 캐시 페이지는 모두 직접 체크해야 하므로 꺼짐) */
+    PANEL_CHECK(p->auto_count == ready - manual_ready);
+    PANEL_CHECK((IsWindowEnabled(p->check_all) != 0) == (ready - manual_ready > 0));
+    PANEL_CHECK(!IsWindowEnabled(p->check_none) && p->checked_count == 0);
+    /* 실제 단추 누름(BM_CLICK → WM_COMMAND)으로 고른다. 꺼진 단추는 아무것도 고르지 않는다. */
+    SendMessageW(p->check_all, BM_CLICK, 0, 0);
+    PANEL_CHECK(p->checked_count == ready - manual_ready);
+    PANEL_CHECK((IsWindowEnabled(p->check_none) != 0) == (p->checked_count > 0));
+    PANEL_CHECK((IsWindowEnabled(p->run_btn) != 0) == (p->checked_count > 0));
+    /* 다시 눌러도 선택은 그대로다 */
+    SendMessageW(p->check_all, BM_CLICK, 0, 0);
+    PANEL_CHECK(p->checked_count == ready - manual_ready);
     PANEL_CHECK(cleaner_panel_check_all(panel, 1) == ready - manual_ready);
     PANEL_CHECK(!p->recycle_checked && p->dev_checked == 0 && p->caution_checked == 0);
     for (i = 0; i < p->targets.len; i++) {
@@ -1577,8 +1593,14 @@ int cleaner_panel_verify(HWND panel, const wchar_t *expect_root)
         swprintf(head, 64, ui_text(UI_T_CL_SEL_CAUTION), (unsigned)p->caution_checked);
         PANEL_CHECK(wcsstr(buf, head) != NULL);
     }
-    cleaner_panel_check_all(panel, 0);
+    /* [선택 해제] 단추는 직접 고른 대상(개발 도구 캐시)까지 모두 풀고, 실행 대상(계획)도 비운다 */
+    SendMessageW(p->check_none, BM_CLICK, 0, 0);
     PANEL_CHECK(p->checked_count == 0 && p->dev_checked == 0 && p->caution_checked == 0);
+    for (i = 0; i < p->targets.len; i++) {
+        PANEL_CHECK(!p->plan.items[i].selected);
+    }
+    PANEL_CHECK(!IsWindowEnabled(p->check_none) && !IsWindowEnabled(p->run_btn));
+    PANEL_CHECK((IsWindowEnabled(p->check_all) != 0) == (ready - manual_ready > 0));
     return failures;
 }
 

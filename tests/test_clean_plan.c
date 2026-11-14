@@ -294,6 +294,51 @@ static void test_selection(void)
     clean_plan_summarize(&plan, &s);
     CHECK(s.targets == 0 && s.bytes == 0);
     CHECK(!clean_plan_set_selected(&plan, 4, 1) && !clean_plan_set_selected(&plan, 99, 1));
+    /* [모두 선택]이 고르는 대상: MANUAL·고를 수 없는 대상 제외, 고른 상태와 무관 */
+    CHECK(clean_plan_auto_selectable(&plan.items[0]) && !clean_plan_auto_selectable(&plan.items[1]) &&
+          !clean_plan_auto_selectable(&plan.items[3]) && !clean_plan_auto_selectable(&plan.items[4]));
+    CHECK(s.auto_selectable == 1 && s.selectable == 4); /* 모두 푼 상태의 요약 */
+    CHECK(clean_plan_select_all(&plan, 1) == 1);
+    clean_plan_summarize(&plan, &s);
+    CHECK(s.auto_selectable == 1 && s.targets == 1); /* 고른 뒤에도 같은 수 */
+    clean_plan_free(&plan);
+}
+
+/* [모두 선택] 단추를 켤지 판단하는 값(GUI): 고를 대상이 없으면 0 이고 눌러도 아무것도 고르지 않는다. */
+static void test_select_all_empty(void)
+{
+    CleanPlan plan;
+    CleanPlanSummary s;
+    CleanPlanTarget *t;
+
+    CHECK(!clean_plan_auto_selectable(NULL));
+    clean_plan_init(&plan);
+    clean_plan_summarize(&plan, &s); /* 대상 없음 */
+    CHECK(s.auto_selectable == 0 && clean_plan_select_all(&plan, 1) == 0);
+    clean_plan_summarize(NULL, &s);
+    CHECK(s.auto_selectable == 0 && clean_plan_select_all(NULL, 1) == 0);
+
+    /* 개발 캐시 페이지처럼 모든 대상이 MANUAL 이면 [모두 선택]은 아무것도 고르지 않는다 */
+    make_dirs(L"empty_sel");
+    write_file(L"empty_sel\\a.bin", 100);
+    t = add_target(&plan, L"npm", CLEAN_PLAN_MANUAL);
+    add_entry(t, L"empty_sel\\a.bin", 0, 100);
+    t = add_target(&plan, L"pip", CLEAN_PLAN_MANUAL | CLEAN_PLAN_CAUTION);
+    add_entry(t, L"empty_sel\\a.bin", 0, 100);
+    t = add_target(&plan, L"edge", 0);
+    t->ready = 0; /* 고를 수 없음(비활성) */
+    add_entry(t, L"empty_sel\\a.bin", 0, 1);
+    clean_plan_summarize(&plan, &s);
+    CHECK(s.auto_selectable == 0 && s.selectable == 2);
+    CHECK(clean_plan_select_all(&plan, 1) == 0);
+    clean_plan_summarize(&plan, &s);
+    CHECK(s.targets == 0);
+    /* 직접 고른 MANUAL 은 [모두 선택]·다시 누름에도 그대로, [선택 해제]는 실행 대상까지 비운다 */
+    CHECK(clean_plan_set_selected(&plan, 0, 1));
+    CHECK(clean_plan_select_all(&plan, 1) == 1 && plan.items[0].selected && !plan.items[1].selected);
+    CHECK(clean_plan_select_all(&plan, 0) == 0);
+    clean_plan_summarize(&plan, &s);
+    CHECK(s.targets == 0 && s.bytes == 0 && !plan.items[0].selected);
     clean_plan_free(&plan);
 }
 
@@ -462,6 +507,7 @@ int main(void)
     CHECK(clean_skip_text(CLEAN_SKIP_APP_RUNNING)[0] != L'\0');
     test_from_project();
     test_selection();
+    test_select_all_empty();
     test_run();
     test_apply_projects();
 

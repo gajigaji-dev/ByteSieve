@@ -541,6 +541,11 @@ add_test(NAME gui_drives COMMAND bytesieve-gui --self-test-drives)
 add_test(NAME gui_cleanup COMMAND bytesieve-gui --self-test-cleanup ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME gui_cleanup_cancel
          COMMAND bytesieve-gui --self-test-cleanup-cancel ${CMAKE_CURRENT_SOURCE_DIR})
+# 프로젝트 정리 페이지: [모두 선택]·[선택 해제] 단추를 눌러 체크 상자·선택 줄·실행 대상이 맞는지(파일은 그대로).
+add_test(NAME gui_select_all
+         COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:bytesieve-gui>
+                 -DFIXTURE=${CMAKE_CURRENT_BINARY_DIR}/gui_select_all_fixture
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/gui_select_all_check.cmake)
 # 프로젝트 정리 페이지: 임시 픽스처를 탐지해 옮길 수 있는 항목을 모두 휴지통으로 옮기고(확인 창 없이)
 # 결과 화면·파일 상태를 확인한다. 보호 대상(접근 거부로 일부 누락)은 남아야 한다.
 add_test(NAME gui_trash

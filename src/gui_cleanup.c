@@ -320,6 +320,20 @@ static int can_check(CleanupPanel *p, size_t index)
     return clean_plan_selectable(plan_at(p, index));
 }
 
+/* 지금 보이는 항목(필터) 중 [모두 선택]이 고를 대상이 있는지. 없으면 단추를 끈다
+ * (보호·이미 옮김·미커밋 변경 프로젝트의 후보뿐이면 눌러도 아무것도 바뀌지 않음). */
+static int can_check_all(CleanupPanel *p)
+{
+    size_t i;
+
+    for (i = 0; i < p->view_len; i++) {
+        if (clean_plan_auto_selectable(plan_at(p, p->view[i]))) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int is_checked(CleanupPanel *p, size_t index)
 {
     const CleanPlanTarget *t = plan_at(p, index);
@@ -440,7 +454,7 @@ static void update_selection(CleanupPanel *p)
 
     selection_text(p, text, sizeof(text) / sizeof(text[0]));
     SetWindowTextW(p->selection, p->has_plan ? text : L"");
-    EnableWindow(p->check_all, !busy && p->has_plan);
+    EnableWindow(p->check_all, !busy && p->has_plan && can_check_all(p));
     EnableWindow(p->check_none, !busy && p->checked_count > 0);
     EnableWindow(p->trash_btn, !busy && p->checked_count > 0);
 }
@@ -529,6 +543,7 @@ static void apply_filter(CleanupPanel *p)
     ListView_SetItemCountEx(p->list, (int)p->view_len, 0);
     InvalidateRect(p->list, NULL, TRUE);
     update_summary(p);
+    update_selection(p); /* [모두 선택]은 보이는 항목 기준이라 필터가 바뀌면 다시 판단한다 */
 }
 
 static void set_warning(CleanupPanel *p)
@@ -1899,6 +1914,61 @@ int cleanup_panel_verify(HWND panel, int expect_cancelled)
         }
         wprintf(L"projects: %u, dirty candidates: %u\n", (unsigned)p->projects.len,
                 (unsigned)dirty);
+        fflush(stdout);
+    }
+
+    /* [모두 선택]·[선택 해제] 단추(BM_CLICK → WM_COMMAND): 보이는 항목 중 [모두 선택]이 고를 대상만 고르고,
+     * 체크 상자·선택 줄 수·실제 실행 대상(계획의 selected)이 서로 같다. 고를 대상이 없으면 단추가 꺼진다.
+     * 이미 고른 상태로 부르면(휴지통 이동 자체 검사) 그 선택을 바꾸지 않도록 건너뛴다. */
+    if (!expect_cancelled && p->has_plan && p->checked_count == 0) {
+        size_t k, want_n = 0, first = (size_t)-1;
+        CleanPlanSummary s;
+        wchar_t sel_now[512], sel_want[512];
+        for (k = 0; k < p->view_len; k++) {
+            if (clean_plan_auto_selectable(plan_at(p, p->view[k]))) {
+                want_n++;
+                if (first == (size_t)-1) {
+                    first = p->view[k];
+                }
+            }
+        }
+        PANEL_CHECK((IsWindowEnabled(p->check_all) != 0) == (want_n > 0));
+        PANEL_CHECK(!IsWindowEnabled(p->check_none) && !IsWindowEnabled(p->trash_btn));
+        for (k = 0; k < 2; k++) { /* 다시 눌러도 같다 */
+            size_t r;
+            SendMessageW(p->check_all, BM_CLICK, 0, 0);
+            PANEL_CHECK(p->checked_count == want_n);
+            for (r = 0; r < p->view_len; r++) {
+                const CleanPlanTarget *t = plan_at(p, p->view[r]);
+                int image = (int)(ListView_GetItemState(p->list, (int)r, LVIS_STATEIMAGEMASK) >> 12);
+                PANEL_CHECK((t->selected != 0) == (clean_plan_auto_selectable(t) != 0));
+                PANEL_CHECK(!can_check(p, p->view[r]) || image == (t->selected ? CHECK_ON : CHECK_OFF));
+            }
+        }
+        clean_plan_summarize(&p->plan, &s);
+        PANEL_CHECK(s.targets == p->checked_count && s.bytes == p->checked_bytes &&
+                    s.reclaim == p->checked_reclaim);
+        PANEL_CHECK((IsWindowEnabled(p->check_none) != 0) == (want_n > 0));
+        PANEL_CHECK((IsWindowEnabled(p->trash_btn) != 0) == (want_n > 0));
+        GetWindowTextW(p->selection, sel_now, 512);
+        selection_text(p, sel_want, 512);
+        PANEL_CHECK(wcscmp(sel_now, sel_want) == 0);
+        if (first != (size_t)-1) {
+            /* 하나를 직접 풀면 수가 줄고, [모두 선택]을 다시 누르면 되돌아온다(개별·전체 선택 동기화) */
+            set_checked(p, first, 0);
+            update_selection(p);
+            PANEL_CHECK(p->checked_count == want_n - 1 && !p->plan.items[first].selected);
+            SendMessageW(p->check_all, BM_CLICK, 0, 0);
+            PANEL_CHECK(p->checked_count == want_n && p->plan.items[first].selected);
+        }
+        /* [선택 해제]는 모두 풀고 실행 대상도 비운다 */
+        SendMessageW(p->check_none, BM_CLICK, 0, 0);
+        clean_plan_summarize(&p->plan, &s);
+        PANEL_CHECK(p->checked_count == 0 && p->checked_bytes == 0 && p->checked_reclaim == 0 &&
+                    s.targets == 0);
+        PANEL_CHECK(!IsWindowEnabled(p->check_none) && !IsWindowEnabled(p->trash_btn));
+        PANEL_CHECK((IsWindowEnabled(p->check_all) != 0) == (want_n > 0));
+        wprintf(L"select-all candidates: %u\n", (unsigned)want_n);
         fflush(stdout);
     }
     return failures;
