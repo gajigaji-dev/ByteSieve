@@ -8,6 +8,7 @@
 #include "cleaner.h"
 #include "cleanup_trash.h"
 #include "dev_cache.h"
+#include "op_result.h"
 #include "project_info.h"
 
 /*
@@ -37,6 +38,9 @@ const wchar_t *gui_dev_cache_label(DevCacheKind kind);
 const wchar_t *gui_dev_cache_note(DevCacheKind kind);
 /* 개발 캐시 위치 상태(dev_cache_status_text 와 같은 분류). */
 const wchar_t *gui_dev_cache_status_text(DevCacheStatus status);
+
+/* 끝난 작업의 결과 판정(op_result) 제목: 완료·일부 완료·완료하지 못함·취소됨·처리할 항목 없음. */
+const wchar_t *gui_op_result_text(OpResult result);
 /* 개발 캐시 위치 근거("환경 변수 X" 등, dev_cache_source_text 와 같은 형식). */
 void gui_dev_cache_source_text(DevCacheSource source, const wchar_t *origin, wchar_t *buf, size_t len);
 /* Booster 시작 프로그램 위치·보호 이유·끝내기 결과(booster_source_text·booster_protect_text·

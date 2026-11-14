@@ -109,6 +109,12 @@ execute_process(COMMAND ${CMAKE_COMMAND} -E env
 if(NOT rc EQUAL 0)
     message(SEND_ERROR "bytesieve-gui --self-test-cleaner exited with ${rc}\n${out}\n${err}")
 endif()
+string(REGEX MATCHALL "result: [^\r\n]+" result_lines "${out}")
+message(STATUS "completion banner: ${result_lines}")
+# 완료 결과 영역: 시스템 정리·개발 캐시 정리 모두 픽스처의 대상을 다 옮겼으므로 "완료".
+if(NOT result_lines STREQUAL "result: success;result: success")
+    message(SEND_ERROR "expected success on both cleaner pages, got '${result_lines}'")
+endif()
 # 모두 픽스처의 격리 폴더로 가야 한다(실제 휴지통으로 간 항목이 있으면 안 됨).
 if(out MATCHES "recycled: ")
     message(SEND_ERROR "items went to the real recycle bin:\n${out}")

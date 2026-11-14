@@ -59,6 +59,12 @@ unset(ENV{BYTESIEVE_QUARANTINE_ROOT})
 if(NOT rc EQUAL 0)
     message(SEND_ERROR "bytesieve-gui --self-test-quarantine exited with ${rc}\n${err}\n${out}")
 endif()
+string(REGEX MATCHALL "result: [^\r\n]+" result_lines "${out}")
+message(STATUS "completion banner: ${result_lines}")
+# 완료 결과 영역: 같은 이름 1개를 건너뛴 복원은 "일부 완료", 남은 항목을 모두 지운 영구 삭제는 "완료".
+if(NOT result_lines MATCHES "result: restore partial" OR NOT result_lines MATCHES "result: purge success")
+    message(SEND_ERROR "expected restore partial and purge success in the completion banner, got '${result_lines}'")
+endif()
 
 # 정리한 3개는 모두 픽스처의 격리 폴더로 갔어야 한다(휴지통 아님).
 string(REGEX MATCHALL "recycled: [^\r\n]+" lines "${out}")

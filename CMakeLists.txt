@@ -123,6 +123,11 @@ target_include_directories(bytesieve_plan PUBLIC src)
 target_link_libraries(bytesieve_plan PUBLIC bytesieve_cleanup_trash bytesieve_project shell32 ole32)
 bytesieve_configure(bytesieve_plan)
 
+# 끝난 작업의 결과 판정(완료·일부 완료·실패·취소·없음). GUI 완료 결과 영역이 쓴다.
+add_library(bytesieve_op_result STATIC src/op_result.c)
+target_include_directories(bytesieve_op_result PUBLIC src)
+bytesieve_configure(bytesieve_op_result)
+
 # 공용 개발 캐시(npm·pip·Gradle·Cargo·NuGet) 위치 탐지·용량 세기. 읽기 전용이며 정리는 cleanup_trash 로.
 add_library(bytesieve_dev_cache STATIC src/dev_cache.c)
 target_include_directories(bytesieve_dev_cache PUBLIC src)
@@ -213,16 +218,17 @@ bytesieve_configure(bytesieve_settings)
 # gui_theme: Windows 11 창 외곽(DWM), 밝게·어둡게 색 토큰과 다크 모드 적용(uxtheme), 언어별 UI 글꼴,
 # 글자 폭에 맞춘 컨트롤 크기. gui_settings: 설정 페이지(테마·표시 언어·스캔 기록).
 # gui_status_text: core 상태 번호(휴지통 이동 결과·복구 가능성 등)를 지금 언어의 화면 문구로 연결.
+# gui_result: 정리 작업이 끝나면 보이는 완료 결과 영역(결과 판정 색·제목, 결과 요약, 다음 작업 단추).
 # 시스템 정리·개발 캐시 페이지(gui_cleaner 패널 둘, 분석 범위만 다름)·프로젝트 정리(gui_cleanup)·부스터(gui_booster).
 add_executable(bytesieve-gui WIN32 src/gui_main.c src/gui_nav.c src/gui_scan.c src/gui_theme.c
                src/gui_drives.c src/gui_cleanup.c src/gui_quarantine.c src/gui_monitor.c
                src/gui_treemap.c src/gui_cleaner.c src/gui_booster.c src/gui_settings.c
-               src/gui_progress.c src/gui_status_text.c)
+               src/gui_progress.c src/gui_status_text.c src/gui_result.c)
 target_link_libraries(bytesieve-gui PRIVATE bytesieve_job bytesieve_history bytesieve_export
                       bytesieve_treemap bytesieve_ui_lang bytesieve_nav bytesieve_settings
                       bytesieve_cleaner bytesieve_booster
                       bytesieve_drive bytesieve_format bytesieve_cleanup_job
-                      bytesieve_cleanup_trash bytesieve_dev_cache bytesieve_sysmon comctl32
+                      bytesieve_cleanup_trash bytesieve_dev_cache bytesieve_sysmon bytesieve_op_result comctl32
                       comdlg32 shell32 ole32 dwmapi uxtheme)
 bytesieve_configure(bytesieve-gui)
 bytesieve_exe_resources(bytesieve-gui ${CMAKE_CURRENT_SOURCE_DIR}/res/gui.rc)
@@ -493,6 +499,11 @@ add_executable(test_project tests/test_project.c)
 target_link_libraries(test_project PRIVATE bytesieve_project)
 bytesieve_configure(test_project)
 add_test(NAME project COMMAND test_project)
+
+add_executable(test_op_result tests/test_op_result.c)
+target_link_libraries(test_op_result PRIVATE bytesieve_op_result)
+bytesieve_configure(test_op_result)
+add_test(NAME op_result COMMAND test_op_result)
 
 add_executable(test_clean_plan tests/test_clean_plan.c)
 target_link_libraries(test_clean_plan PRIVATE bytesieve_plan)

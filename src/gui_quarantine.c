@@ -11,6 +11,8 @@
 
 #include "gui_quarantine.h"
 #include "gui_progress.h"
+#include "gui_result.h"
+#include "gui_status_text.h"
 #include "gui_theme.h"
 #include "path.h"
 #include "quarantine.h"
@@ -38,7 +40,8 @@ enum {
     IDC_Q_SUMMARY,
     IDC_Q_INFO,
     IDC_Q_LIST,
-    IDC_Q_STATUS
+    IDC_Q_STATUS,
+    IDC_Q_RESULT /* 완료 결과 영역(gui_result) */
 };
 
 /* 목록 열. */
@@ -97,6 +100,11 @@ typedef struct {
 typedef struct {
     HWND hwnd;
     HWND refresh, restore, purge, cancel, open, summary, progress, info, list, status;
+    HWND banner; /* 완료 결과 영역: 복원·영구 삭제가 끝나면 보이고, 영구 삭제를 시작하면 숨긴다 */
+    /* 마지막 복원·영구 삭제 결과(완료 결과 영역, 언어를 바꾸면 다시 씀) */
+    int r_kind; /* 0 없음, 1 복원, 2 영구 삭제 */
+    size_t r_done, r_failed, r_skipped, r_cancelled;
+    uint64_t r_bytes; /* 영구 삭제한 항목의 기록된 크기 합 */
     HFONT font;
     int dpi;
     int progress_pos;
@@ -493,6 +501,44 @@ static void show_failures(QuarantinePanel *p, UiText title, UiText head, Pending
     free(text);
 }
 
+/*
+ * 완료 결과 영역: 마지막 복원·영구 삭제의 실제 결과 수로 판정과 요약을 지금 언어로 만들어 보인다.
+ * 영구 삭제로 확보한 용량은 격리할 때 기록한 크기 합이라 "약"으로 알린다(기록이 없으면 말하지 않음).
+ */
+static void render_result(QuarantinePanel *p)
+{
+    wchar_t detail[1024], size[32];
+    OpResult result;
+
+    if (p->r_kind == 0) {
+        return;
+    }
+    detail[0] = L'\0';
+    result = op_result_classify(p->r_done, p->r_failed, p->r_skipped, p->r_cancelled > 0);
+    if (p->r_done > 0) {
+        result_text_append(detail, 1024, p->r_kind == 1 ? UI_T_RES_RESTORED : UI_T_RES_PURGED,
+                           (unsigned)p->r_done);
+        if (p->r_kind == 2 && p->r_bytes > 0) {
+            format_size(p->r_bytes, size, 32);
+            result_text_append(detail, 1024, UI_T_RES_PURGE_FREED, size);
+        }
+    }
+    if (p->r_failed > 0) {
+        result_text_append(detail, 1024, UI_T_RES_FAILED_N, (unsigned)p->r_failed);
+    }
+    if (p->r_skipped > 0) {
+        result_text_append(detail, 1024, UI_T_RES_SKIPPED_N, (unsigned)p->r_skipped);
+    }
+    if (p->r_cancelled > 0) {
+        result_text_append(detail, 1024, UI_T_RES_CANCELLED_N, (unsigned)p->r_cancelled);
+    }
+    if (detail[0] == L'\0') {
+        result_text_append(detail, 1024, UI_T_RES_NONE_DONE);
+    }
+    /* 항목별 결과는 목록의 결과 열에 있으므로 다음 작업 단추는 두지 않는다([닫기]만). */
+    result_banner_show(p->banner, result, detail, NULL, 0);
+}
+
 size_t quarantine_panel_restore(HWND panel, int interactive)
 {
     QuarantinePanel *p = panel_of(panel);
@@ -573,6 +619,13 @@ size_t quarantine_panel_restore(HWND panel, int interactive)
     }
     reload(p, pending, pending_len);
     show_counts(p, UI_T_Q_RESTORED, restored, conflicts, failed, skipped);
+    p->r_kind = 1;
+    p->r_done = restored;
+    p->r_failed = failed;
+    p->r_skipped = conflicts + skipped; /* 같은 이름이 있어 건너뜀 포함 */
+    p->r_cancelled = 0;
+    p->r_bytes = 0;
+    render_result(p);
     free_pending(pending, pending_len);
     free(conflict_rows);
     free(rows);
@@ -773,6 +826,7 @@ int quarantine_panel_purge(HWND panel, int confirm)
         show_text(p, UI_T_Q_PURGE_NO_THREAD);
         return 0;
     }
+    result_banner_hide(p->banner); /* 작업 중에는 진행 막대·상태 줄이 진행을 보인다 */
     p->job = job;
     p->purge_finished = 0;
     p->progress_pos = 0;
@@ -787,6 +841,7 @@ static void finish_purge(QuarantinePanel *p, int interactive)
     PurgeJob *job = p->job;
     PendingNote *pending;
     size_t i, done = 0, failed = 0, cancelled = 0, len = 0;
+    uint64_t freed = 0;
 
     if (job == NULL) {
         return;
@@ -800,6 +855,7 @@ static void finish_purge(QuarantinePanel *p, int interactive)
         QuarantineStatus st = job->status[i];
         if (st == QUARANTINE_OK) {
             done++;
+            freed += job->entries[job->rows[i]].bytes;
         } else if (st == QUARANTINE_CANCELLED) {
             cancelled++;
         } else {
@@ -833,6 +889,13 @@ static void finish_purge(QuarantinePanel *p, int interactive)
     } else {
         show_counts(p, UI_T_Q_PURGED, done, failed, 0, 0);
     }
+    p->r_kind = 2;
+    p->r_done = done;
+    p->r_failed = failed;
+    p->r_skipped = 0;
+    p->r_cancelled = cancelled;
+    p->r_bytes = freed;
+    render_result(p);
     free_pending(pending, len);
     SendMessageW(GetParent(p->hwnd), WM_COMMAND,
                  MAKEWPARAM(GetDlgCtrlID(p->hwnd), QPN_PURGED), (LPARAM)p->hwnd);
@@ -919,6 +982,14 @@ static void panel_layout(QuarantinePanel *p)
     y += h + gap;
     MoveWindow(p->progress, 0, y, w, pscale(p, 16), TRUE);
     y += pscale(p, 16) + gap;
+    {
+        /* 완료 결과 영역(보일 때만 자리를 차지한다) */
+        int bh = result_banner_height(p->banner, w);
+        if (bh > 0) {
+            MoveWindow(p->banner, 0, y, w, bh, TRUE);
+            y += bh + gap;
+        }
+    }
     MoveWindow(p->info, 0, y, w, pscale(p, 20), TRUE);
     y += pscale(p, 20);
     MoveWindow(p->status, 0, y, w, pscale(p, 20), TRUE);
@@ -996,6 +1067,7 @@ static void panel_create_controls(QuarantinePanel *p)
                           IDC_Q_INFO);
     p->status = panel_child(p, L"STATIC", L"", SS_LEFTNOWORDWRAP | SS_ENDELLIPSIS, 0,
                             IDC_Q_STATUS);
+    p->banner = result_banner_create(p->hwnd, IDC_Q_RESULT, p->font, p->dpi);
     p->list = panel_child(p, WC_LISTVIEWW, L"",
                           LVS_REPORT | LVS_OWNERDATA | LVS_SHOWSELALWAYS | WS_TABSTOP,
                           WS_EX_CLIENTEDGE, IDC_Q_LIST);
@@ -1236,6 +1308,10 @@ void quarantine_panel_apply_language(HWND panel, HFONT font)
     measure_buttons(p);
     update_summary(p);
     render_status(p);
+    result_banner_set_font(p->banner, p->font);
+    if (result_banner_visible(p->banner)) {
+        render_result(p); /* 결과 요약을 새 언어로 */
+    }
     panel_layout(p);
     /* 상태·결과 열은 그릴 때 지금 언어로 만든다(가상 목록). */
     InvalidateRect(p->list, NULL, TRUE);
@@ -1323,6 +1399,30 @@ int quarantine_panel_verify(HWND panel, size_t expect_rows, size_t expect_ok)
                 SendMessageW(p->progress, PBM_GETPOS, 0, 0) == PROGRESS_RANGE);
     PANEL_CHECK(!p->purge_finished || progress_state(p->progress) == PROGRESS_DONE ||
                 progress_state(p->progress) == PROGRESS_FAILED);
+    /* 완료 결과 영역: 작업 전에는 숨기고, 복원·영구 삭제 뒤에는 실제 결과 수로 판정·제목·요약이 맞다. */
+    if (p->r_kind == 0) {
+        PANEL_CHECK(!result_banner_visible(p->banner));
+    } else {
+        wchar_t sentence[256];
+        OpResult want = op_result_classify(p->r_done, p->r_failed, p->r_skipped, p->r_cancelled > 0);
+        PANEL_CHECK(result_banner_visible(p->banner) && result_banner_result(p->banner) == want);
+        GetWindowTextW(p->banner, buf, MAX_PATH + 64);
+        PANEL_CHECK(wcscmp(buf, gui_op_result_text(want)) == 0);
+        if (p->r_done > 0) {
+            swprintf(sentence, 256, ui_text(p->r_kind == 1 ? UI_T_RES_RESTORED : UI_T_RES_PURGED),
+                     (unsigned)p->r_done);
+            PANEL_CHECK(wcsstr(result_banner_detail(p->banner), sentence) != NULL);
+        }
+        if (p->r_skipped > 0) {
+            swprintf(sentence, 256, ui_text(UI_T_RES_SKIPPED_N), (unsigned)p->r_skipped);
+            PANEL_CHECK(wcsstr(result_banner_detail(p->banner), sentence) != NULL);
+        }
+        /* 영구 삭제를 끝까지 마쳤으면(목록이 비었음) 실패·취소 없이 완료 */
+        PANEL_CHECK(p->r_kind != 2 || !p->purge_finished || p->r_failed > 0 || want == OP_RESULT_SUCCESS ||
+                    want == OP_RESULT_EMPTY);
+        wprintf(L"result: %ls %ls\n", p->r_kind == 1 ? L"restore" : L"purge", op_result_name(want));
+        fflush(stdout);
+    }
     return failures;
 }
 
@@ -1406,5 +1506,6 @@ void quarantine_panel_set_dpi(HWND panel, int dpi)
 
     if (p != NULL && dpi > 0) {
         p->dpi = dpi;
+        result_banner_set_dpi(p->banner, dpi);
     }
 }

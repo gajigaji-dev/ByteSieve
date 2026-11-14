@@ -73,6 +73,7 @@ GUI(`bytesieve-gui`) 안의 파일은 다음처럼 나뉩니다. 페이지마다
 | `gui_settings` | 설정 페이지(테마·표시 언어·스캔 기록 자동 저장). 저장은 `app_settings`, 자동 저장은 `gui_main`을 거쳐 폴더 스캔 패널과 같은 경로 |
 | `gui_drives`·`gui_cleanup`·`gui_quarantine`·`gui_monitor`·`gui_booster`·`gui_treemap` | 나머지 페이지 패널과 트리맵 보기 |
 | `gui_status_text` | core 상태 번호(휴지통 이동 결과·복구 가능성, Cleaner 대상 이름·설명·분류·상태, 개발 캐시 이름·설명·위치 상태·근거, 건너뛴 이유, BitLocker 상태, Booster 시작 프로그램 위치·보호 이유·끝내기 결과)를 지금 표시 언어의 화면 문구로 연결. core 의 `*_status_text`(한국어, CLI·테스트용)는 그대로 두고 같은 분류를 `ui_lang` 표에 잇는다(한국어 결과는 core 문구와 같음, 자체 검사로 확인) |
+| `gui_result` | 정리 작업이 끝나면 보이는 완료 결과 영역(색 막대·제목·결과 요약·다음 작업 단추). 제목·색은 `op_result` 판정(완료·일부 완료·완료하지 못함·취소됨·없음)으로만 정하고, 작업 중에는 숨김 |
 | `gui_progress` | 진행 막대 상태(대기·진행·움직이는 막대·완료·취소·실패) 공용 처리. 실패·취소해도 막대가 비어 사라져 보이지 않게 함 |
 | `gui_theme` | 창 외곽(DWM 둥근 모서리·Mica·어두운 제목 표시줄), 밝게·어둡게 색 토큰(`theme_color`, 시스템 강조색), 창 트리 전체에 모드 적용(`theme_apply_window`: 목록·트리·단추·입력 칸 테마와 색, 클래스 배경), 패널의 `WM_CTLCOLOR*` 처리, 언어별 UI 글꼴·페이지 제목 글꼴, 글자 폭에 맞춘 컨트롤 크기 |
 

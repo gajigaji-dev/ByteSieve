@@ -14,6 +14,7 @@
 #include "cleanup_trash.h"
 #include "gui_cleanup.h"
 #include "gui_progress.h"
+#include "gui_result.h"
 #include "gui_status_text.h"
 #include "gui_theme.h"
 #include "quarantine.h"
@@ -55,7 +56,13 @@ enum {
     IDC_C_TRASH,
     IDC_C_SELECTION,
     IDC_C_ECO_LABEL,
-    IDC_C_ECO
+    IDC_C_ECO,
+    IDC_C_RESULT, /* 완료 결과 영역(gui_result) */
+    /* 완료 결과 영역의 다음 작업 단추 */
+    IDC_C_ACT_FAILURES,
+    IDC_C_ACT_RECYCLE,
+    IDC_C_ACT_QUARANTINE,
+    IDC_C_ACT_DETECT
 };
 
 /* 목록 열. 첫 열(용량)에 체크 상자가 붙는다. */
@@ -135,6 +142,7 @@ typedef struct {
     HWND hwnd;
     HWND path, browse, start, cancel, progress, status, warn, filter_label, filter, summary,
         list, check_all, check_none, trash_btn, selection, eco_label, eco;
+    HWND banner; /* 완료 결과 영역: 휴지통 이동이 끝나면 보이고, 다시 탐지·이동을 시작하면 숨긴다 */
     HFONT font;
     int dpi;
 
@@ -173,6 +181,8 @@ typedef struct {
     ScanStatus detected;     /* C_STATUS_DETECTED */
     uint64_t detect_ms;
     size_t t_moved, t_failed, t_cancelled, t_quarantined; /* C_STATUS_TRASHED */
+    size_t t_fail_only, t_skipped; /* 완료 결과 영역: 실패와 건너뜀을 나눠 센다(t_failed 는 둘의 합) */
+    int t_was_cancelled;
     uint64_t t_bytes, t_elapsed_ms;
 
     wchar_t cell[512]; /* LVN_GETDISPINFO 용 */
@@ -875,6 +885,57 @@ static void show_failures(CleanupPanel *p, size_t failed)
     free(text);
 }
 
+/*
+ * 완료 결과 영역: 마지막 휴지통 이동의 실제 결과(옮긴 수·용량, 격리 폴더로 간 수, 실패·건너뜀·취소)로
+ * 판정(op_result)과 요약을 지금 언어로 만들어 보인다. 옮긴 것은 휴지통·격리 폴더에 있으므로 "확보"라고
+ * 하지 않고 비우거나 영구 삭제해야 공간이 생긴다고 안내한다. 다음 작업 단추는 해당할 때만 둔다.
+ */
+static void render_result(CleanupPanel *p)
+{
+    wchar_t detail[1024], size[32];
+    ResultAction actions[RESULT_BANNER_MAX_ACTIONS];
+    int n = 0;
+    size_t to_trash = p->t_moved - p->t_quarantined;
+    OpResult result = op_result_classify(p->t_moved, p->t_fail_only, p->t_skipped, p->t_was_cancelled);
+
+    detail[0] = L'\0';
+    if (p->t_moved > 0) {
+        format_size(p->t_bytes, size, 32);
+        result_text_append(detail, 1024, UI_T_RES_MOVED, (unsigned)p->t_moved, size);
+        if (to_trash > 0) {
+            result_text_append(detail, 1024, UI_T_RES_WHERE_TRASH);
+        }
+        if (p->t_quarantined > 0) {
+            result_text_append(detail, 1024, UI_T_RES_WHERE_QUARANTINE, (unsigned)p->t_quarantined);
+        }
+    }
+    if (p->t_fail_only > 0) {
+        result_text_append(detail, 1024, UI_T_RES_FAILED_N, (unsigned)p->t_fail_only);
+    }
+    if (p->t_skipped > 0) {
+        result_text_append(detail, 1024, UI_T_RES_SKIPPED_N, (unsigned)p->t_skipped);
+    }
+    if (p->t_was_cancelled) {
+        result_text_append(detail, 1024, UI_T_RES_CANCELLED_N, (unsigned)p->t_cancelled);
+    }
+    if (detail[0] == L'\0') {
+        result_text_append(detail, 1024, UI_T_RES_NONE_DONE);
+    }
+    if (p->t_failed > 0) {
+        actions[n].id = IDC_C_ACT_FAILURES, actions[n++].text = UI_T_RES_ACT_FAILURES;
+    }
+    if (p->t_quarantined > 0) {
+        actions[n].id = IDC_C_ACT_QUARANTINE, actions[n++].text = UI_T_RES_ACT_QUARANTINE;
+    }
+    if (to_trash > 0 && n < RESULT_BANNER_MAX_ACTIONS) {
+        actions[n].id = IDC_C_ACT_RECYCLE, actions[n++].text = UI_T_RES_ACT_RECYCLE;
+    }
+    if (n < RESULT_BANNER_MAX_ACTIONS) {
+        actions[n].id = IDC_C_ACT_DETECT, actions[n++].text = UI_T_RES_ACT_DETECT;
+    }
+    result_banner_show(p->banner, result, detail, actions, n);
+}
+
 static void finish_trash(CleanupPanel *p)
 {
     CleanPlanTotals totals;
@@ -910,7 +971,11 @@ static void finish_trash(CleanupPanel *p)
     p->t_quarantined = quarantined;
     p->t_bytes = bytes;
     p->t_elapsed_ms = elapsed;
+    p->t_fail_only = totals.failed;
+    p->t_skipped = totals.skipped;
+    p->t_was_cancelled = totals.was_cancelled || cancelled > 0;
     show_status(p, C_STATUS_TRASHED);
+    render_result(p);
     /* 일부라도 실패하면 빨간색, 취소하면 멈춘 자리에서 노란색, 모두 옮기면 가득. */
     progress_set(p->progress,
                  failed > 0 ? PROGRESS_FAILED : cancelled > 0 ? PROGRESS_CANCELLED : PROGRESS_DONE, 0,
@@ -1100,6 +1165,14 @@ static void panel_layout(CleanupPanel *p)
     y += pscale(p, 20);
     MoveWindow(p->warn, 0, y, w, pscale(p, 20), TRUE);
     y += pscale(p, 20) + gap;
+    {
+        /* 완료 결과 영역(보일 때만 자리를 차지한다) */
+        int bh = result_banner_height(p->banner, w);
+        if (bh > 0) {
+            MoveWindow(p->banner, 0, y, w, bh, TRUE);
+            y += bh + gap;
+        }
+    }
 
     MoveWindow(p->filter_label, 0, y + pscale(p, 4), label_w, pscale(p, 20), TRUE);
     /* 콤보 상자 높이는 펼친 목록 높이까지 포함한다. */
@@ -1243,6 +1316,7 @@ static void panel_create_controls(CleanupPanel *p)
                                IDC_C_TRASH);
     p->selection = panel_child(p, L"STATIC", L"", SS_LEFTNOWORDWRAP | SS_ENDELLIPSIS, 0,
                                IDC_C_SELECTION);
+    p->banner = result_banner_create(p->hwnd, IDC_C_RESULT, p->font, p->dpi);
     p->list = panel_child(p, WC_LISTVIEWW, L"",
                           LVS_REPORT | LVS_OWNERDATA | LVS_SHOWSELALWAYS | WS_TABSTOP,
                           WS_EX_CLIENTEDGE, IDC_C_LIST);
@@ -1316,6 +1390,19 @@ static LRESULT CALLBACK panel_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             return 0;
         case IDC_C_TRASH:
             cleanup_panel_trash(hwnd, 1);
+            return 0;
+        case IDC_C_ACT_FAILURES:
+            show_failures(p, p->t_failed);
+            return 0;
+        case IDC_C_ACT_RECYCLE:
+            result_open_recycle_bin(hwnd);
+            return 0;
+        case IDC_C_ACT_QUARANTINE:
+            SendMessageW(GetParent(hwnd), WM_COMMAND,
+                         MAKEWPARAM(GetDlgCtrlID(hwnd), CPN_OPEN_QUARANTINE), (LPARAM)hwnd);
+            return 0;
+        case IDC_C_ACT_DETECT:
+            cleanup_panel_start(hwnd, NULL);
             return 0;
         case IDC_C_FILTER:
         case IDC_C_ECO:
@@ -1483,6 +1570,7 @@ int cleanup_panel_start(HWND panel, const wchar_t *root)
         ProjectOptions po;
         memset(&po, 0, sizeof(po));
         project_list_free(&p->projects);
+        result_banner_hide(p->banner); /* 이전 결과는 새 탐지와 맞지 않는다 */
         p->job = cleanup_job_start_ex(target, PROGRESS_INTERVAL_MS, &po, on_job_notify, panel);
     }
     free(target);
@@ -1581,6 +1669,7 @@ int cleanup_panel_trash(HWND panel, int confirm)
     }
     free(index);
     memset(&ops, 0, sizeof(ops)); /* 프로젝트 정리에는 영구 삭제 대상이 없다 */
+    result_banner_hide(p->banner); /* 작업 중에는 진행 막대·상태 줄이 진행을 보인다 */
     p->trash = clean_plan_run_start(&p->plan, &ops, on_trash_notify, panel);
     if (p->trash == NULL) {
         show_text(p, UI_T_C_TRASH_START_FAILED);
@@ -1634,6 +1723,10 @@ void cleanup_panel_apply_language(HWND panel, HFONT font)
     update_summary(p);
     update_selection(p);
     render_status(p);
+    result_banner_set_font(p->banner, p->font);
+    if (result_banner_visible(p->banner)) {
+        render_result(p); /* 결과 요약·단추를 새 언어로 */
+    }
     panel_layout(p);
     /* 목록 칸(유형·비고·복구·마지막 활동·정리)은 그릴 때 지금 언어로 만든다(가상 목록). */
     InvalidateRect(p->list, NULL, TRUE);
@@ -1758,6 +1851,12 @@ int cleanup_panel_verify_lang(HWND panel)
                 PANEL_CHECK(!has_hangul(buf));
             }
         }
+    }
+    /* 완료 결과 영역이 보이면 제목이 지금 언어다 */
+    if (result_banner_visible(p->banner)) {
+        wchar_t title[64];
+        GetWindowTextW(p->banner, title, 64);
+        PANEL_CHECK(wcscmp(title, gui_op_result_text(result_banner_result(p->banner))) == 0);
     }
     return failures;
 }
@@ -2058,6 +2157,36 @@ int cleanup_panel_verify_trash(HWND panel, size_t expect_moved)
     GetWindowTextW(p->selection, buf, 512);
     selection_text(p, want, 512);
     PANEL_CHECK(p->moved_count > 0 && wcscmp(buf, want) == 0);
+    /*
+     * 완료 결과 영역: 항목 결과로 센 실제 이동 수(moved)와 결과 요약의 수·용량이 같고, 판정·제목이 맞으며
+     * (실패·건너뜀·취소가 없을 때만 "완료"), 해당하는 다음 작업 단추가 있다.
+     */
+    {
+        wchar_t sentence[256], size[32];
+        OpResult want_result = op_result_classify(moved, p->t_fail_only, p->t_skipped, p->t_was_cancelled);
+        int k, has_quarantine = 0, has_detect = 0;
+        PANEL_CHECK(result_banner_visible(p->banner));
+        PANEL_CHECK(p->t_moved == moved && result_banner_result(p->banner) == want_result);
+        PANEL_CHECK((want_result == OP_RESULT_SUCCESS) ==
+                    (moved > 0 && p->t_fail_only + p->t_skipped == 0 && !p->t_was_cancelled));
+        GetWindowTextW(p->banner, buf, 512);
+        PANEL_CHECK(wcscmp(buf, gui_op_result_text(want_result)) == 0);
+        format_size(p->t_bytes, size, 32);
+        swprintf(sentence, 256, ui_text(UI_T_RES_MOVED), (unsigned)moved, size);
+        PANEL_CHECK(wcsstr(result_banner_detail(p->banner), sentence) != NULL);
+        for (k = 0; k < result_banner_action_count(p->banner); k++) {
+            has_quarantine |= result_banner_action_id(p->banner, k) == IDC_C_ACT_QUARANTINE;
+            has_detect |= result_banner_action_id(p->banner, k) == IDC_C_ACT_DETECT;
+        }
+        PANEL_CHECK(has_quarantine == (p->t_quarantined > 0));
+        if (p->t_quarantined > 0) {
+            swprintf(sentence, 256, ui_text(UI_T_RES_WHERE_QUARANTINE), (unsigned)p->t_quarantined);
+            PANEL_CHECK(wcsstr(result_banner_detail(p->banner), sentence) != NULL);
+        }
+        PANEL_CHECK(has_detect || result_banner_action_count(p->banner) == RESULT_BANNER_MAX_ACTIONS);
+        wprintf(L"result: %ls\n", op_result_name(want_result));
+        fflush(stdout);
+    }
     return failures;
 }
 
@@ -2121,5 +2250,6 @@ void cleanup_panel_set_dpi(HWND panel, int dpi)
 
     if (p != NULL && dpi > 0) {
         p->dpi = dpi;
+        result_banner_set_dpi(p->banner, dpi);
     }
 }

@@ -33,6 +33,8 @@
 #define CLN_ANALYZED 1
 /* 정리가 끝나면 부모에게 WM_COMMAND(MAKEWPARAM(id, CLN_CLEANED), panel). */
 #define CLN_CLEANED 2
+/* 완료 결과 영역의 [격리 폴더 보기]를 누르면 부모에게 WM_COMMAND(MAKEWPARAM(id, CLN_OPEN_QUARANTINE), panel). */
+#define CLN_OPEN_QUARANTINE 3
 
 int cleaner_panel_register(HINSTANCE inst);
 HWND cleaner_panel_create(HWND parent, int id, HFONT font, int dpi);
