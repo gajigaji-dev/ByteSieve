@@ -186,6 +186,7 @@ GitHub Actions(`.github/workflows/ci.yml`)가 `main`·`dev`에 올리거나 PR�
 | [docs/performance.md](docs/performance.md) | `bytesieve-bench` 사용법과 스캐너 진단 값, 측정 결과, 병렬 스캔 메모리 최적화 전후 비교, 병목 분석 |
 | [docs/testing.md](docs/testing.md) | 테스트 목록과 범위, GUI 자체 검사 옵션 |
 | [docs/release.md](docs/release.md) | 배포 결정 사항, 산출물(설치 프로그램·포터블 ZIP·SHA256), 버전 관리, 릴리스 절차, 출시 전 확인 목록 |
+| [docs/release-v1.0.1.md](docs/release-v1.0.1.md) | 1.0.1 개발 요약(다국어·정리 결과 영역·DPI·성능 개선·버그 수정·릴리스 검증) |
 | [docs/platform.md](docs/platform.md) | Windows 종속 코드의 위치와 core 의존성, macOS·Linux 확장 방향(계획) |
 | [CHANGELOG.md](CHANGELOG.md) | 버전별 변경 기록(릴리스 노트) |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | 기여 안내: Issue·Label, 브랜치·커밋·PR 규칙, 개발 환경, 코드 규칙, 정리 기능 안전 원칙 |
