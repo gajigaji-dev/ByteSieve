@@ -385,6 +385,295 @@ typedef enum {
     UI_T_C_FAILURES_TITLE,
     UI_T_C_BROWSE_TITLE,
 
+    /* core 상태 문구: Cleaner 대상 종류 이름·설명(CleanerKind 순서).
+     * 설명(UI_T_K_NOTE_*·UI_T_D_NOTE_*)은 서식 문자열이 아니라 그대로 보이는 문단이다("%TEMP%" 같은 글자가
+     * 들어 있어 swprintf 의 서식으로 쓰면 안 됨, "%ls" 인자로만 쓴다). test_ui_lang 은 이 범위를 서식 비교에서 뺀다. */
+    UI_T_K_NAME_USER_TEMP,
+    UI_T_K_NAME_WER,
+    UI_T_K_NAME_RECYCLE,
+    UI_T_K_NAME_CHROME,
+    UI_T_K_NAME_EDGE,
+    UI_T_K_NAME_FIREFOX,
+    UI_T_K_NAME_DEV,
+    UI_T_K_NAME_VDISK,
+    UI_T_K_NOTE_USER_TEMP,
+    UI_T_K_NOTE_WER,
+    UI_T_K_NOTE_RECYCLE,
+    UI_T_K_NOTE_CHROME,
+    UI_T_K_NOTE_EDGE,
+    UI_T_K_NOTE_FIREFOX,
+    UI_T_K_NOTE_DEV,
+    UI_T_K_NOTE_VDISK,
+    UI_T_K_GROUP_WINDOWS, /* CleanerGroup 순서 */
+    UI_T_K_GROUP_RECYCLE,
+    UI_T_K_GROUP_BROWSER,
+    UI_T_K_GROUP_DEV,
+    UI_T_K_GROUP_VDISK,
+    UI_T_K_ST_READY, /* CleanerStatus 순서 */
+    UI_T_K_ST_EMPTY,
+    UI_T_K_ST_NOT_FOUND,
+    UI_T_K_ST_APP_RUNNING,
+    UI_T_K_ST_DENIED,
+    UI_T_K_ST_ERROR,
+    UI_T_K_ST_CANCELLED,
+    UI_T_K_ST_INFO_ONLY,
+    UI_T_K_PROFILES,   /* %d: 브라우저 프로필 수 */
+    UI_T_K_ALL_DRIVES, /* 휴지통 위치 */
+    UI_T_SKIP_NONE,    /* CleanSkip 순서 */
+    UI_T_SKIP_RECENT,
+    UI_T_SKIP_APP_RUNNING,
+    /* core 상태 문구: 개발 캐시 이름·설명(DevCacheKind 순서), 위치 상태, 위치 근거 */
+    UI_T_D_LABEL_NPM,
+    UI_T_D_LABEL_PIP,
+    UI_T_D_LABEL_GRADLE,
+    UI_T_D_LABEL_GRADLE_WRAPPER,
+    UI_T_D_LABEL_CARGO_REGISTRY,
+    UI_T_D_LABEL_CARGO_GIT,
+    UI_T_D_LABEL_NUGET_PACKAGES,
+    UI_T_D_LABEL_NUGET_HTTP,
+    UI_T_D_LABEL_PNPM,
+    UI_T_D_LABEL_YARN,
+    UI_T_D_LABEL_YARN_BERRY,
+    UI_T_D_LABEL_MAVEN,
+    UI_T_D_LABEL_GO_MOD,
+    UI_T_D_LABEL_GO_BUILD,
+    UI_T_D_LABEL_CONDA,
+    UI_T_D_NOTE_NPM,
+    UI_T_D_NOTE_PIP,
+    UI_T_D_NOTE_GRADLE,
+    UI_T_D_NOTE_GRADLE_WRAPPER,
+    UI_T_D_NOTE_CARGO_REGISTRY,
+    UI_T_D_NOTE_CARGO_GIT,
+    UI_T_D_NOTE_NUGET_PACKAGES,
+    UI_T_D_NOTE_NUGET_HTTP,
+    UI_T_D_NOTE_PNPM,
+    UI_T_D_NOTE_YARN,
+    UI_T_D_NOTE_YARN_BERRY,
+    UI_T_D_NOTE_MAVEN,
+    UI_T_D_NOTE_GO_MOD,
+    UI_T_D_NOTE_GO_BUILD,
+    UI_T_D_NOTE_CONDA,
+    UI_T_D_ST_FOUND, /* DevCacheStatus 순서 */
+    UI_T_D_ST_NOT_FOUND,
+    UI_T_D_ST_NOT_DIR,
+    UI_T_D_ST_LINK,
+    UI_T_D_ST_UNRECOGNIZED,
+    UI_T_D_ST_NO_PATH,
+    UI_T_D_SRC_DEFAULT, /* DevCacheSource 순서 */
+    UI_T_D_SRC_ENV,     /* %ls: 환경 변수 이름 */
+    UI_T_D_SRC_CONFIG,  /* %ls: 설정 파일 경로 */
+
+    /* 시스템 정리·개발 캐시(Cleaner 패널): 단추·열 머리글·안내 */
+    UI_T_CL_REFRESH,
+    UI_T_CL_RUN,
+    UI_T_CL_COL_TARGET,
+    UI_T_CL_COL_GROUP,
+    UI_T_CL_COL_GROWTH,
+    UI_T_CL_COL_EXCLUDED,
+    UI_T_CL_COL_LOCATION,
+    UI_T_CL_COL_SOURCE,
+    UI_T_CL_INFO_SYSTEM,
+    UI_T_CL_INFO_CACHE,
+    UI_T_CL_INFO_ALL,
+
+    /* Cleaner: 목록 칸(상태·제외·증감) */
+    UI_T_CL_STATE_EMPTIED,      /* %ls: 비운 용량 */
+    UI_T_CL_STATE_EMPTY_FAILED, /* %ls 이유, %08X 오류 */
+    UI_T_CL_ERROR_WORD,
+    UI_T_CL_STATE_DONE,         /* %u 옮김, %ls 용량, %ls 격리 표시, %ls " ·" 또는 "" */
+    UI_T_CL_PART_QUARANTINE,
+    UI_T_CL_PART_SKIPPED,       /* %u */
+    UI_T_CL_PART_FAILED,        /* %u */
+    UI_T_CL_PART_CANCELLED,     /* %u */
+    UI_T_CL_STATE_PERMANENT,
+    UI_T_CL_STATE_CAUTION,
+    UI_T_CL_EXCL_RECENT,        /* %u 수, %ls 용량 */
+    UI_T_CL_EXCL_DENIED,        /* %ls 앞 구분, %u 수 */
+    UI_T_CL_GROWTH_FIRST,
+    UI_T_CL_GROWTH_SAME,        /* %llu 며칠 */
+    UI_T_CL_GROWTH_DELTA,       /* %lc 부호, %ls 용량, %llu 며칠 */
+
+    /* Cleaner: 선택 줄·상세 설명 */
+    UI_T_CL_SELECTION,     /* %u 선택, %ls 실제 확보, %ls 파일 크기, %ls 휴지통 비우기 표시 */
+    UI_T_CL_SEL_RECYCLE,
+    UI_T_CL_SEL_CAUTION,   /* %u */
+    UI_T_CL_DETAIL_HINT,
+    UI_T_CL_DETAIL_SOURCE, /* " · 위치 근거: " (뒤에 근거) */
+    UI_T_CL_DETAIL_SHARED, /* %ls: 하드 링크로 나누는 용량 */
+    UI_T_CL_DETAIL_VDISK,  /* %ls 설명, %ls 위치, %ls 실제 점유, %ls 스파스 표시, %ls 줄이는 방법 */
+    UI_T_CL_UNKNOWN,
+    UI_T_CL_SPARSE,
+    UI_T_CL_DETAIL,        /* %ls 주의 표시, %ls 설명, %ls 위치, %ls 근거, %ls 상태, %ls 제외 머리, %ls 제외, %ls 하드 링크 */
+    UI_T_CL_CAUTION_TAG,
+    UI_T_CL_EXCL_LABEL,
+
+    /* Cleaner: 상태 줄 */
+    UI_T_CL_START_FAILED,
+    UI_T_CL_ANALYZING,
+    UI_T_CL_SCANNING,       /* %ls 대상, %u 지금, %u 전체, %ls 지금까지 용량 */
+    UI_T_CL_NO_MEMORY,
+    UI_T_CL_SCANNED,        /* %ls 머리말, %u 대상, %ls 실제 확보, %.1f 초 */
+    UI_T_CL_SCAN_DONE_HEAD,
+    UI_T_CL_SCAN_CANCELLED_HEAD,
+    UI_T_CL_CANCELLING_RUN,
+    UI_T_CL_NOTHING_CHECKED,
+    UI_T_CL_RUN_CANCELLED,
+    UI_T_CL_NOTHING_TO_RUN,
+    UI_T_CL_RUN_START_FAILED,
+    UI_T_CL_RUNNING_START,
+    UI_T_CL_EMPTYING,
+    UI_T_CL_RUNNING,        /* %u 끝남, %u 전체, %u 옮김, %ls 용량, %u 건너뜀·실패 */
+    UI_T_CL_RAN,            /* %u 옮김, %ls 용량, %ls 휴지통 결과, %u 건너뜀, %u 실패, %ls 취소 표시, %.1f 초 */
+    UI_T_CL_RAN_RECYCLE_DONE,   /* %ls */
+    UI_T_CL_RAN_RECYCLE_FAILED,
+    UI_T_CL_RAN_CANCELLED,
+
+    /* Cleaner: 확인·결과 창 */
+    UI_T_CL_CONFIRM_HEAD,        /* %u 대상, %ls 실제 확보, %ls 휴지통 비우기 표시 */
+    UI_T_CL_CONFIRM_RECYCLE,
+    UI_T_CL_TAG_PERMANENT,
+    UI_T_CL_TAG_CAUTION,
+    UI_T_CL_CONFIRM_DEV,         /* %u */
+    UI_T_CL_CONFIRM_DEV_CAUTION, /* %u */
+    UI_T_CL_CONFIRM_INFO,        /* 안내와 "계속할까요?" */
+    UI_T_CL_RECYCLE_CONFIRM,     /* %llu 항목 수, %ls 용량 */
+    UI_T_CL_RECYCLE_TITLE,
+    UI_T_CL_FAILURES_HEAD,       /* %u */
+    UI_T_CL_FAILURES_RECYCLE,    /* %ls 이유, %08X 오류 */
+    UI_T_CL_MOVE_FAILED,
+    UI_T_CL_RESULT_TITLE,
+
+    /* 부스터 페이지: 단추·안내·열 머리글 */
+    UI_T_B_REFRESH,
+    UI_T_B_START_LABEL,
+    UI_T_B_DISABLE,
+    UI_T_B_ENABLE,
+    UI_T_B_PROC_LABEL,
+    UI_T_B_BACKGROUND_ONLY,
+    UI_T_B_END,
+    UI_T_B_COL_NAME,
+    UI_T_B_COL_STATE,
+    UI_T_B_COL_SOURCE,
+    UI_T_B_COL_COMMAND,
+    UI_T_B_COL_RESULT,
+    UI_T_B_COL_PID,
+    UI_T_B_COL_KIND,
+    UI_T_B_COL_CPU,
+    UI_T_B_COL_MEMORY,
+    UI_T_B_COL_PATH,
+    /* 부스터: 요약·안내 줄과 칸 */
+    UI_T_B_MEASURING,
+    UI_T_B_SUMMARY,          /* %ls CPU, %ls 사용, %ls 전체, %u 사용률, %u 프로세스, %u 백그라운드 */
+    UI_T_B_SUMMARY_MEM_FAIL, /* %ls CPU */
+    UI_T_B_START_INFO,       /* %u 전체, %u 사용, %u 선택, %ls 읽기 실패 표시 */
+    UI_T_B_START_READ_ERRORS,
+    UI_T_B_APPLIED_ON,       /* %u, %ls 일부 실패 표시 */
+    UI_T_B_APPLIED_OFF,      /* %u, %ls 일부 실패 표시 */
+    UI_T_B_PARTIAL_FAIL,
+    UI_T_B_RES_CHANGED,
+    UI_T_B_RES_DENIED,
+    UI_T_B_RES_FAILED,       /* %lu */
+    UI_T_B_RES_NEEDS_ADMIN,
+    UI_T_B_STATE_ON,
+    UI_T_B_STATE_OFF,
+    UI_T_B_KIND_APP,
+    UI_T_B_KIND_BACKGROUND,
+    UI_T_B_PROC_INFO,        /* %u 선택, %ls 메모리 */
+    UI_T_B_PROC_READING,
+    UI_T_B_END_RESULT,       /* %u 끝냄, %ls 메모리, %u 실패 */
+    UI_T_B_STATE_ERROR,      /* %ls 결과, %lu 오류 */
+    UI_T_B_PROTECTED,        /* %ls 보호 이유 */
+    /* 부스터: 끝내기 확인 창 */
+    UI_T_B_CONFIRM_HEAD,     /* %u, %ls 메모리 */
+    UI_T_B_CONFIRM_MORE,     /* %u */
+    UI_T_B_CONFIRM_WARN,     /* 안내와 "계속할까요?" */
+    UI_T_B_CONFIRM_TITLE,
+    /* core 상태 문구: 시작 프로그램 위치(BoosterStartupSource 순서) */
+    UI_T_B_SRC_RUN_USER,
+    UI_T_B_SRC_RUN_MACHINE,
+    UI_T_B_SRC_RUN_MACHINE32,
+    UI_T_B_SRC_FOLDER_USER,
+    UI_T_B_SRC_FOLDER_COMMON,
+    /* core 상태 문구: 보호 이유(BoosterProtect 순서) */
+    UI_T_B_PROT_NONE,
+    UI_T_B_PROT_SYSTEM,
+    UI_T_B_PROT_SESSION,
+    UI_T_B_PROT_CRITICAL,
+    UI_T_B_PROT_WINDOWS,
+    UI_T_B_PROT_SELF,
+    UI_T_B_PROT_NO_ACCESS,
+    /* core 상태 문구: 끝내기 결과(BoosterEndStatus 순서) */
+    UI_T_B_END_OK,
+    UI_T_B_END_PROTECTED,
+    UI_T_B_END_GONE,
+    UI_T_B_END_CHANGED,
+    UI_T_B_END_DENIED,
+    UI_T_B_END_FAILED,
+
+    /* 드라이브 페이지 */
+    UI_T_DR_REFRESH,
+    UI_T_DR_HINT,
+    UI_T_DR_LOADING,
+    UI_T_DR_LIST_FAILED,     /* %lu */
+    UI_T_DR_SUMMARY,         /* %u 드라이브, %ls 전체, %ls 사용, %ls 여유, %u 실패, %u/%u 암호화, %02u:%02u:%02u */
+    UI_T_DR_START_NOMEM,
+    UI_T_DR_START_NOTHREAD,
+    UI_T_DR_COL_ROOT,
+    UI_T_DR_COL_LABEL,
+    UI_T_DR_COL_TYPE,
+    UI_T_DR_COL_FS,
+    UI_T_DR_COL_ENCRYPTION,
+    UI_T_DR_COL_TOTAL,
+    UI_T_DR_COL_USED,
+    UI_T_DR_COL_FREE,
+    UI_T_DR_COL_USAGE,
+    UI_T_DR_TYPE_REMOVABLE,
+    UI_T_DR_TYPE_FIXED,
+    UI_T_DR_TYPE_REMOTE,
+    UI_T_DR_TYPE_CDROM,
+    UI_T_DR_TYPE_RAMDISK,
+    UI_T_DR_TYPE_NO_ROOT,
+    UI_T_DR_TYPE_UNKNOWN,
+    UI_T_DR_ST_OK,
+    UI_T_DR_ST_NOT_READY,
+    UI_T_DR_ST_ACCESS_DENIED,
+    UI_T_DR_ST_MISSING,
+    UI_T_DR_ST_DISCONNECTED,
+    UI_T_DR_ST_FAILED,
+    UI_T_DR_ENC_RAW,         /* %ls 상태, %ld 원래 값 */
+    UI_T_DR_LOCKED,
+    UI_T_DR_STATUS_ERROR,    /* %ls 상태, %lu 오류 */
+    /* core 상태 문구: BitLocker 상태(DriveEncryption 순서) */
+    UI_T_DR_ENC_NOT_QUERIED,
+    UI_T_DR_ENC_NONE,
+    UI_T_DR_ENC_OFF,
+    UI_T_DR_ENC_ON,
+    UI_T_DR_ENC_LOCKED,
+    UI_T_DR_ENC_ENCRYPTING,
+    UI_T_DR_ENC_DECRYPTING,
+    UI_T_DR_ENC_SUSPENDED,
+    UI_T_DR_ENC_PENDING,
+    UI_T_DR_ENC_UNKNOWN,
+    UI_T_DR_ENC_FAILED,
+
+    /* 모니터 페이지 */
+    UI_T_M_HINT,
+    UI_T_M_STARTING,
+    UI_T_M_SUMMARY,          /* %u 초, %02u:%02u:%02u, %ls 일부 실패 표시 */
+    UI_T_M_PARTIAL,
+    UI_T_M_START_NOEVENT,
+    UI_T_M_START_NOTHREAD,
+    UI_T_M_RAM_TITLE,
+    UI_T_M_MEM_TEXT,         /* %ls 사용, %ls 전체, %ls 사용 가능, %u.%u 사용률 */
+    UI_T_M_FAILED,           /* %lu */
+    UI_T_M_MEM_INVALID,
+    UI_T_M_CPU_TEXT,         /* %u.%u 사용률, %u 논리 프로세서 */
+    UI_T_M_CPU_USAGE,        /* %u.%u */
+    UI_T_M_MEASURING,
+    UI_T_M_CPU_INVALID,
+    UI_T_M_GRAPH_TITLE,
+    UI_T_M_LEGEND_MEMORY,
+
     UI_T_COUNT
 } UiText;
 

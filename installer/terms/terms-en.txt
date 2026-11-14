@@ -1,6 +1,6 @@
 ﻿ByteSieve Terms of Use
 
-Effective date: @EFFECTIVE_DATE@
+Effective date: November 14, 2026
 
 These Terms summarize, in plain language, the conditions for installing and using ByteSieve. Your right to use ByteSieve is granted under the PolyForm Noncommercial License 1.0.0 (the "License"), which is provided unchanged together with these Terms. By selecting "I accept the agreement" during installation, you agree to both these Terms and the License.
 
@@ -132,4 +132,4 @@ For questions, bug reports or commercial use inquiries, please use https://githu
 
 Supplementary Provision
 
-These Terms take effect on @EFFECTIVE_DATE@.
+These Terms take effect on November 14, 2026.

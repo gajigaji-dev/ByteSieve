@@ -117,6 +117,7 @@ typedef struct {
     CleanerStatus status;
     uint32_t code;        /* ERROR 일 때 HRESULT 또는 Windows 오류 */
     wchar_t *label;       /* 세부 이름(개발 캐시 "npm 패키지 캐시", 브라우저 프로필 수 등), NULL 가능 */
+    int profiles;         /* 브라우저: 찾은 프로필 수(label 의 숫자, 화면이 지금 언어로 다시 쓸 때 씀). 그 밖은 0 */
     wchar_t *location;    /* 표시 위치(폴더, 휴지통은 "모든 드라이브"), NULL 가능 */
     CleanerEntry *entries;
     size_t entry_count;

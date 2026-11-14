@@ -3,7 +3,7 @@
 ```
 disk-scanner [--max-depth N] [--jsonl] [--track [--history-dir DIR]] [--threads N] <directory>
 disk-scanner -h | --help
-disk-scanner --version                  # 버전(예: disk-scanner 1.0.0)
+disk-scanner --version                  # 버전(예: disk-scanner 1.0.1)
 disk-scanner find <directory> ...        # 정리 후보 찾기: 아래 [find](#정리-후보-찾기-disk-scanner-find) 참고
 disk-scanner clean project|system ...   # 정리: 아래 [clean](#정리-disk-scanner-clean) 참고
 disk-scanner devenv ...                 # 개발 환경 분석: 아래 [devenv](#개발-환경-분석-disk-scanner-devenv) 참고

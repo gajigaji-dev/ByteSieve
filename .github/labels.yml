@@ -1,0 +1,41 @@
+# ByteSieve Issue·PR 라벨 목록 (참고용)
+# 이 파일은 GitHub에 자동으로 반영되지 않는다. 라벨을 만들거나 고칠 때 기준으로 쓴다.
+#   gh label create <name> --color <color> --description "<description>"
+# Issue 양식(.github/ISSUE_TEMPLATE/*.yml)의 labels 에 적은 라벨이 저장소에 없으면 GitHub가 조용히 건너뛴다.
+
+# ---- 추가할 라벨 ----
+- name: v1.0.1
+  color: "0E8A16"
+  description: 1.0.1 패치 릴리스 범위
+- name: i18n
+  color: "1D76DB"
+  description: 번역·표시 언어(ko/en/ja/zh-Hans)
+- name: gui
+  color: "5319E7"
+  description: GUI(bytesieve-gui)
+- name: cli
+  color: "C5DEF5"
+  description: CLI(disk-scanner)
+- name: installer
+  color: "FBCA04"
+  description: 설치 프로그램·포터블 ZIP·이용약관
+- name: release
+  color: "B60205"
+  description: 버전·CHANGELOG·태그·릴리스 공개
+- name: safety
+  color: "D93F0B"
+  description: 정리(삭제) 안전 장치·데이터 유실 방지
+
+# ---- 이미 있는 GitHub 기본 라벨 중 양식에서 쓰는 것 ----
+- name: bug
+  color: "d73a4a"
+  description: Something isn't working
+- name: enhancement
+  color: "a2eeef"
+  description: New feature or request
+- name: documentation
+  color: "0075ca"
+  description: Improvements or additions to documentation
+- name: help wanted
+  color: "008672"
+  description: Extra attention is needed

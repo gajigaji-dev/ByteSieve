@@ -61,6 +61,11 @@ static void test_table(void)
                 g_failures++;
             }
             format_signature(s, sig, 128);
+            /* 설명 문단(UI_T_K_NOTE_*·UI_T_D_NOTE_*)은 서식이 아니라 그대로 보이는 글이다("%TEMP%"). */
+            if ((id >= UI_T_K_NOTE_USER_TEMP && id <= UI_T_K_NOTE_VDISK) ||
+                (id >= UI_T_D_NOTE_NPM && id <= UI_T_D_NOTE_CONDA)) {
+                continue;
+            }
             if (wcscmp(sig, base) != 0) {
                 fprintf(stderr, "format mismatch: id %d, lang %ls: \"%ls\" vs \"%ls\"\n", id,
                         ui_lang_name((UiLang)lang), sig, base);

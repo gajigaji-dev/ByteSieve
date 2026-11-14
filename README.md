@@ -10,23 +10,23 @@ CLI(`disk-scanner`)와 Win32 GUI(`bytesieve-gui`)를 제공합니다.
 **요구 사항**: Windows 10/11 64비트(x64)
 
 최신 버전은 [GitHub Releases의 최신 릴리스](https://github.com/gajigaji-dev/ByteSieve/releases/latest)에서 내려받습니다.
-지금 최신 버전은 **1.0.0**입니다.
+지금 최신 버전은 **1.0.1**입니다.
 
 | 파일 | 용도 |
 |---|---|
-| [ByteSieve-1.0.0-setup-x64.exe](https://github.com/gajigaji-dev/ByteSieve/releases/download/v1.0.0/ByteSieve-1.0.0-setup-x64.exe) | **설치 프로그램(권장)**. 관리자 권한 없이 `%LOCALAPPDATA%\Programs\ByteSieve`에 설치하고 시작 메뉴 바로 가기를 만듭니다 |
-| [ByteSieve-1.0.0-portable-x64.zip](https://github.com/gajigaji-dev/ByteSieve/releases/download/v1.0.0/ByteSieve-1.0.0-portable-x64.zip) | **포터블 버전**. 설치하지 않고 실행합니다 |
-| [SHA256SUMS.txt](https://github.com/gajigaji-dev/ByteSieve/releases/download/v1.0.0/SHA256SUMS.txt) | 내려받은 파일 확인용 |
+| [ByteSieve-1.0.1-setup-x64.exe](https://github.com/gajigaji-dev/ByteSieve/releases/download/v1.0.1/ByteSieve-1.0.1-setup-x64.exe) | **설치 프로그램(권장)**. 관리자 권한 없이 `%LOCALAPPDATA%\Programs\ByteSieve`에 설치하고 시작 메뉴 바로 가기를 만듭니다 |
+| [ByteSieve-1.0.1-portable-x64.zip](https://github.com/gajigaji-dev/ByteSieve/releases/download/v1.0.1/ByteSieve-1.0.1-portable-x64.zip) | **포터블 버전**. 설치하지 않고 실행합니다 |
+| [SHA256SUMS.txt](https://github.com/gajigaji-dev/ByteSieve/releases/download/v1.0.1/SHA256SUMS.txt) | 내려받은 파일 확인용 |
 
 이전 버전과 버전별 릴리스 노트는 [Releases 목록](https://github.com/gajigaji-dev/ByteSieve/releases)에 있습니다.
 
 **설치 프로그램**
-1. `ByteSieve-1.0.0-setup-x64.exe`를 실행하고 설치 언어(한국어·English·日本語·简体中文)를 고릅니다. 고른 언어가 앱 표시 언어가 됩니다(나중에 [설정]에서 바꿀 수 있음).
+1. `ByteSieve-1.0.1-setup-x64.exe`를 실행하고 설치 언어(한국어·English·日本語·简体中文)를 고릅니다. 고른 언어가 앱 표시 언어가 됩니다(나중에 [설정]에서 바꿀 수 있음).
 2. 이용약관에 동의하고 설치를 마치면 바로 실행할 수 있습니다. 이후에는 시작 메뉴의 **ByteSieve**로 실행합니다.
 3. 제거는 Windows [설정] → [앱] → [설치된 앱]에서 합니다.
 
 **포터블 버전**
-1. ZIP을 원하는 폴더에 풉니다(`ByteSieve-1.0.0-portable-x64\` 폴더가 생깁니다).
+1. ZIP을 원하는 폴더에 풉니다(`ByteSieve-1.0.1-portable-x64\` 폴더가 생깁니다).
 2. GUI는 `bytesieve-gui.exe`를 실행합니다. CLI `disk-scanner.exe`도 같은 폴더에 있습니다([빠른 시작](#빠른-시작) 참고).
 
 **알아 둘 점**
@@ -59,7 +59,7 @@ CLI(`disk-scanner`)와 Win32 GUI(`bytesieve-gui`)를 제공합니다.
 | 개발 환경 분석 | 공용 개발 캐시 15종(npm·pip·Gradle·Cargo·NuGet·pnpm·Yarn v1/Berry·Maven·Go 모듈/빌드·Conda)의 위치(환경 변수·설정 파일)·용량·실제 확보, WSL2·Docker Desktop 가상 디스크(`.vhdx`)의 크기·실제 점유와 줄이는 명령 안내(정리하지 않음), 분석할 때마다 캐시·가상 디스크 용량을 기록해 직전 기록보다 늘어난·줄어든 용량 표시(`disk-scanner devenv`, GUI [개발 캐시]의 증감 열) |
 | 시스템 정리·개발 캐시 | GUI [시스템 정리] 페이지는 사용자 임시 파일(`%TEMP%`)·Windows 오류 보고서·휴지통·브라우저(Chrome·Edge·Firefox) 캐시를, [개발 캐시] 페이지는 공용 개발 캐시(npm·pip·Gradle·Cargo·NuGet·pnpm·Yarn·Maven·Go·Conda, 환경 변수·설정 파일까지 확인한 위치와 그 근거 표시)와 WSL·Docker 가상 디스크를 분석해(같은 Cleaner 엔진, 분석 범위만 나눔) 대상별 실제 확보 용량을 보여 주고, 고른 대상만 정리. 설정한 캐시 위치가 링크·캐시 구조가 아니면 이유와 함께 정리하지 않음. 휴지통 외에는 기존 안전 장치를 거쳐 휴지통(없는 드라이브는 격리 폴더)으로 옮기며, 최근 24시간 안에 바뀐 임시 파일·실행 중인 브라우저의 캐시는 건너뜀. 휴지통 비우기(영구 삭제)는 직접 고르고 따로 한 번 더 확인해야 함. 개발 도구 캐시도 [모두 선택]에 들어가지 않아 직접 골라야 하며, 오프라인 빌드가 안 되는 캐시는 주의로 표시 |
 | Booster | 시작 프로그램 켜기/끄기(작업 관리자와 같은 방식, 등록은 지우지 않아 되돌릴 수 있음), 전체·프로세스별 CPU·메모리 사용량, 앱/백그라운드 구분과 고른 프로세스 끝내기(시스템·Windows 구성 요소·ByteSieve 자신은 보호, PID 재사용 확인) |
-| 표시 언어·Windows 11 모양 | GUI를 한국어·영어·일본어·중국어 간체로 표시(환경 변수 → [설정]에서 고른 언어·설치 언어 → Windows 표시 언어 순, 언어별 글꼴, 문구 길이에 맞춘 단추 폭). 지금은 사이드바 메뉴·페이지 제목·[설정] 페이지와 폴더 스캔 페이지(컨트롤·상태 줄·분석 줄·트리맵·확인 창)·프로젝트 정리·격리 폴더 페이지(단추·목록·결과 열·상태 줄·확인 창)까지 번역. [설정]에서 언어를 바꾸면 다시 시작하지 않고 번역된 화면에 바로 적용. Windows 11 설정 앱처럼 목적별로 묶은 왼쪽 사이드바(키보드 ↑↓·Home·End, 아래 끝에 [설정]), 큰 페이지 제목, Fluent 색 토큰(밝게·어둡게, 강조색 선택 막대), 둥근 창 모서리·Mica 제목 표시줄 |
+| 표시 언어·Windows 11 모양 | GUI를 한국어·영어·일본어·중국어 간체로 표시(환경 변수 → [설정]에서 고른 언어·설치 언어 → Windows 표시 언어 순, 언어별 글꼴, 문구 길이에 맞춘 단추 폭). 사이드바 메뉴·페이지 제목·[설정] 페이지와 여덟 페이지 모두(폴더 스캔의 컨트롤·상태 줄·분석 줄·트리맵·확인 창, 드라이브·프로젝트 정리·시스템 정리·개발 캐시·격리 폴더·모니터·Booster의 단추·목록·결과·상세 설명·상태 줄·확인 창)를 번역. [설정]에서 언어를 바꾸면 다시 시작하지 않고 모든 화면에 바로 적용. Windows 11 설정 앱처럼 목적별로 묶은 왼쪽 사이드바(키보드 ↑↓·Home·End, 아래 끝에 [설정]), 큰 페이지 제목, Fluent 색 토큰(밝게·어둡게, 강조색 선택 막대), 둥근 창 모서리·Mica 제목 표시줄 |
 | 다크 모드·설정 | [설정] 페이지에서 테마(시스템 설정 따르기·밝게·어둡게)를 고르면 바로 창 전체에 적용(제목 표시줄·사이드바·목록·트리·입력 칸·단추·그래프·트리맵). 시스템 설정 따르기면 Windows 앱 모드가 바뀔 때 따라가고, 고대비 테마에서는 어둡게 하지 않음. 표시 언어(바로 적용)와 스캔 기록 자동 저장도 [설정]에서 바꾸며, 설정은 `HKCU\Software\ByteSieve`에 저장 |
 
 ## 빌드
@@ -212,7 +212,7 @@ ByteSieve/
 ## 구현 상태와 향후 계획
 
 [주요 기능](#주요-기능) 표의 기능은 모두 구현되어 있으며, CLI·GUI·배포(설치 프로그램·포터블 ZIP·SHA256, CI·릴리스 자동화)까지
-1.0.0으로 출시했습니다. 버전별 변경은 [CHANGELOG.md](CHANGELOG.md)에 있습니다.
+출시했습니다. 버전별 변경은 [CHANGELOG.md](CHANGELOG.md)에 있습니다.
 
 ### 향후 개선 계획(미구현)
 
@@ -241,7 +241,7 @@ ByteSieve/
 - Windows 11 Fluent 디자인 나머지 단계([docs/ui-design.md](docs/ui-design.md)): 사이드바 아이콘·좁은 창에서 접기,
   트리맵·그래프·드라이브 막대를 Direct2D로 다시 그리기, 모니터마다 다른 배율(Per-Monitor DPI) 지원
 - 다크 모드 남은 부분: 확인 창(MessageBox)·오른쪽 클릭 메뉴·진행 막대는 아직 밝게 그려짐(Windows가 그리는 부분), 어둡게일 때 체크 상자는 비주얼 스타일 없이 그려짐
-- 번역 범위 확대: 다른 다섯 페이지(시스템 정리·개발 캐시·부스터·드라이브·모니터)의 문구·상태 줄·확인 창과 core 상태 문구, HTML 보고서를 영어·일본어·중국어 간체로(지금은 사이드바·페이지 제목·설정 페이지와 폴더 스캔·프로젝트 정리·격리 폴더 페이지). 페이지별로 번역 표에 넣고 언어를 바꿀 때 다시 쓰는 함수를 더함
+- 번역 범위 확대: HTML 보고서를 영어·일본어·중국어 간체로(GUI 화면은 모든 페이지 번역 완료, CLI 출력은 한국어)
 
 **배포·문서**
 - 배포 이후([docs/release.md](docs/release.md#나중에-검토할-것)): 코드 서명(SmartScreen 경고 제거), winget 등록,

@@ -934,6 +934,7 @@ static int analyze_chromium(Analyze *a, CleanerKind kind, const wchar_t *local,
         wchar_t label[64];
         swprintf(label, 64, L"프로필 %d개", profiles);
         t->label = path_dup(label);
+        t->profiles = profiles;
     }
     settle(a, t, found);
     return 0;
@@ -994,6 +995,7 @@ static int analyze_firefox(Analyze *a, const wchar_t *local)
         wchar_t label[64];
         swprintf(label, 64, L"프로필 %d개", profiles);
         t->label = path_dup(label);
+        t->profiles = profiles;
     }
     settle(a, t, 1);
     return 0;
