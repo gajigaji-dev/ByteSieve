@@ -11,6 +11,17 @@ CLI(`disk-scanner`)와 Win32 GUI(`bytesieve-gui`)를 제공합니다.
 
 **요구 사항**: Windows 10/11 64비트(x64)
 
+| 플랫폼 | 지원 범위 | 산출물 | 실행 방법 |
+|---|---|---|---|
+| Windows 10/11 x64 | **지원**(GUI·CLI) | `ByteSieve-<버전>-setup-x64.exe`, `ByteSieve-<버전>-portable-x64.zip` | 아래 [설치 프로그램]·[포터블 버전] |
+| macOS | **지원하지 않음** | 없음 | Windows PC 또는 Windows 가상 머신에서 실행 |
+| Linux | **지원하지 않음** | 없음 | Windows PC 또는 Windows 가상 머신에서 실행 |
+
+ByteSieve는 core(스캐너·경로·휴지통·격리 폴더·설정 저장)가 Win32 API를 직접 쓰고, CLI도 같은 core를 씁니다.
+그래서 macOS·Linux용 실행 파일은 플랫폼 계층을 나누는 포팅 없이는 만들 수 없습니다.
+**macOS·Linux는 현재 공식 지원하지 않으며 배포 파일도 제공하지 않습니다**(빌드·테스트도 Windows에서만 합니다).
+자세한 내용과 확장 방향은 [docs/platform.md](docs/platform.md)에 있습니다.
+
 [GitHub Releases의 최신 릴리스](https://github.com/gajigaji-dev/ByteSieve/releases/latest)에서 아래 파일을 내려받습니다.
 최신 버전 번호와 변경 내용은 그 페이지에 있습니다(`<버전>`은 예를 들어 `1.0.0`).
 
