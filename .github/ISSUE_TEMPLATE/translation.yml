@@ -1,6 +1,6 @@
 name: 번역 오류·누락 / Translation issue
 description: 고른 표시 언어로 나오지 않거나 잘못 번역된 문구를 알려 주세요. / Report untranslated or mistranslated text.
-labels: ["i18n", "bug"]
+labels: ["i18n", "bug", "needs triage"]
 body:
   - type: markdown
     attributes:

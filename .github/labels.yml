@@ -1,32 +1,11 @@
-# ByteSieve Issue·PR 라벨 목록 (참고용)
-# 이 파일은 GitHub에 자동으로 반영되지 않는다. 라벨을 만들거나 고칠 때 기준으로 쓴다.
-#   gh label create <name> --color <color> --description "<description>"
-# Issue 양식(.github/ISSUE_TEMPLATE/*.yml)의 labels 에 적은 라벨이 저장소에 없으면 GitHub가 조용히 건너뛴다.
+# ByteSieve Issue·PR Label 목록(기준). 사용법은 CONTRIBUTING.md 의 "Label" 구역.
+# 이 파일은 GitHub에 자동으로 반영되지 않는다. Label 을 만들거나 고칠 때 기준으로 쓴다.
+#   gh label create "<name>" --color <color> --description "<description>"
+#   gh label edit "<name>" --color <color> --description "<description>"
+# Issue 양식(.github/ISSUE_TEMPLATE/*.yml)의 labels 에 적은 Label 이 저장소에 없으면 GitHub가 조용히 건너뛴다.
+# GitHub 기본 Label 은 지우지 않고 그대로 쓴다(종류·상태·기여자용).
 
-# ---- 추가할 라벨 ----
-- name: v1.0.1
-  color: "0E8A16"
-  description: 1.0.1 패치 릴리스 범위
-- name: i18n
-  color: "1D76DB"
-  description: 번역·표시 언어(ko/en/ja/zh-Hans)
-- name: gui
-  color: "5319E7"
-  description: GUI(bytesieve-gui)
-- name: cli
-  color: "C5DEF5"
-  description: CLI(disk-scanner)
-- name: installer
-  color: "FBCA04"
-  description: 설치 프로그램·포터블 ZIP·이용약관
-- name: release
-  color: "B60205"
-  description: 버전·CHANGELOG·태그·릴리스 공개
-- name: safety
-  color: "D93F0B"
-  description: 정리(삭제) 안전 장치·데이터 유실 방지
-
-# ---- 이미 있는 GitHub 기본 라벨 중 양식에서 쓰는 것 ----
+# ---- 종류(GitHub 기본) ----
 - name: bug
   color: "d73a4a"
   description: Something isn't working
@@ -36,6 +15,65 @@
 - name: documentation
   color: "0075ca"
   description: Improvements or additions to documentation
+- name: question
+  color: "d876e3"
+  description: Further information is requested
+
+# ---- 영역 ----
+- name: scan
+  color: "C2E0C6"
+  description: 폴더 스캔·트리맵·스캔 기록(변화 추적)
+- name: cleanup
+  color: "FEF2C0"
+  description: 프로젝트 정리·시스템 정리·개발 캐시·격리 폴더
+- name: gui
+  color: "5319E7"
+  description: GUI(bytesieve-gui) 화면·배치·테마
+- name: cli
+  color: "C5DEF5"
+  description: CLI(disk-scanner)
+- name: i18n
+  color: "1D76DB"
+  description: 번역·표시 언어(ko/en/ja/zh-Hans)
+- name: installer
+  color: "FBCA04"
+  description: 설치 프로그램·포터블 ZIP·이용약관
+- name: release
+  color: "B60205"
+  description: 버전·CHANGELOG·태그·릴리스 공개
+- name: performance
+  color: "0E8A16"
+  description: 성능(측정 근거 포함)
+- name: platform
+  color: "BFDADC"
+  description: Windows 종속성·다른 플랫폼 확장 준비(docs/platform.md)
+- name: accessibility
+  color: "f143ab"
+  description: Barrier affecting people with disabilities
+
+# ---- 주의 ----
+- name: safety
+  color: "D93F0B"
+  description: 사용자 파일을 잘못 옮기거나 지울 수 있는 문제(먼저 처리)
+
+# ---- 상태(needs triage 외는 GitHub 기본) ----
+- name: needs triage
+  color: "EDEDED"
+  description: 관리자가 아직 확인하지 않음
+- name: duplicate
+  color: "cfd3d7"
+  description: This issue or pull request already exists
+- name: invalid
+  color: "e4e669"
+  description: This doesn't seem right
+- name: wontfix
+  color: "ffffff"
+  description: This will not be worked on
+
+# ---- 기여자용(GitHub 기본) ----
+- name: good first issue
+  color: "7057ff"
+  description: Good for newcomers
 - name: help wanted
   color: "008672"
   description: Extra attention is needed

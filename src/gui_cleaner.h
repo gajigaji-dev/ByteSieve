@@ -93,6 +93,8 @@ void cleaner_panel_set_dpi(HWND panel, int dpi);
 
 /* 단추 줄이 잘리지 않는 최소 폭(최소 창 크기에 쓴다). */
 int cleaner_panel_min_width(HWND panel);
+/* 목록이 접히지 않는 높이(픽셀, 마지막 배치의 폭 기준: 안내 문단·완료 결과 영역 포함). 0 이면 아직 배치 전. */
+int cleaner_panel_min_height(HWND panel);
 
 /*
  * 자체 검사: 단추·안내·열 머리글이 지금 언어이고 잘리지 않는지, 상태 줄·선택 줄·상세 설명과 목록의 번역 칸이

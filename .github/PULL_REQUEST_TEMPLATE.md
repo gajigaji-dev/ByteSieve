@@ -1,6 +1,7 @@
 <!-- 기여 안내: CONTRIBUTING.md / See CONTRIBUTING.md -->
 <!-- PR 제목은 커밋과 같은 `종류: 요약` 형식으로 씁니다(예: `fix: 격리 폴더 페이지 번역 및 언어 즉시 적용`). -->
-<!-- Title format: `type: summary` (feat / fix / docs / refactor / test / chore). -->
+<!-- 대상 브랜치는 main, 작업 브랜치 이름은 `종류/짧은-설명`(예: fix/select-all)입니다. -->
+<!-- Title format: `type: summary` (feat / fix / docs / refactor / perf / test / chore). Target branch: main. -->
 
 ## 무엇을 왜 바꿨나요 / What and why
 
@@ -10,6 +11,7 @@
 
 - [ ] feat: 새 기능 / New feature
 - [ ] fix: 버그 수정(번역 누락 포함) / Bug fix (incl. missing translations)
+- [ ] perf: 성능 개선(측정 전후 기록 포함) / Performance (with before/after measurements)
 - [ ] docs: 문서만 / Docs only
 - [ ] refactor: 동작 변화 없는 구조 변경 / Refactor (no behavior change)
 - [ ] test: 테스트만 / Tests only

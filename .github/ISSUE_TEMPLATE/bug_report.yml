@@ -1,6 +1,6 @@
 name: 버그 신고 / Bug report
 description: 잘못 동작하거나 오류가 나는 문제를 알려 주세요. / Report something that does not work as expected.
-labels: ["bug"]
+labels: ["bug", "needs triage"]
 body:
   - type: markdown
     attributes:

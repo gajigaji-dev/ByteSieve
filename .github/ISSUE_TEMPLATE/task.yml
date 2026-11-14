@@ -1,12 +1,11 @@
 name: 작업 / Task
 description: 릴리스·문서·저장소 관리 등 버그나 기능 제안이 아닌 작업 (관리자용) / Release, docs or maintenance work (for maintainers)
-title: "[CHORE] "
 body:
   - type: markdown
     attributes:
       value: |
-        제목 앞머리는 작업 종류에 맞춰 `[CHORE]`·`[DOCS]`·`[TEST]`·`[REFACTOR]` 중 하나로 바꿔 주세요.
-        라벨(`release`·`documentation`·`v1.0.1` 등)은 등록한 뒤 붙입니다. 라벨 목록: `.github/labels.yml`
+        제목은 무엇을 할지 한 줄로 씁니다(예: "v1.0.1 태그·릴리스 공개"). 종류는 제목 앞머리가 아니라 Label 로 나타냅니다.
+        등록한 뒤 종류·영역 Label(`documentation`·`release`·`cleanup` 등)을 붙입니다. 목록: `.github/labels.yml`, 사용법: CONTRIBUTING.md
   - type: textarea
     id: background
     attributes:
