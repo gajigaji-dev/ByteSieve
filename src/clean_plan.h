@@ -137,6 +137,12 @@ void clean_plan_apply_projects(CleanPlan *plan, const ProjectList *projects);
 /* 고를 수 있는지: 정리할 수 있고, 옮길 항목이 남아 있음(아직 시도 안 했거나 다시 해 볼 만한 실패·취소). */
 int clean_plan_selectable(const CleanPlanTarget *t);
 
+/*
+ * [모두 선택](clean_plan_select_all)이 고르는 대상인지: 고를 수 있고(clean_plan_selectable) MANUAL 이 아님.
+ * GUI 는 이런 대상이 하나도 없으면 [모두 선택] 단추를 끈다(눌러도 아무것도 고르지 않으므로).
+ */
+int clean_plan_auto_selectable(const CleanPlanTarget *t);
+
 /* 대상 하나를 고르거나 푼다(고를 수 없으면 풀린다). 바뀐 뒤의 선택 상태를 반환한다. */
 int clean_plan_set_selected(CleanPlan *plan, size_t index, int on);
 
@@ -163,6 +169,7 @@ typedef struct {
     size_t unpushed;   /* 고른 대상 중 UNPUSHED */
     uint64_t permanent_bytes;
     size_t selectable; /* 고를 수 있는 대상 수 */
+    size_t auto_selectable; /* [모두 선택]이 고르는 대상 수(clean_plan_auto_selectable, 고른 것 포함) */
 } CleanPlanSummary;
 
 void clean_plan_summarize(const CleanPlan *plan, CleanPlanSummary *out);

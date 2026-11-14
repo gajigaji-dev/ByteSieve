@@ -267,6 +267,11 @@ int clean_plan_selectable(const CleanPlanTarget *t)
     return 0;
 }
 
+int clean_plan_auto_selectable(const CleanPlanTarget *t)
+{
+    return t != NULL && !(t->flags & CLEAN_PLAN_MANUAL) && clean_plan_selectable(t);
+}
+
 int clean_plan_set_selected(CleanPlan *plan, size_t index, int on)
 {
     CleanPlanTarget *t;
@@ -315,6 +320,7 @@ void clean_plan_summarize(const CleanPlan *plan, CleanPlanSummary *out)
     for (i = 0; plan != NULL && i < plan->len; i++) {
         const CleanPlanTarget *t = &plan->items[i];
         out->selectable += clean_plan_selectable(t) != 0;
+        out->auto_selectable += clean_plan_auto_selectable(t) != 0;
         if (!t->selected) {
             continue;
         }
