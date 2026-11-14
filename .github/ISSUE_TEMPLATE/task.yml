@@ -1,0 +1,35 @@
+name: 작업 / Task
+description: 릴리스·문서·저장소 관리 등 버그나 기능 제안이 아닌 작업 (관리자용) / Release, docs or maintenance work (for maintainers)
+title: "[CHORE] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        제목 앞머리는 작업 종류에 맞춰 `[CHORE]`·`[DOCS]`·`[TEST]`·`[REFACTOR]` 중 하나로 바꿔 주세요.
+        라벨(`release`·`documentation`·`v1.0.1` 등)은 등록한 뒤 붙입니다. 라벨 목록: `.github/labels.yml`
+  - type: textarea
+    id: background
+    attributes:
+      label: 배경 / Background
+      description: 왜 필요한 작업인지 / Why this is needed
+    validations:
+      required: true
+  - type: textarea
+    id: tasks
+    attributes:
+      label: 할 일 / Tasks
+      value: |
+        - [ ]
+    validations:
+      required: true
+  - type: input
+    id: branch
+    attributes:
+      label: 작업 브랜치 / Branch
+      description: "`feat/`·`fix/`·`docs/`·`refactor/`·`test/`·`chore/` 접두사 (CONTRIBUTING.md)"
+      placeholder: "chore/release-1.0.1"
+  - type: textarea
+    id: depends
+    attributes:
+      label: 선행 작업·관련 Issue / Depends on
+      placeholder: "#12 병합 후 진행"

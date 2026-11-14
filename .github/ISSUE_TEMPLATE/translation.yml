@@ -1,0 +1,63 @@
+name: 번역 오류·누락 / Translation issue
+description: 고른 표시 언어로 나오지 않거나 잘못 번역된 문구를 알려 주세요. / Report untranslated or mistranslated text.
+labels: ["i18n", "bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ByteSieve GUI는 한국어·English·日本語·简体中文을 지원합니다. 문구는 `src/ui_lang.c` 번역 표에 있습니다.
+        HTML 보고서와 CLI 출력은 아직 한국어만 지원하므로(알려진 제한) 여기에 신고하지 않아도 됩니다.
+
+        The GUI supports Korean, English, Japanese and Simplified Chinese. HTML reports and CLI output are Korean-only for now (known limitation).
+  - type: input
+    id: version
+    attributes:
+      label: ByteSieve 버전 / Version
+      placeholder: "1.0.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: language
+    attributes:
+      label: 표시 언어 / Display language
+      options:
+        - 한국어 (ko)
+        - English (en)
+        - 日本語 (ja)
+        - 简体中文 (zh-Hans)
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: 문제 종류 / Kind
+      options:
+        - 번역되지 않고 다른 언어로 나옴 / Not translated
+        - 잘못되거나 어색한 번역 / Wrong or awkward translation
+        - 글자·단추가 잘리거나 겹침 / Text clipped or overlapping
+        - 언어를 바꿔도 바로 적용되지 않음 / Language change not applied immediately
+        - 설치 프로그램·이용약관 / Installer or terms of use
+    validations:
+      required: true
+  - type: input
+    id: where
+    attributes:
+      label: 화면 위치 / Where
+      description: 페이지와 위치(단추·열 머리글·상태 줄·확인 창 등) / Page and element (button, column header, status line, dialog…)
+      placeholder: "[시스템 정리] 페이지 상태 줄"
+    validations:
+      required: true
+  - type: textarea
+    id: text
+    attributes:
+      label: 지금 문구와 제안 문구 / Current and suggested text
+      placeholder: |
+        지금 / Current:
+        제안 / Suggested:
+    validations:
+      required: true
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: 스크린샷 / Screenshot
+      description: 개인정보(사용자 이름·폴더 이름 등)는 가려 주세요. / Hide personal information.

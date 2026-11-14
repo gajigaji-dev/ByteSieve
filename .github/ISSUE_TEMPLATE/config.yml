@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 기여 안내 / Contributing guide
+    url: https://github.com/gajigaji-dev/ByteSieve/blob/main/CONTRIBUTING.md
+    about: Issue·PR 작성 방법과 빌드·테스트 방법 / How to file issues, open PRs, build and test
+  - name: 최신 버전 내려받기 / Download the latest release
+    url: https://github.com/gajigaji-dev/ByteSieve/releases/latest
+    about: 문제를 신고하기 전에 최신 버전에서도 생기는지 확인해 주세요. / Please check whether the issue still happens in the latest version.

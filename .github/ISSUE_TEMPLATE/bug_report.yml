@@ -1,0 +1,87 @@
+name: 버그 신고 / Bug report
+description: 잘못 동작하거나 오류가 나는 문제를 알려 주세요. / Report something that does not work as expected.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        신고해 주셔서 고맙습니다. 먼저 [기존 Issue](https://github.com/gajigaji-dev/ByteSieve/issues)에 같은 문제가 있는지 확인해 주세요.
+        **스크린샷·로그의 사용자 이름, 폴더 이름 등 개인정보는 가려 주세요.**
+
+        Thanks for the report. Please search existing issues first and hide personal information in screenshots and logs.
+  - type: input
+    id: version
+    attributes:
+      label: ByteSieve 버전 / Version
+      description: GUI [설정] 페이지의 버전 정보 또는 `disk-scanner --version` / Settings page or `disk-scanner --version`
+      placeholder: "1.0.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: package
+    attributes:
+      label: 설치 형태 / Package
+      options:
+        - 설치 프로그램 / Installer (setup-x64.exe)
+        - 포터블 / Portable (portable-x64.zip)
+        - 직접 빌드 / Built from source
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: 문제가 생긴 곳 / Where
+      multiple: true
+      options:
+        - 폴더 스캔 / Folder scan
+        - 드라이브 / Drives
+        - 프로젝트 정리 / Project cleanup
+        - 시스템 정리 / System cleanup
+        - 개발 캐시 / Dev caches
+        - 격리 폴더 / Quarantine
+        - 모니터 / Monitor
+        - Booster
+        - 설정·표시 언어 / Settings & language
+        - CLI (disk-scanner)
+        - 설치·제거 / Install & uninstall
+        - 기타 / Other
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows 버전과 표시 언어 / Windows version and display language
+      placeholder: "Windows 11 24H2, 한국어"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 재현 순서 / Steps to reproduce
+      placeholder: |
+        1. [프로젝트 정리]에서 폴더를 고름
+        2. [탐지]를 누름
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 기대한 결과와 실제 결과 / Expected vs. actual
+      description: 오류 문구가 있으면 그대로 붙여 주세요. / Paste any error message as-is.
+    validations:
+      required: true
+  - type: textarea
+    id: files
+    attributes:
+      label: 파일 이동·삭제 관련 정보 / Moved or deleted files
+      description: |
+        파일이 잘못 옮겨지거나 지워진 것 같다면 정리한 페이지, 항목 경로, 휴지통이나 그 드라이브의 격리 폴더(`.bytesieve-trash`)에
+        남아 있는지 적어 주세요. 해당하지 않으면 비워 두세요.
+        If files seem to be moved or deleted wrongly, tell us the page, the item path, and whether it is in the Recycle Bin
+        or the drive's quarantine folder (`.bytesieve-trash`). Leave empty if not applicable.
+  - type: textarea
+    id: extra
+    attributes:
+      label: 스크린샷·로그·기타 / Screenshots, logs, other
+      description: 개인정보는 가려 주세요. / Hide personal information.
