@@ -39,7 +39,7 @@ CLI(`disk-scanner`)와 GUI(`bytesieve-gui`)가 같은 core 코드를 씁니다.
 | Windows 종속 코드와 다른 플랫폼 확장 방향 | [docs/platform.md](docs/platform.md) |
 | 배포 절차 | [docs/release.md](docs/release.md) |
 
-지금은 **Windows 전용**입니다. macOS·Linux 지원은 아직 계획 단계이며, 관련 기여는 [docs/platform.md](docs/platform.md)의
+지금은 **Windows 전용**입니다. macOS·Linux는 공식 지원하지 않으며 배포 파일도 제공하지 않습니다. macOS·Linux 지원은 아직 계획 단계이며, 관련 기여는 [docs/platform.md](docs/platform.md)의
 방향을 따르고 Windows 동작을 바꾸지 않아야 합니다.
 
 ## Issue 등록
