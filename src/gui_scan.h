@@ -34,6 +34,15 @@ int scan_panel_start(HWND panel, const wchar_t *target, int precise);
 void scan_panel_cancel(HWND panel);
 int scan_panel_busy(HWND panel);
 
+/*
+ * 자체 검사용. 스캔이 끝난 뒤 직전 기록과 비교·저장하는 작업(작업 스레드)을 ms 만큼 늦추고(0 = 늦추지 않음),
+ * 그 작업 중인지 알려 주며, 작업 중 상태(바쁨·움직이는 막대·완료로 보이지 않음·다시 스캔/취소/기록 삭제/
+ * 내보내기 막힘)를 확인한다(실패 수).
+ */
+void scan_panel_set_history_delay(HWND panel, unsigned ms);
+int scan_panel_history_pending(HWND panel);
+int scan_panel_verify_history_pending(HWND panel);
+
 /* 패널 안 컨트롤이 잘리지 않는 최소 폭(문구 길이에 따라 언어마다 다름). */
 int scan_panel_min_width(HWND panel);
 
