@@ -674,6 +674,30 @@ typedef enum {
     UI_T_M_GRAPH_TITLE,
     UI_T_M_LEGEND_MEMORY,
 
+    /* 정리 작업 완료 결과 영역(gui_result): 제목(op_result 상태별)·결과 요약 문장·다음 작업 단추 */
+    UI_T_RES_SUCCESS,
+    UI_T_RES_PARTIAL,
+    UI_T_RES_FAILED,
+    UI_T_RES_CANCELLED,
+    UI_T_RES_EMPTY,
+    UI_T_RES_MOVED,
+    UI_T_RES_WHERE_TRASH,
+    UI_T_RES_WHERE_QUARANTINE,
+    UI_T_RES_FREED,
+    UI_T_RES_EMPTY_BIN_FAILED,
+    UI_T_RES_FAILED_N,
+    UI_T_RES_SKIPPED_N,
+    UI_T_RES_CANCELLED_N,
+    UI_T_RES_RESTORED,
+    UI_T_RES_PURGED,
+    UI_T_RES_PURGE_FREED,
+    UI_T_RES_NONE_DONE,
+    UI_T_RES_ACT_FAILURES,
+    UI_T_RES_ACT_RECYCLE,
+    UI_T_RES_ACT_QUARANTINE,
+    UI_T_RES_ACT_DETECT,
+    UI_T_RES_ACT_ANALYZE,
+    UI_T_RES_ACT_CLOSE,
     UI_T_COUNT
 } UiText;
 

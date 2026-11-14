@@ -17,6 +17,8 @@
 #define CPN_FINISHED 1
 /* 휴지통 이동이 끝나면 부모에게 WM_COMMAND(MAKEWPARAM(id, CPN_TRASHED), panel) 를 보낸다. */
 #define CPN_TRASHED 2
+/* 완료 결과 영역의 [격리 폴더 보기]를 누르면 부모에게 WM_COMMAND(MAKEWPARAM(id, CPN_OPEN_QUARANTINE), panel). */
+#define CPN_OPEN_QUARANTINE 3
 
 /* 창 클래스를 등록한다. 성공 0. */
 int cleanup_panel_register(HINSTANCE inst);
