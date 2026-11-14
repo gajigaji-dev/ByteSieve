@@ -18,6 +18,7 @@
 #include "gui_monitor.h"
 #include "gui_nav.h"
 #include "gui_quarantine.h"
+#include "gui_result.h"
 #include "gui_scan.h"
 #include "gui_settings.h"
 #include "gui_theme.h"
@@ -134,6 +135,9 @@ typedef struct {
 
 static App g_app;
 
+static HWND page_banner(HWND page); /* 페이지의 완료 결과 영역 */
+static int page_min_width(int page);
+
 static int scale(int px)
 {
     return MulDiv(px, g_app.dpi, 96);
@@ -154,10 +158,19 @@ static int nav_width(void)
 /* 페이지 패널이 잘리지 않는 최소 높이(96 DPI 기준). 자리가 이보다 낮으면 세로로 스크롤한다. */
 #define PAGE_MIN_H 300
 
-/* 페이지 패널이 잘리지 않는 최소 높이. [설정]은 줄을 쌓는 배치라 그 높이, 다른 페이지는 PAGE_MIN_H. */
+/* 페이지 패널이 잘리지 않는 최소 높이. [설정]은 줄을 쌓는 배치라 그 높이, 다른 페이지는 PAGE_MIN_H
+ * (완료 결과 영역이 보이면 그 높이를 더함). */
 static int page_min_height(int page)
 {
     int h = scale(PAGE_MIN_H);
+    HWND banner = g_app.pages[page] != NULL ? page_banner(g_app.pages[page]) : NULL;
+
+    /* 완료 결과 영역이 보이면 그만큼 더 높아야 목록이 접히지 않는다(모자라면 세로 스크롤). */
+    if (banner != NULL && result_banner_visible(banner)) {
+        RECT pr;
+        GetClientRect(g_app.pages[page], &pr);
+        h += result_banner_height(banner, pr.right > 0 ? pr.right : page_min_width(page)) + scale(6);
+    }
 
     if (page == NAV_PAGE_SETTINGS) {
         int need = settings_panel_min_height(g_app.pages[page]);
@@ -899,6 +912,12 @@ static int self_test_cleaner_run(NavPage page)
                  nav_page_name(page), (unsigned)g_app.cleaner_expect);
         return 0;
     }
+    /* 정리 중에는 완료 결과 영역을 보이지 않는다(끝나지 않은 작업을 완료로 보이지 않음). */
+    if (page_banner(h) == NULL || result_banner_visible(page_banner(h))) {
+        fwprintf(stderr, L"self-test failed: completion banner visible while cleaning (%ls)\n",
+                 nav_page_name(page));
+        return 0;
+    }
     return 1;
 }
 
@@ -966,6 +985,21 @@ static int verify_lang(void)
         fflush(stdout);
     }
     return failures == 0 ? 0 : 1;
+}
+
+/* 페이지의 완료 결과 영역(gui_result, 없으면 NULL). 최소 높이 계산과 자체 검사가 쓴다. */
+static HWND page_banner(HWND page)
+{
+    HWND h;
+
+    for (h = GetWindow(page, GW_CHILD); h != NULL; h = GetWindow(h, GW_HWNDNEXT)) {
+        wchar_t cls[64];
+        GetClassNameW(h, cls, 64);
+        if (wcscmp(cls, L"ByteSieveResultBanner") == 0) {
+            return h;
+        }
+    }
+    return NULL;
 }
 
 /* ---- 배치 검사(--self-test-layout) ---- */
@@ -1224,6 +1258,30 @@ static int layout_check_scroll(void)
     return failures;
 }
 
+/*
+ * 정리 페이지들(프로젝트 정리·시스템 정리·개발 캐시·격리 폴더)에 긴 결과 요약과 다음 작업 단추 3개인
+ * 완료 결과 영역을 보여 둔다(지금 언어). 결과 영역이 보일 때의 배치도 같은 기준으로 확인한다.
+ */
+static void layout_show_sample_banners(void)
+{
+    static const int pages[] = {NAV_PAGE_CLEANUP, NAV_PAGE_CLEANER, NAV_PAGE_CACHE, NAV_PAGE_QUARANTINE};
+    static const ResultAction actions[] = {
+        {1, UI_T_RES_ACT_FAILURES}, {2, UI_T_RES_ACT_QUARANTINE}, {3, UI_T_RES_ACT_RECYCLE}};
+    wchar_t detail[1024];
+    int i;
+
+    detail[0] = L'\0';
+    result_text_append(detail, 1024, UI_T_RES_MOVED, 12345u, L"123.45 GiB");
+    result_text_append(detail, 1024, UI_T_RES_WHERE_TRASH);
+    result_text_append(detail, 1024, UI_T_RES_WHERE_QUARANTINE, 678u);
+    result_text_append(detail, 1024, UI_T_RES_FAILED_N, 90u);
+    result_text_append(detail, 1024, UI_T_RES_SKIPPED_N, 12u);
+    result_text_append(detail, 1024, UI_T_RES_CANCELLED_N, 34u);
+    for (i = 0; i < (int)(sizeof(pages) / sizeof(pages[0])); i++) {
+        result_banner_show(page_banner(g_app.pages[pages[i]]), OP_RESULT_PARTIAL, detail, actions, 3);
+    }
+}
+
 /* 창을 cx×cy 로 바꿔 제목·모든 페이지를 확인한다. */
 static int layout_check_window(int cx, int cy)
 {
@@ -1270,6 +1328,7 @@ static int verify_layout(void)
     for (l = 0; l < (int)(sizeof(langs) / sizeof(langs[0])); l++) {
         int sizes[5][2];
         apply_language(langs[l]);
+        layout_show_sample_banners();
         min_window_size(&cx, &cy);
         sizes[0][0] = cx, sizes[0][1] = cy;
         sizes[1][0] = cx + scale(160), sizes[1][1] = cy + scale(120);
@@ -1848,6 +1907,10 @@ static int on_page_notify(int id, int code)
             fwprintf(stderr, L"self-test failed: trash did not start (%u selected)\n",
                      (unsigned)g_app.trash_expect);
             finish_self_test(1);
+        } else if (page_banner(cleanup) == NULL || result_banner_visible(page_banner(cleanup))) {
+            /* 옮기는 중에는 완료 결과 영역을 보이지 않는다(끝나지 않은 작업을 완료로 보이지 않음). */
+            fwprintf(stderr, L"self-test failed: completion banner visible while moving\n");
+            finish_self_test(1);
         }
         return 1;
     }
@@ -2015,6 +2078,12 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         }
         if (LOWORD(wp) == IDC_SETTINGS) {
             on_settings_notify(HIWORD(wp));
+            return 0;
+        }
+        /* 완료 결과 영역의 [격리 폴더 보기]: 격리 폴더 페이지로 옮긴다(열 때 목록을 다시 읽는다). */
+        if ((LOWORD(wp) == IDC_CLEANUP && HIWORD(wp) == CPN_OPEN_QUARANTINE) ||
+            ((LOWORD(wp) == IDC_CLEANER || LOWORD(wp) == IDC_CACHE) && HIWORD(wp) == CLN_OPEN_QUARANTINE)) {
+            show_page(NAV_PAGE_QUARANTINE);
             return 0;
         }
         if (LOWORD(wp) == IDOK) {
@@ -2372,6 +2441,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmd, int show)
     booster_panel_register(inst);
     settings_panel_register(inst);
     treemap_view_register(inst);
+    result_banner_register(inst);
     memset(&wc, 0, sizeof(wc));
     wc.cbSize = sizeof(wc);
     wc.lpfnWndProc = host_proc;

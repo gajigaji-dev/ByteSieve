@@ -57,6 +57,11 @@ static const UiText k_cleaner_status[CLEANER_STATUS_COUNT] = {
     [CLEANER_DENIED] = UI_T_K_ST_DENIED,       [CLEANER_ERROR] = UI_T_K_ST_ERROR,
     [CLEANER_CANCELLED] = UI_T_K_ST_CANCELLED, [CLEANER_INFO_ONLY] = UI_T_K_ST_INFO_ONLY,
 };
+static const UiText k_op_result[OP_RESULT_COUNT] = {
+    [OP_RESULT_SUCCESS] = UI_T_RES_SUCCESS,     [OP_RESULT_PARTIAL] = UI_T_RES_PARTIAL,
+    [OP_RESULT_FAILED] = UI_T_RES_FAILED,       [OP_RESULT_CANCELLED] = UI_T_RES_CANCELLED,
+    [OP_RESULT_EMPTY] = UI_T_RES_EMPTY,
+};
 static const UiText k_skip[CLEAN_SKIP_COUNT] = {
     [CLEAN_SKIP_NONE] = UI_T_SKIP_NONE,
     [CLEAN_SKIP_RECENT] = UI_T_SKIP_RECENT,
@@ -159,6 +164,11 @@ const wchar_t *gui_cleaner_group_text(CleanerGroup group)
 const wchar_t *gui_cleaner_status_text(CleanerStatus status)
 {
     return table_text(k_cleaner_status, CLEANER_STATUS_COUNT, (int)status);
+}
+
+const wchar_t *gui_op_result_text(OpResult result)
+{
+    return table_text(k_op_result, OP_RESULT_COUNT, (int)result);
 }
 
 const wchar_t *gui_clean_skip_text(CleanSkip skip)
@@ -278,6 +288,9 @@ int gui_status_text_verify(void)
     for (i = 0; i < CLEANER_STATUS_COUNT; i++) {
         CHECK_SAME("cleaner status", i, gui_cleaner_status_text((CleanerStatus)i),
                    cleaner_status_text((CleanerStatus)i));
+    }
+    for (i = 0; i < OP_RESULT_COUNT; i++) {
+        CHECK_SAME("op result", i, gui_op_result_text((OpResult)i), op_result_text((OpResult)i));
     }
     for (i = 0; i < CLEAN_SKIP_COUNT; i++) {
         CHECK_SAME("skip", i, gui_clean_skip_text((CleanSkip)i), clean_skip_text((CleanSkip)i));
