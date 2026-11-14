@@ -401,22 +401,22 @@ static void host_layout_once(void)
 }
 
 /*
- * 패널의 최소 높이([시스템 정리]·[개발 캐시]·[설정])는 방금 받은 폭으로 배치해 봐야 정해진다(세로 막대가 생기면 폭이
- * 줄어 다시 바뀔 수 있음). 숨긴 페이지를 포함해 세 페이지의 최소 높이가 한 번의 배치 동안 바뀌지 않을 때까지 반복한다(최대 4번).
+ * 페이지의 최소 높이는 방금 받은 폭으로 배치해 봐야 정해지는 것이 있다([설정]·[시스템 정리]·[개발 캐시]의 패널이 잰 높이,
+ * 완료 결과 영역의 줄 바꿈 높이). 세로 막대로 폭이 줄면 다시 바뀔 수 있으므로, 숨긴 페이지를 포함해 모든 페이지의 최소 높이가
+ * 한 번의 배치 동안 바뀌지 않을 때까지 반복한다(최대 4번).
  */
 static void host_layout(void)
 {
-    static const int measured[] = {NAV_PAGE_SETTINGS, NAV_PAGE_CLEANER, NAV_PAGE_CACHE};
     int pass, i;
 
     for (pass = 0; pass < 4; pass++) {
-        int before[3], changed = 0;
-        for (i = 0; i < 3; i++) {
-            before[i] = page_min_height(measured[i]);
+        int before[NAV_PAGE_COUNT], changed = 0;
+        for (i = 0; i < NAV_PAGE_COUNT; i++) {
+            before[i] = g_app.pages[i] != NULL ? page_min_height(i) : 0;
         }
         host_layout_once();
-        for (i = 0; i < 3; i++) {
-            changed |= page_min_height(measured[i]) != before[i];
+        for (i = 0; i < NAV_PAGE_COUNT; i++) {
+            changed |= g_app.pages[i] != NULL && page_min_height(i) != before[i];
         }
         if (!changed) {
             break;
