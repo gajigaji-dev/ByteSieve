@@ -107,6 +107,7 @@ typedef struct {
     size_t caution_checked; /* 체크한 대상 중 주의 수 */
     size_t dev_checked;     /* 체크한 대상 중 직접 골라야 하는 대상(개발 도구 캐시) 수 */
     size_t auto_count;      /* [모두 선택]이 고르는 대상 수. 0 이면 단추를 끈다(개발 캐시 페이지 등) */
+    int min_h; /* 목록이 접히지 않는 높이(마지막 배치의 폭 기준: 안내 문단·결과 영역 높이가 폭에 따라 달라짐) */
 
     CleanPlanRunJob *run;
     int run_interactive;
@@ -1038,6 +1039,7 @@ static void panel_layout(CleanerPanel *p)
     MoveWindow(p->selection, x, y + pscale(p, 4), w - x > 0 ? w - x : 0, pscale(p, 20), TRUE);
     y += h + gap;
     list_h = rc.bottom - y - detail_h - gap;
+    p->min_h = y + pscale(p, 80) + gap + detail_h; /* 목록에 최소 80(96 DPI)을 남긴다 */
     MoveWindow(p->list, 0, y, w, list_h > 0 ? list_h : 0, TRUE);
     MoveWindow(p->detail, 0, rc.bottom - detail_h, w, detail_h, TRUE);
 }
@@ -1980,4 +1982,11 @@ void cleaner_panel_set_dpi(HWND panel, int dpi)
         p->dpi = dpi;
         result_banner_set_dpi(p->banner, dpi);
     }
+}
+
+int cleaner_panel_min_height(HWND panel)
+{
+    CleanerPanel *p = panel_of(panel);
+
+    return p != NULL ? p->min_h : 0;
 }

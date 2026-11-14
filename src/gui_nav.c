@@ -498,7 +498,8 @@ int nav_view_width(HWND nav)
     }
     /* 세로 스크롤 막대가 보이면 그 폭만큼 넓혀 항목 문구 자리를 그대로 둔다. */
     if (GetWindowLongPtrW(nav, GWL_STYLE) & WS_VSCROLL) {
-        w += GetSystemMetricsForDpi(SM_CXVSCROLL, (UINT)v->dpi);
+        UINT bar_dpi = GetDpiForWindow(nav); /* 막대는 창의 실제 DPI 로 그려진다 */
+        w += GetSystemMetricsForDpi(SM_CXVSCROLL, bar_dpi != 0 ? bar_dpi : (UINT)v->dpi);
     }
     return w;
 }

@@ -1736,15 +1736,20 @@ void cleanup_panel_apply_language(HWND panel, HFONT font)
 int cleanup_panel_min_width(HWND panel)
 {
     CleanupPanel *p = panel_of(panel);
-    int gap, a, b;
+    int gap, a, b, c;
 
     if (p == NULL) {
         return 0;
     }
     gap = pscale(p, 6);
-    /* 첫 줄: 경로 칸 최소(80) + 단추 셋. 선택 줄: 단추 셋(선택 문구는 남는 폭만 쓴다). */
+    /* 첫 줄: 경로 칸 최소(80) + 단추 셋. 선택 줄: 단추 셋(선택 문구는 남는 폭만 쓴다).
+     * 필터 줄: 이름표 + 유형 콤보(260) + 이름표 + 환경 콤보(150)(요약 문구는 남는 폭만 쓴다). panel_layout 과 같은 값. */
     a = pscale(p, 80) + p->w_browse + p->w_start + p->w_cancel + 3 * gap;
     b = p->w_check_all + p->w_check_none + p->w_trash + 2 * gap;
+    c = p->w_label + pscale(p, 260) + gap * 2 + p->w_label + pscale(p, 150);
+    if (c > a) {
+        a = c;
+    }
     return a > b ? a : b;
 }
 

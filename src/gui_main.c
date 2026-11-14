@@ -179,8 +179,10 @@ static int page_min_height(int page)
         h += result_banner_height(banner, pr.right > 0 ? pr.right : page_min_width(page)) + scale(6);
     }
 
-    if (page == NAV_PAGE_SETTINGS) {
-        int need = settings_panel_min_height(g_app.pages[page]);
+    if (page == NAV_PAGE_SETTINGS || page == NAV_PAGE_CLEANER || page == NAV_PAGE_CACHE) {
+        /* 줄을 쌓는 [설정], 안내 문단·결과 영역 높이가 폭에 따라 바뀌는 [시스템 정리]·[개발 캐시]는 패널이 잰 높이 */
+        int need = page == NAV_PAGE_SETTINGS ? settings_panel_min_height(g_app.pages[page])
+                                              : cleaner_panel_min_height(g_app.pages[page]);
         if (need > h) {
             h = need;
         }
@@ -331,7 +333,7 @@ static void page_rect(RECT *out)
  * 패널을 최소 크기로 두고 스크롤 막대로 옮겨 보게 한다(맨 위·왼쪽의 주요 단추는 스크롤 0 에서 보임).
  * 페이지마다 스크롤 위치를 기억한다. 자리가 넉넉하면 막대 없이 자리를 채운다(예전과 같음).
  */
-static void host_layout(void)
+static void host_layout_once(void)
 {
     static int busy;
     RECT wr;
@@ -344,8 +346,15 @@ static void host_layout(void)
     GetWindowRect(g_app.host, &wr);
     W = wr.right - wr.left;
     H = wr.bottom - wr.top;
-    sbw = GetSystemMetricsForDpi(SM_CXVSCROLL, (UINT)g_app.dpi);
-    sbh = GetSystemMetricsForDpi(SM_CYHSCROLL, (UINT)g_app.dpi);
+    {
+        /* 스크롤 막대는 창의 실제 DPI 로 그려진다(배치 검사가 DPI 를 흉내 낼 때도 막대는 실제 DPI). */
+        UINT bar_dpi = GetDpiForWindow(g_app.host);
+        if (bar_dpi == 0) {
+            bar_dpi = (UINT)g_app.dpi;
+        }
+        sbw = GetSystemMetricsForDpi(SM_CXVSCROLL, bar_dpi);
+        sbh = GetSystemMetricsForDpi(SM_CYHSCROLL, bar_dpi);
+    }
     for (i = 0; i < NAV_PAGE_COUNT; i++) {
         int need_w = page_min_width(i), need_h = page_min_height(i), hs = 0, vs = 0, k, cw, ch, pw, ph;
         int *pos = g_app.scroll[i];
@@ -389,6 +398,13 @@ static void host_layout(void)
         }
     }
     busy = 0;
+}
+
+/* 패널의 최소 높이([시스템 정리]·[개발 캐시]·[설정])는 방금 받은 폭으로 배치해 봐야 정해지므로 두 번 배치한다. */
+static void host_layout(void)
+{
+    host_layout_once();
+    host_layout_once();
 }
 
 static void host_scroll(int bar, int code)
@@ -1237,6 +1253,8 @@ static int layout_check_scroll(void)
             if (!GetScrollInfo(g_app.host, bar, &si) || si.nMax + 1 - (int)si.nPage != need - have) {
                 failures += layout_fail(visible, &page, bar == SB_HORZ ? L"cannot scroll to the right edge"
                                                                        : L"cannot scroll to the bottom", NULL);
+                fwprintf(stderr, L"  page %d: need %d, room %d, scroll max %d, page %u\n", (int)g_app.page,
+                         need, have, si.nMax, si.nPage);
             }
         }
     }

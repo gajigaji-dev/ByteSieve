@@ -158,7 +158,7 @@ GUI는 왼쪽 사이드바에서 목적별로 묶은 여덟 페이지와 아래 
 ctest --test-dir build -C Debug --output-on-failure
 ```
 
-단위 테스트 31개, CLI·도구 검사 32개, GUI 자체 검사 33개(총 96개)가 등록되어 있습니다.
+단위 테스트 31개, CLI·도구 검사 32개, GUI 자체 검사 34개(총 97개)가 등록되어 있습니다.
 GitHub Actions(`.github/workflows/ci.yml`)가 `main`·`dev`에 올리거나 PR을 열 때 Release 구성으로 빌드·테스트합니다.
 
 ## 문서

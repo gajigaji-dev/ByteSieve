@@ -653,6 +653,11 @@ add_test(NAME gui_layout_192_1080p COMMAND bytesieve-gui --self-test-layout)
 set_tests_properties(gui_layout_192_1080p PROPERTIES
                      ENVIRONMENT "BYTESIEVE_TEST_DPI=192;BYTESIEVE_TEST_WORKAREA=1920x984"
                      PASS_REGULAR_EXPRESSION "layout: dpi 192, min window 1894x984, " TIMEOUT 120)
+# GitHub 러너처럼 작은 화면(작업 영역 1024×720)에서 200%: 페이지마다 가로·세로 스크롤로 모든 컨트롤에 닿는지.
+add_test(NAME gui_layout_192_small COMMAND bytesieve-gui --self-test-layout)
+set_tests_properties(gui_layout_192_small PROPERTIES
+                     ENVIRONMENT "BYTESIEVE_TEST_DPI=192;BYTESIEVE_TEST_WORKAREA=1024x720"
+                     PASS_REGULAR_EXPRESSION "layout: dpi 192, min window 1024x720, " TIMEOUT 120)
 add_test(NAME gui_layout_144_768p COMMAND bytesieve-gui --self-test-layout)
 set_tests_properties(gui_layout_144_768p PROPERTIES
                      ENVIRONMENT "BYTESIEVE_TEST_DPI=144;BYTESIEVE_TEST_WORKAREA=1366x728"
