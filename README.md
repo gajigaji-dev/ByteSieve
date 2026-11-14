@@ -62,6 +62,8 @@ CLI(`disk-scanner`)와 Win32 GUI(`bytesieve-gui`)를 제공합니다.
 | 시스템 정리·개발 캐시 | GUI [시스템 정리] 페이지는 사용자 임시 파일(`%TEMP%`)·Windows 오류 보고서·휴지통·브라우저(Chrome·Edge·Firefox) 캐시를, [개발 캐시] 페이지는 공용 개발 캐시(npm·pip·Gradle·Cargo·NuGet·pnpm·Yarn·Maven·Go·Conda, 환경 변수·설정 파일까지 확인한 위치와 그 근거 표시)와 WSL·Docker 가상 디스크를 분석해(같은 Cleaner 엔진, 분석 범위만 나눔) 대상별 실제 확보 용량을 보여 주고, 고른 대상만 정리. 설정한 캐시 위치가 링크·캐시 구조가 아니면 이유와 함께 정리하지 않음. 휴지통 외에는 기존 안전 장치를 거쳐 휴지통(없는 드라이브는 격리 폴더)으로 옮기며, 최근 24시간 안에 바뀐 임시 파일·실행 중인 브라우저의 캐시는 건너뜀. 휴지통 비우기(영구 삭제)는 직접 고르고 따로 한 번 더 확인해야 함. 개발 도구 캐시도 [모두 선택]에 들어가지 않아 직접 골라야 하며, 오프라인 빌드가 안 되는 캐시는 주의로 표시 |
 | Booster | 시작 프로그램 켜기/끄기(작업 관리자와 같은 방식, 등록은 지우지 않아 되돌릴 수 있음), 전체·프로세스별 CPU·메모리 사용량, 앱/백그라운드 구분과 고른 프로세스 끝내기(시스템·Windows 구성 요소·ByteSieve 자신은 보호, PID 재사용 확인) |
 | 표시 언어·Windows 11 모양 | GUI를 한국어·영어·일본어·중국어 간체로 표시(환경 변수 → [설정]에서 고른 언어·설치 언어 → Windows 표시 언어 순, 언어별 글꼴, 문구 길이에 맞춘 단추 폭). 사이드바 메뉴·페이지 제목·[설정] 페이지와 여덟 페이지 모두(폴더 스캔의 컨트롤·상태 줄·분석 줄·트리맵·확인 창, 드라이브·프로젝트 정리·시스템 정리·개발 캐시·격리 폴더·모니터·Booster의 단추·목록·결과·상세 설명·상태 줄·확인 창)를 번역. [설정]에서 언어를 바꾸면 다시 시작하지 않고 모든 화면에 바로 적용. Windows 11 설정 앱처럼 목적별로 묶은 왼쪽 사이드바(키보드 ↑↓·Home·End, 아래 끝에 [설정]), 큰 페이지 제목, Fluent 색 토큰(밝게·어둡게, 강조색 선택 막대), 둥근 창 모서리·Mica 제목 표시줄 |
+| 작업 완료 결과 | 정리 작업(휴지통 이동·시스템 정리·개발 캐시 정리·격리 항목 복원·영구 삭제)이 끝나면 진행 막대 아래에 결과 영역을 보임: 완료·일부 완료·완료하지 못함·취소됨·처리할 항목 없음을 색과 제목으로 구분하고, 처리 수·옮긴 용량·실패·건너뜀을 실제 결과대로 요약(옮긴 것은 휴지통·격리 폴더를 비워야 공간이 생긴다고 안내), [실패 항목 보기]·[격리 폴더 보기]·[휴지통 열기]·[다시 탐지] 등 다음 작업 단추 |
+| 화면 배율·창 크기 | 모니터마다 다른 배율(Per-Monitor DPI V2): 배율이 다른 모니터로 옮기거나 실행 중 배율을 바꾸면 글꼴·단추·열 폭·그래프·트리맵을 새 배율로 다시 잡음(입력값·선택·스크롤 위치 유지). 최소 창 크기는 모니터 작업 영역을 넘지 않고, 자리가 모자라면 사이드바·페이지가 스크롤 |
 | 다크 모드·설정 | [설정] 페이지에서 테마(시스템 설정 따르기·밝게·어둡게)를 고르면 바로 창 전체에 적용(제목 표시줄·사이드바·목록·트리·입력 칸·단추·그래프·트리맵). 시스템 설정 따르기면 Windows 앱 모드가 바뀔 때 따라가고, 고대비 테마에서는 어둡게 하지 않음. 표시 언어(바로 적용)와 스캔 기록 자동 저장도 [설정]에서 바꾸며, 설정은 `HKCU\Software\ByteSieve`에 저장 |
 
 ## 빌드
@@ -184,7 +186,9 @@ GitHub Actions(`.github/workflows/ci.yml`)가 `main`·`dev`에 올리거나 PR�
 ByteSieve/
 ├── CMakeLists.txt     빌드·테스트·설치(install) 정의, 버전(project VERSION)
 ├── CHANGELOG.md       변경 기록(릴리스 노트)
-├── .github/workflows/ CI(빌드·테스트), 릴리스(v* 태그 → 설치 프로그램·ZIP·SHA256 → 릴리스 초안)
+├── CONTRIBUTING.md    기여 안내(Issue·Label, 브랜치·커밋·PR 규칙, 개발 환경), CODE_OF_CONDUCT.md 행동 강령, LICENSE
+├── .github/           workflows/(CI 빌드·테스트, 릴리스: v* 태그 → 설치 프로그램·ZIP·SHA256 → 릴리스 초안),
+│                      ISSUE_TEMPLATE/(버그·기능·번역·작업 양식), PULL_REQUEST_TEMPLATE.md, labels.yml(Label 기준)
 ├── docs/              상세 문서(screenshots/: 예제 데이터로 찍은 GUI 화면)
 ├── installer/         Inno Setup 설치 스크립트(bytesieve.iss), 배포 파일에 넣는 README.txt, 중국어 간체 번역
 ├── res/               exe 리소스: 앱 아이콘, 버전 정보, 앱 매니페스트(gui·cli)
@@ -203,9 +207,10 @@ ByteSieve/
 │   ├── drive, sysmon, path, size_format              드라이브·RAM/CPU 측정·경로·용량 표시
 │   ├── treemap                                       트리맵 배치(스퀘어리파이드, 순수 계산)
 │   ├── cli, cli_clean, cli_devenv, jsonl, main.c     CLI(disk-scanner, find·clean·devenv 명령 포함)
-│   ├── gui_main.c, gui_nav                           GUI 창 골격(사이드바·페이지 전환·자체 검사 진행), 사이드바 컨트롤
+│   ├── gui_main.c, gui_nav                           GUI 창 골격(사이드바·페이지 전환·스크롤 자리·배율 변경·자체 검사 진행), 사이드바 컨트롤
 │   ├── gui_scan, gui_drives, gui_cleaner, gui_booster, gui_cleanup, gui_quarantine, gui_monitor, gui_settings, gui_treemap   GUI 페이지 패널
 │   ├── gui_progress                                  진행 막대 상태(진행·움직이는 막대·완료·취소·실패) 공용 처리
+│   ├── gui_result, op_result                         정리 작업 완료 결과 영역, 끝난 작업의 결과 판정(완료·일부 완료·실패·취소·없음, 순수 계산)
 │   ├── version.h.in                                  버전 헤더 틀(CMake 가 build/generated/version.h 로 만듦)
 │   ├── nav_model                                     사이드바 메뉴 모델(목적별 그룹·키 이동·위치 판정, 순수 계산)
 │   ├── gui_theme, ui_lang, gui_status_text           GUI 공통 모양(창 외곽·밝게/어둡게 색 토큰·다크 모드 적용·언어별 글꼴·글자 폭), 표시 언어·번역 문자열, core 상태 번호 → 화면 문구

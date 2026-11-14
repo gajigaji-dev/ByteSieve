@@ -34,7 +34,8 @@ ByteSieve는 설치형 exe(데스크톱 프로그램)와 포터블 ZIP으로 배
   exe 버전 리소스(탐색기 속성), `disk-scanner --version`, GUI [설정] → 정보, 설치 프로그램 버전, 파일 이름이 모두 이 값을 따릅니다.
   태그와 이 값이 다르면 패키징이 실패합니다.
 - **리소스**(`res/`): 앱 아이콘(`bytesieve.ico`, `tools/make_icon.py`로 생성), 버전 정보, 앱 매니페스트
-  (공용 컨트롤 v6·시스템 DPI 인식·Windows 10/11·긴 경로·`asInvoker`). 매니페스트를 리소스로 넣으므로 링커는 `/MANIFEST:NO`.
+  (GUI: 공용 컨트롤 v6·모니터별 DPI 인식 V2·Windows 10/11·긴 경로·`asInvoker`, CLI: Windows 10/11·긴 경로·`asInvoker`).
+  매니페스트를 리소스로 넣으므로 링커는 `/MANIFEST:NO`.
 - **C 런타임 정적 링크**(`/MT`): VC++ 재배포 패키지 없이 Windows 기본 DLL만으로 실행됩니다.
 - **실행 중 표시**: GUI가 이름 있는 뮤텍스 `ByteSieve.Gui.Running`을 만들고, 설치·제거 프로그램이 이것으로 앱이 켜져 있는지
   확인해 닫으라고 안내합니다(여러 개 실행을 막지는 않음).
@@ -86,7 +87,8 @@ ByteSieve는 설치형 exe(데스크톱 프로그램)와 포터블 ZIP으로 배
    (Release 빌드 → Release 테스트 → `dist\`에 설치 프로그램·ZIP·SHA256). Inno Setup이 없으면 `-NoInstaller`.
    이어서 `tools\test_installer.ps1`로 설치·업그레이드·제거를 검증합니다(위 표).
    UI가 바뀌었으면 `tools\screenshots.ps1`로 `docs/screenshots`를 다시 찍습니다([gui.md](gui.md#스크린샷)).
-3. **병합**: 릴리스 브랜치를 `main`에 병합합니다(CI 통과 확인).
+3. **병합**: 1~2를 한 릴리스 준비 브랜치(`chore/release-<버전>`)를 PR로 `main`에 병합합니다(CI 통과 확인).
+   브랜치 규칙은 [CONTRIBUTING.md](../CONTRIBUTING.md#브랜치-전략)에 있습니다.
 4. **태그**: `main`에서 `git tag v<버전>`(예: `git tag v1.0.0`) → `git push origin v1.0.0`.
    Actions가 패키지를 만들어 **릴리스 초안**에 올립니다.
 5. **출시 전 확인**: 아래 목록을 초안의 파일로 확인합니다.

@@ -25,7 +25,7 @@
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
       <!-- 모니터별 DPI 인식 V2(Windows 10 1703 이상). 배율이 다른 모니터로 옮기거나 배율을 바꾸면 WM_DPICHANGED 로
-           다시 그린다. dpiAwareness 를 모르는 Windows 는 아래 dpiAware(시스템 DPI 인식)를 쓴다. -->
+           다시 그린다. dpiAwareness 를 모르는 Windows 는 아래 dpiAware(true/pm: 모니터별 DPI 인식 V1)를 쓴다. -->
       <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
       <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2, PerMonitor</dpiAwareness>
       <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
