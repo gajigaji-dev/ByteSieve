@@ -80,8 +80,8 @@ ByteSieve는 설치형 exe(데스크톱 프로그램)와 포터블 ZIP으로 배
 1. **버전·변경 기록**: `CMakeLists.txt`의 `project(... VERSION x.y.z)`를 올리고, `CHANGELOG.md`에 `## [x.y.z] - 날짜` 구역을 씁니다.
    이용약관을 바꾼 버전이면 `installer/terms/terms-*.txt` 네 파일의 `@EFFECTIVE_DATE@`(시행일·부칙)를 배포일로 바꿉니다
    (예: `2026년 12월 1일` / `December 1, 2026` / `2026年12月1日` / `2026年12月1日`). 남아 있으면 태그 빌드가 실패합니다(`tools/package.ps1`).
-   README·`docs/*`의 기능 표·테스트 개수가 맞는지 확인하고, README [설치]의 최신 버전과 다운로드 링크 세 개
-   (`releases/download/v<버전>/ByteSieve-<버전>-…`)를 새 버전으로 바꿉니다(파일 이름에 버전이 들어 있어 자동으로 바뀌지 않음).
+   README·`docs/*`의 기능 표·테스트 개수가 맞는지 확인합니다. README [설치]는 최신 릴리스 페이지와 `<버전>` 파일 이름만
+   가리키므로 버전마다 고치지 않습니다(예전에는 버전별 다운로드 링크를 미리 바꿔 공개 전까지 404가 되었음).
 2. **로컬 패키징**(선택): `powershell -ExecutionPolicy Bypass -File tools\package.ps1`
    (Release 빌드 → Release 테스트 → `dist\`에 설치 프로그램·ZIP·SHA256). Inno Setup이 없으면 `-NoInstaller`.
    이어서 `tools\test_installer.ps1`로 설치·업그레이드·제거를 검증합니다(위 표).

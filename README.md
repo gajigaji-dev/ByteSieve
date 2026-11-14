@@ -3,30 +3,32 @@
 Windows용 디스크 사용량 분석·정리 도구입니다. C11과 Win32 API만으로 작성했으며 외부 라이브러리 의존성이 없습니다.
 CLI(`disk-scanner`)와 Win32 GUI(`bytesieve-gui`)를 제공합니다.
 
+버그 신고·기능 제안·코드 기여는 [기여 안내(CONTRIBUTING.md)](CONTRIBUTING.md)를 참고하세요.
+
 ![폴더 스캔 페이지의 트리맵 보기(예제 데이터)](docs/screenshots/treemap.png)
 
 ## 설치
 
 **요구 사항**: Windows 10/11 64비트(x64)
 
-최신 버전은 [GitHub Releases의 최신 릴리스](https://github.com/gajigaji-dev/ByteSieve/releases/latest)에서 내려받습니다.
-지금 최신 버전은 **1.0.1**입니다.
+[GitHub Releases의 최신 릴리스](https://github.com/gajigaji-dev/ByteSieve/releases/latest)에서 아래 파일을 내려받습니다.
+최신 버전 번호와 변경 내용은 그 페이지에 있습니다(`<버전>`은 예를 들어 `1.0.0`).
 
 | 파일 | 용도 |
 |---|---|
-| [ByteSieve-1.0.1-setup-x64.exe](https://github.com/gajigaji-dev/ByteSieve/releases/download/v1.0.1/ByteSieve-1.0.1-setup-x64.exe) | **설치 프로그램(권장)**. 관리자 권한 없이 `%LOCALAPPDATA%\Programs\ByteSieve`에 설치하고 시작 메뉴 바로 가기를 만듭니다 |
-| [ByteSieve-1.0.1-portable-x64.zip](https://github.com/gajigaji-dev/ByteSieve/releases/download/v1.0.1/ByteSieve-1.0.1-portable-x64.zip) | **포터블 버전**. 설치하지 않고 실행합니다 |
-| [SHA256SUMS.txt](https://github.com/gajigaji-dev/ByteSieve/releases/download/v1.0.1/SHA256SUMS.txt) | 내려받은 파일 확인용 |
+| `ByteSieve-<버전>-setup-x64.exe` | **설치 프로그램(권장)**. 관리자 권한 없이 `%LOCALAPPDATA%\Programs\ByteSieve`에 설치하고 시작 메뉴 바로 가기를 만듭니다 |
+| `ByteSieve-<버전>-portable-x64.zip` | **포터블 버전**. 설치하지 않고 실행합니다 |
+| `SHA256SUMS.txt` | 내려받은 파일 확인용 |
 
 이전 버전과 버전별 릴리스 노트는 [Releases 목록](https://github.com/gajigaji-dev/ByteSieve/releases)에 있습니다.
 
 **설치 프로그램**
-1. `ByteSieve-1.0.1-setup-x64.exe`를 실행하고 설치 언어(한국어·English·日本語·简体中文)를 고릅니다. 고른 언어가 앱 표시 언어가 됩니다(나중에 [설정]에서 바꿀 수 있음).
+1. `ByteSieve-<버전>-setup-x64.exe`를 실행하고 설치 언어(한국어·English·日本語·简体中文)를 고릅니다. 고른 언어가 앱 표시 언어가 됩니다(나중에 [설정]에서 바꿀 수 있음).
 2. 이용약관에 동의하고 설치를 마치면 바로 실행할 수 있습니다. 이후에는 시작 메뉴의 **ByteSieve**로 실행합니다.
 3. 제거는 Windows [설정] → [앱] → [설치된 앱]에서 합니다.
 
 **포터블 버전**
-1. ZIP을 원하는 폴더에 풉니다(`ByteSieve-1.0.1-portable-x64\` 폴더가 생깁니다).
+1. ZIP을 원하는 폴더에 풉니다(`ByteSieve-<버전>-portable-x64\` 폴더가 생깁니다).
 2. GUI는 `bytesieve-gui.exe`를 실행합니다. CLI `disk-scanner.exe`도 같은 폴더에 있습니다([빠른 시작](#빠른-시작) 참고).
 
 **알아 둘 점**
@@ -156,7 +158,7 @@ GUI는 왼쪽 사이드바에서 목적별로 묶은 여덟 페이지와 아래 
 ctest --test-dir build -C Debug --output-on-failure
 ```
 
-단위 테스트 31개, CLI·도구 검사 32개, GUI 자체 검사 31개(총 94개)가 등록되어 있습니다.
+단위 테스트 31개, CLI·도구 검사 32개, GUI 자체 검사 33개(총 96개)가 등록되어 있습니다.
 GitHub Actions(`.github/workflows/ci.yml`)가 `main`·`dev`에 올리거나 PR을 열 때 Release 구성으로 빌드·테스트합니다.
 
 ## 문서
@@ -171,7 +173,10 @@ GitHub Actions(`.github/workflows/ci.yml`)가 `main`·`dev`에 올리거나 PR�
 | [docs/performance.md](docs/performance.md) | `bytesieve-bench` 사용법과 스캐너 진단 값, 측정 결과, 병렬 스캔 메모리 최적화 전후 비교, 병목 분석 |
 | [docs/testing.md](docs/testing.md) | 테스트 목록과 범위, GUI 자체 검사 옵션 |
 | [docs/release.md](docs/release.md) | 배포 결정 사항, 산출물(설치 프로그램·포터블 ZIP·SHA256), 버전 관리, 릴리스 절차, 출시 전 확인 목록 |
+| [docs/platform.md](docs/platform.md) | Windows 종속 코드의 위치와 core 의존성, macOS·Linux 확장 방향(계획) |
 | [CHANGELOG.md](CHANGELOG.md) | 버전별 변경 기록(릴리스 노트) |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | 기여 안내: Issue·Label, 브랜치·커밋·PR 규칙, 개발 환경, 코드 규칙, 정리 기능 안전 원칙 |
+| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | 행동 강령 |
 
 ## 디렉터리 구조
 
@@ -249,53 +254,18 @@ ByteSieve/
 
 ## 기여하기
 
-버그 신고, 기능 제안, 번역 개선, 문서 수정, 코드 기여를 모두 환영합니다.
+버그 신고, 기능 제안, 번역 개선, 문서 수정, 코드 기여를 모두 환영합니다. 자세한 규칙은 **[CONTRIBUTING.md](CONTRIBUTING.md)** 에 있습니다.
 
-### Issue 등록
-
-[Issues](https://github.com/gajigaji-dev/ByteSieve/issues)에서 먼저 비슷한 Issue가 있는지 찾아본 뒤 새로 등록해 주세요.
-버그라면 아래 내용을 적어 주면 빨리 확인할 수 있습니다.
-
-- ByteSieve 버전(GUI [설정] 페이지의 버전 정보 또는 `disk-scanner --version`)과 설치 프로그램·포터블 중 어느 것인지
-- Windows 버전, 표시 언어
-- 재현 순서, 기대한 결과와 실제 결과, 오류 문구
-- 스크린샷이나 로그(사용자 이름·폴더 이름 등 개인정보는 가려 주세요)
-
-파일이 잘못 옮겨지거나 지워진 것 같은 문제는 정리한 페이지, 항목 경로, 격리 폴더(`.bytesieve-trash`)에 남아 있는지를 함께 알려 주세요.
-
-### Pull Request 제출
-
-1. 저장소를 Fork하고 `main`에서 작업 브랜치를 만듭니다. 브랜치 이름은 `feat/…`·`fix/…`·`docs/…`·`refactor/…`처럼 작업 종류를 앞에 붙입니다.
-2. 변경하고, 아래 [로컬 빌드·테스트](#로컬-빌드테스트)가 경고·실패 없이 통과하는지 확인합니다.
-3. 커밋 메시지는 `fix: 격리 폴더 페이지 번역 및 언어 즉시 적용`처럼 `종류: 요약` 형식으로 씁니다.
-4. `main`으로 PR을 열고 무엇을 왜 바꿨는지, 어떻게 확인했는지 적습니다. 화면이 바뀌면 스크린샷을 붙여 주세요.
-5. PR을 열면 GitHub Actions(CI)가 Release 구성으로 빌드·테스트합니다. 실패하면 로그를 확인해 고쳐 주세요.
-
-큰 기능이나 구조 변경은 먼저 Issue로 방향을 맞춘 뒤 시작하는 것이 좋습니다.
-
-### 로컬 빌드·테스트
-
-```powershell
-cmake -S . -B build
-cmake --build build --config Debug
-ctest --test-dir build -C Debug --output-on-failure
-```
-
-- 요구 사항과 결과물 위치는 [빌드](#빌드)를, 테스트 목록과 GUI 자체 검사는 [docs/testing.md](docs/testing.md)를 참고하세요.
-- 일부 CLI 검사는 Git이 있으면 Git 상태까지 확인하고, 없으면 그 부분을 건너뜁니다.
-- 설치 프로그램까지 만들어 보려면 [Inno Setup 6](https://jrsoftware.org/isinfo.php)이 필요합니다(`tools\package.ps1`, 없으면 `-NoInstaller`).
-
-### 기본 규칙
-
-- **C11 + Win32 API만** 씁니다. 외부 라이브러리를 추가하지 않습니다.
-- MSVC `/W4`로 빌드하므로 새 코드에서 경고가 나오지 않게 합니다.
-- 주변 코드 스타일을 따릅니다: 한국어 주석, 헤더에 동작·안전 조건 설명, 문자열은 `wchar_t`.
-- GUI 문구는 직접 쓰지 않고 번역 표(`src/ui_lang.c`)에 한국어·영어·일본어·중국어 간체를 모두 넣습니다(`test_ui_lang`이 빠진 번역을 잡습니다).
-- 상태 enum을 추가하면 화면용 `*_status_text`와 식별자 `*_status_name`도 함께 추가합니다.
-- **정리(삭제) 기능의 안전 원칙**: 영구 삭제는 사용자가 명시적으로 확인한 경우에만 합니다. 어떤 경로로 정리하든
-  `src/cleanup_trash.h`의 안전 장치(경로 판정 → 옮기기 직전 확인 → 옮기는 중 확인)를 거칩니다([docs/cleanup.md](docs/cleanup.md)).
-- 기능을 바꾸면 관련 `docs/*.md`와 README의 기능 표·향후 계획을, 테스트를 추가·삭제하면 README의 테스트 개수와 [docs/testing.md](docs/testing.md)를 함께 고칩니다.
-- 기여한 코드는 이 저장소의 [라이선스](#라이선스)로 함께 배포됩니다. PR을 보내기 전에 라이선스를 확인해 주세요.
+- **Issue**: [Issues](https://github.com/gajigaji-dev/ByteSieve/issues)에서 비슷한 Issue를 먼저 찾아본 뒤
+  [새 Issue](https://github.com/gajigaji-dev/ByteSieve/issues/new/choose)에서 버그 신고·기능 제안·번역 오류 양식을 고릅니다.
+  파일이 잘못 옮겨지거나 지워진 것 같다면 정리한 페이지, 항목 경로, 격리 폴더(`.bytesieve-trash`)에 남아 있는지를 함께 알려 주세요.
+- **처음 기여한다면**: [`good first issue`](https://github.com/gajigaji-dev/ByteSieve/labels/good%20first%20issue) Label이 붙은 Issue부터 보세요.
+- **Pull Request**: `main`에서 `feat/…`·`fix/…`·`docs/…`처럼 종류를 앞에 붙인 브랜치를 만들고, `종류: 요약` 형식의 커밋·PR 제목으로
+  `main`에 PR을 엽니다. CI(Release 빌드·전체 테스트)가 통과해야 병합합니다.
+- **빌드·테스트**: [빌드](#빌드)와 [테스트](#테스트), 자세히는 [CONTRIBUTING.md](CONTRIBUTING.md#개발-환경과-빌드테스트)를 보세요.
+- **꼭 지킬 것**: C11 + Win32 API만(외부 라이브러리 없음), `/W4` 경고 없음, 화면 문구는 네 언어 번역 표에,
+  **영구 삭제는 사용자가 확인한 경우에만** 하고 정리는 `src/cleanup_trash.h`의 안전 장치를 거칩니다.
+- 참여하는 모든 사람은 [행동 강령](CODE_OF_CONDUCT.md)을 지킵니다. 기여한 코드는 이 저장소의 [라이선스](#라이선스)로 함께 배포됩니다.
 
 ## 라이선스
 

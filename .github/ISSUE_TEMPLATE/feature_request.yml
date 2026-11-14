@@ -1,6 +1,6 @@
 name: 기능 제안 / Feature request
 description: 새 기능이나 개선을 제안해 주세요. / Suggest a new feature or an improvement.
-labels: ["enhancement"]
+labels: ["enhancement", "needs triage"]
 body:
   - type: markdown
     attributes:

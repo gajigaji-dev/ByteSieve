@@ -2,6 +2,8 @@
 
 ## 기술 스택
 
+지금은 Windows 전용입니다. Windows 종속 코드의 위치와 core 의존성, 다른 플랫폼 확장 방향은 [platform.md](platform.md)에 정리했습니다.
+
 - **언어·빌드**: C11, CMake 3.21+, MSVC(`/W4 /utf-8`), 유니코드(`UNICODE`) 빌드
 - **Windows API**: 폴더 열거 `GetFileInformationByHandleEx(FileFullDirectoryInfo)`(미지원 파일 시스템은 `FindFirstFileExW`),
   긴 경로 `\\?\`, 휴지통 이동 `IFileOperation`, 격리 폴더 이동·복원 `MoveFileExW`(같은 볼륨, 덮어쓰기 없음), 드라이브 `GetLogicalDrives`·`GetDiskFreeSpaceExW`,
