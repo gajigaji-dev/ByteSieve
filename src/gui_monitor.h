@@ -41,6 +41,10 @@ int monitor_panel_verify(HWND panel);
  */
 void monitor_panel_apply_language(HWND panel, HFONT font);
 
+/* DPI 가 바뀌면(배율이 다른 모니터로 옮김·배율 변경) 크기 계산 기준을 바꾼다. 글꼴·폭·배치는 이어서
+ * 부르는 monitor_panel_apply_language 가 다시 잡는다. */
+void monitor_panel_set_dpi(HWND panel, int dpi);
+
 /*
  * 자체 검사: 이름표가 지금 언어이고 잘리지 않는지, 상태 줄·RAM/CPU 문구가 지금 언어로 쓰였는지(한국어가
  * 아니면 한글이 없는지), 그래프 문구도 지금 언어인지 확인한다. 실패 수.

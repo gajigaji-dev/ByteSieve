@@ -59,6 +59,7 @@
 enum {
     IDC_NAV = 100,
     IDC_TITLE,
+    IDC_PAGE_HOST, /* 페이지 패널을 담는 스크롤 자리 */
     /* 페이지 패널: IDC_PAGE_BASE + NavPage */
     IDC_PAGE_BASE = 200
 };
@@ -95,19 +96,24 @@ typedef enum {
     SELF_TEST_NAV,    /* 사이드바 키보드·마우스 이동 → 페이지 전환·제목·처음 열 때 조회 횟수 검증 → 종료 */
     SELF_TEST_THEME,  /* 테마 밝게 → 어둡게 → 시스템(어둡게·밝게) → 밝게 고정, 단계마다 컨트롤 색 검증 → 종료 */
     SELF_TEST_SETTINGS, /* [설정]에서 언어 바꾸기(저장 값·즉시 적용)·자동 저장 끄고 켜기 → 저장 값·두 페이지 검증 → 종료 */
-    SELF_TEST_LANG_SWITCH /* 스캔(한국어) → 언어를 en·ja·zh-Hans·ko 로 차례로 바꾸며 결과·상태 줄·문구 다시 쓰기 검증 → 종료 */
+    SELF_TEST_LANG_SWITCH, /* 스캔(한국어) → 언어를 en·ja·zh-Hans·ko 로 차례로 바꾸며 결과·상태 줄·문구 다시 쓰기 검증 → 종료 */
+    SELF_TEST_DPI_CHANGE, /* 실행 중 DPI 변경(WM_DPICHANGED) 96→144→192→120→96 마다 글꼴·배치·입력값·화면 상태 검증 → 종료 */
+    SELF_TEST_LAYOUT /* 네 언어 × 여러 창 크기에서 모든 페이지의 문구 잘림·겹침·패널 밖 넘침·입력값 유지 검증 → 종료 */
 } SelfTest;
 
 typedef struct {
     HWND hwnd;
     HWND nav;
     HWND title;
+    HWND host; /* 페이지 패널의 부모(스크롤 자리). 패널 알림은 메인 창으로 넘긴다 */
     HWND pages[NAV_PAGE_COUNT];
+    int scroll[NAV_PAGE_COUNT][2]; /* 페이지별 가로·세로 스크롤 위치(자리가 페이지 최소 크기보다 작을 때) */
     NavPage page; /* 보이는 페이지 */
     HFONT font;       /* 지금 언어의 UI 글꼴(사이드바·폴더 스캔·설정) */
     HFONT base_font;  /* 시작할 때 만든 글꼴(언어를 바꿔도 끝날 때 해제) */
     HFONT title_font;
     int dpi;
+    int font_dpi; /* 시스템 글꼴 크기의 기준 DPI(실제 화면 DPI). 배치 검사가 dpi 를 바꾸면 글꼴을 그 비율로 키운다 */
     ThemeMode theme_mode; /* 지금 테마 설정(시스템·밝게·어둡게) */
 
     /* 페이지를 열 때 시작한 조회(처음 열 때 조회·열 때마다 다시 읽기) 횟수. */
@@ -137,11 +143,85 @@ static int scale(int px)
 
 /* 바깥 여백·제목 줄 높이(96 DPI 기준). */
 #define MAIN_MARGIN 12
+#define PAGE_HOST_CLASS L"ByteSievePageHost"
 #define MAIN_TITLE_H 44
 
 static int nav_width(void)
 {
     return g_app.nav != NULL ? nav_view_width(g_app.nav) : scale(200);
+}
+
+/* 페이지 패널이 잘리지 않는 최소 높이(96 DPI 기준). 자리가 이보다 낮으면 세로로 스크롤한다. */
+#define PAGE_MIN_H 300
+
+/* 페이지 패널이 잘리지 않는 최소 높이. [설정]은 줄을 쌓는 배치라 그 높이, 다른 페이지는 PAGE_MIN_H. */
+static int page_min_height(int page)
+{
+    int h = scale(PAGE_MIN_H);
+
+    if (page == NAV_PAGE_SETTINGS) {
+        int need = settings_panel_min_height(g_app.pages[page]);
+        if (need > h) {
+            h = need;
+        }
+    }
+    return h;
+}
+
+/* 페이지 패널이 잘리지 않는 최소 폭. 자리가 이보다 좁으면 가로로 스크롤한다. */
+static int page_min_width(int page)
+{
+    HWND h = g_app.pages[page];
+
+    switch (page) {
+    case NAV_PAGE_SCAN:
+        return scan_panel_min_width(h);
+    case NAV_PAGE_DRIVES:
+        return drive_panel_min_width(h);
+    case NAV_PAGE_CLEANUP:
+        return cleanup_panel_min_width(h);
+    case NAV_PAGE_CLEANER:
+    case NAV_PAGE_CACHE:
+        return cleaner_panel_min_width(h);
+    case NAV_PAGE_QUARANTINE:
+        return quarantine_panel_min_width(h);
+    case NAV_PAGE_BOOSTER:
+        return booster_panel_min_width(h);
+    case NAV_PAGE_SETTINGS:
+        return settings_panel_min_width(h);
+    default:
+        return 0;
+    }
+}
+
+/*
+ * 창이 있는 모니터의 작업 영역(작업 표시줄 제외) 크기. 창을 만들기 전이면 주 모니터.
+ * 배치·DPI 자체 검사는 BYTESIEVE_TEST_WORKAREA=<폭>x<높이> 로 작은 화면을 흉내 낸다.
+ */
+static void work_area_size(int *w, int *h)
+{
+    MONITORINFO mi;
+    HMONITOR mon;
+    POINT origin = {0, 0};
+
+    if (g_app.self_test == SELF_TEST_LAYOUT || g_app.self_test == SELF_TEST_DPI_CHANGE) {
+        wchar_t env[32];
+        DWORD n = GetEnvironmentVariableW(L"BYTESIEVE_TEST_WORKAREA", env, 32);
+        if (n > 0 && n < 32 && swscanf_s(env, L"%dx%d", w, h) == 2 && *w > 0 && *h > 0) {
+            return;
+        }
+    }
+    mon = g_app.hwnd != NULL ? MonitorFromWindow(g_app.hwnd, MONITOR_DEFAULTTONEAREST)
+                             : MonitorFromPoint(origin, MONITOR_DEFAULTTOPRIMARY);
+    memset(&mi, 0, sizeof(mi));
+    mi.cbSize = sizeof(mi);
+    if (mon != NULL && GetMonitorInfoW(mon, &mi)) {
+        *w = mi.rcWork.right - mi.rcWork.left;
+        *h = mi.rcWork.bottom - mi.rcWork.top;
+    } else {
+        *w = GetSystemMetrics(SM_CXMAXIMIZED);
+        *h = GetSystemMetrics(SM_CYMAXIMIZED);
+    }
 }
 
 /*
@@ -193,6 +273,18 @@ static void min_window_size(int *cx, int *cy)
     if (need > *cy) {
         *cy = need;
     }
+    /* 모니터 작업 영역보다 크게 하지 않는다(예: 1920×1080 화면의 200% 배율). 모자란 자리는 사이드바와
+     * 페이지가 스크롤로 보여 준다(page_min_width·PAGE_MIN_H, nav_view 스크롤). */
+    {
+        int work_w, work_h;
+        work_area_size(&work_w, &work_h);
+        if (*cx > work_w) {
+            *cx = work_w;
+        }
+        if (*cy > work_h) {
+            *cy = work_h;
+        }
+    }
 }
 
 /* 페이지 패널 자리(메인 창 클라이언트 좌표). */
@@ -214,20 +306,168 @@ static void page_rect(RECT *out)
     }
 }
 
+/*
+ * 스크롤 자리 안에 페이지 패널을 놓는다. 자리가 페이지의 최소 크기(page_min_width·PAGE_MIN_H)보다 작으면
+ * 패널을 최소 크기로 두고 스크롤 막대로 옮겨 보게 한다(맨 위·왼쪽의 주요 단추는 스크롤 0 에서 보임).
+ * 페이지마다 스크롤 위치를 기억한다. 자리가 넉넉하면 막대 없이 자리를 채운다(예전과 같음).
+ */
+static void host_layout(void)
+{
+    static int busy;
+    RECT wr;
+    int W, H, i, sbw, sbh;
+
+    if (g_app.host == NULL || busy) {
+        return;
+    }
+    busy = 1; /* 막대를 보이고 숨기면 WM_SIZE 가 다시 온다 */
+    GetWindowRect(g_app.host, &wr);
+    W = wr.right - wr.left;
+    H = wr.bottom - wr.top;
+    sbw = GetSystemMetricsForDpi(SM_CXVSCROLL, (UINT)g_app.dpi);
+    sbh = GetSystemMetricsForDpi(SM_CYHSCROLL, (UINT)g_app.dpi);
+    for (i = 0; i < NAV_PAGE_COUNT; i++) {
+        int need_w = page_min_width(i), need_h = page_min_height(i), hs = 0, vs = 0, k, cw, ch, pw, ph;
+        int *pos = g_app.scroll[i];
+        if (g_app.pages[i] == NULL) {
+            continue;
+        }
+        for (k = 0; k < 2; k++) {
+            hs = need_w > W - (vs ? sbw : 0);
+            vs = need_h > H - (hs ? sbh : 0);
+        }
+        cw = W - (vs ? sbw : 0);
+        ch = H - (hs ? sbh : 0);
+        pw = need_w > cw ? need_w : cw;
+        ph = need_h > ch ? need_h : ch;
+        if (pos[0] > pw - cw) {
+            pos[0] = pw - cw;
+        }
+        if (pos[1] > ph - ch) {
+            pos[1] = ph - ch;
+        }
+        if (pos[0] < 0) {
+            pos[0] = 0;
+        }
+        if (pos[1] < 0) {
+            pos[1] = 0;
+        }
+        MoveWindow(g_app.pages[i], -pos[0], -pos[1], pw > 0 ? pw : 0, ph > 0 ? ph : 0, TRUE);
+        if (i == (int)g_app.page) {
+            SCROLLINFO si;
+            memset(&si, 0, sizeof(si));
+            si.cbSize = sizeof(si);
+            si.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+            si.nMax = hs ? pw - 1 : 0;
+            si.nPage = hs ? (UINT)cw : 0;
+            si.nPos = pos[0];
+            SetScrollInfo(g_app.host, SB_HORZ, &si, TRUE);
+            si.nMax = vs ? ph - 1 : 0;
+            si.nPage = vs ? (UINT)ch : 0;
+            si.nPos = pos[1];
+            SetScrollInfo(g_app.host, SB_VERT, &si, TRUE);
+        }
+    }
+    busy = 0;
+}
+
+static void host_scroll(int bar, int code)
+{
+    SCROLLINFO si;
+    int pos, line = scale(32);
+
+    memset(&si, 0, sizeof(si));
+    si.cbSize = sizeof(si);
+    si.fMask = SIF_ALL;
+    if (!GetScrollInfo(g_app.host, bar, &si) || si.nPage == 0) {
+        return;
+    }
+    pos = si.nPos;
+    switch (code) {
+    case SB_LINEUP:
+        pos -= line;
+        break;
+    case SB_LINEDOWN:
+        pos += line;
+        break;
+    case SB_PAGEUP:
+        pos -= (int)si.nPage;
+        break;
+    case SB_PAGEDOWN:
+        pos += (int)si.nPage;
+        break;
+    case SB_THUMBTRACK:
+    case SB_THUMBPOSITION:
+        pos = si.nTrackPos;
+        break;
+    case SB_TOP:
+        pos = 0;
+        break;
+    case SB_BOTTOM:
+        pos = si.nMax;
+        break;
+    default:
+        return;
+    }
+    g_app.scroll[g_app.page][bar == SB_HORZ ? 0 : 1] = pos;
+    host_layout();
+}
+
+/* 스크롤 자리: 패널이 부모(GetParent)에게 보내는 알림을 메인 창으로 넘기고, 막대·휠로 페이지를 옮긴다. */
+static LRESULT CALLBACK host_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    switch (msg) {
+    case WM_COMMAND:
+    case WM_NOTIFY:
+        return SendMessageW(GetParent(hwnd), msg, wp, lp);
+    case WM_HSCROLL:
+        if (lp == 0) {
+            host_scroll(SB_HORZ, LOWORD(wp));
+        }
+        return 0;
+    case WM_VSCROLL:
+        if (lp == 0) {
+            host_scroll(SB_VERT, LOWORD(wp));
+        }
+        return 0;
+    case WM_MOUSEWHEEL:
+        /* 패널 안의 목록 등이 쓰지 않은 휠만 올라온다. 세로 막대가 있을 때만 옮긴다. */
+        if (GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_VSCROLL) {
+            g_app.scroll[g_app.page][1] -= MulDiv(GET_WHEEL_DELTA_WPARAM(wp), scale(48), WHEEL_DELTA);
+            host_layout();
+        }
+        return 0;
+    case WM_SIZE:
+        host_layout();
+        return 0;
+    case WM_ERASEBKGND: {
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        FillRect((HDC)wp, &rc, theme_bg_brush());
+        return 1;
+    }
+    default:
+        break;
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
 static void layout(void)
 {
     RECT rc, page;
-    int i, m = scale(MAIN_MARGIN);
+    int m = scale(MAIN_MARGIN), nw = nav_width();
 
     GetClientRect(g_app.hwnd, &rc);
-    MoveWindow(g_app.nav, 0, 0, nav_width(), rc.bottom, TRUE);
+    MoveWindow(g_app.nav, 0, 0, nw, rc.bottom, TRUE);
+    if (nav_width() != nw) {
+        /* 사이드바가 낮아 스크롤 막대가 생기거나 없어졌으면 그 폭을 반영한다. */
+        MoveWindow(g_app.nav, 0, 0, nav_width(), rc.bottom, TRUE);
+    }
     page_rect(&page);
     MoveWindow(g_app.title, page.left, m, page.right - page.left, scale(MAIN_TITLE_H) - scale(4),
                TRUE);
-    for (i = 0; i < NAV_PAGE_COUNT; i++) {
-        MoveWindow(g_app.pages[i], page.left, page.top, page.right - page.left,
-                   page.bottom - page.top, TRUE);
-    }
+    MoveWindow(g_app.host, page.left, page.top, page.right - page.left, page.bottom - page.top, TRUE);
+    host_layout(); /* 자리 크기가 같아도 페이지 최소 크기(언어·DPI)가 바뀌었을 수 있다 */
 }
 
 /* ---- 페이지 전환 ---- */
@@ -300,6 +540,7 @@ static void show_page(NavPage page)
     for (i = 0; i < NAV_PAGE_COUNT; i++) {
         ShowWindow(g_app.pages[i], i == (int)page ? SW_SHOW : SW_HIDE);
     }
+    host_layout(); /* 이 페이지의 스크롤 막대·위치 */
     if (page == NAV_PAGE_SETTINGS) {
         /* 폴더 스캔 페이지에서 바꾼 자동 저장 상태·고대비 여부를 다시 보인다(읽기만 함). */
         settings_panel_sync(g_app.pages[NAV_PAGE_SETTINGS],
@@ -332,6 +573,19 @@ static HFONT create_ui_font(UiLang lang)
         SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0);
         font = CreateFontIndirectW(&ncm.lfMessageFont);
     }
+    /* 배치 검사가 DPI 를 바꿨으면(BYTESIEVE_TEST_DPI) 그 배율의 Windows 처럼 글꼴도 같은 비율로 키운다. */
+    if (font != NULL && g_app.font_dpi > 0 && g_app.dpi != g_app.font_dpi) {
+        LOGFONTW lf;
+        if (GetObjectW(font, sizeof(lf), &lf) == sizeof(lf)) {
+            HFONT scaled;
+            lf.lfHeight = MulDiv(lf.lfHeight, g_app.dpi, g_app.font_dpi);
+            scaled = CreateFontIndirectW(&lf);
+            if (scaled != NULL) {
+                DeleteObject(font);
+                font = scaled;
+            }
+        }
+    }
     return font;
 }
 
@@ -349,18 +603,19 @@ static void apply_thread_ui_language(UiLang lang)
  * 다시 쓰고, 문구 길이에 맞게 최소 창 크기·배치를 다시 계산한다. 같은 언어면 아무것도 하지 않는다.
  * 새 글꼴을 만들지 못하면 언어를 바꾸지 않는다.
  */
-static void apply_language(UiLang lang)
+/*
+ * 지금 언어·DPI 로 글꼴을 다시 만들어 사이드바·제목·모든 페이지에 적용한다(페이지는 문구·단추 폭·열 머리글을
+ * 다시 재고 배치한다). fit 이면 최소 창 크기보다 작아지지 않게 넓힌다. 글꼴을 만들지 못하면 0.
+ */
+static int apply_fonts(UiLang lang, int fit)
 {
     HFONT font, title_font, old_font = g_app.font, old_title = g_app.title_font;
     RECT wr;
     int cx, cy;
 
-    if (lang == ui_lang_current() || (unsigned)lang >= (unsigned)UI_LANG_COUNT) {
-        return;
-    }
     font = create_ui_font(lang);
     if (font == NULL) {
-        return;
+        return 0;
     }
     ui_lang_set(lang);
     apply_thread_ui_language(lang);
@@ -391,10 +646,85 @@ static void apply_language(UiLang lang)
     /* 문구가 길어진 언어면 최소 창 크기보다 작아지지 않게 넓힌다(WM_SIZE → layout). */
     GetWindowRect(g_app.hwnd, &wr);
     min_window_size(&cx, &cy);
-    if (wr.right - wr.left < cx || wr.bottom - wr.top < cy) {
+    if (fit && (wr.right - wr.left < cx || wr.bottom - wr.top < cy)) {
         SetWindowPos(g_app.hwnd, NULL, 0, 0, wr.right - wr.left > cx ? wr.right - wr.left : cx,
                      wr.bottom - wr.top > cy ? wr.bottom - wr.top : cy,
                      SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+    layout();
+    InvalidateRect(g_app.hwnd, NULL, TRUE);
+    return 1;
+}
+
+static void apply_language(UiLang lang)
+{
+    if (lang == ui_lang_current() || (unsigned)lang >= (unsigned)UI_LANG_COUNT) {
+        return;
+    }
+    apply_fonts(lang, 1);
+}
+
+/* 목록(ListView) 열 폭을 DPI 비율로 바꾼다(사용자가 바꾼 폭도 비율대로 유지). d[0] 이전, d[1] 새 DPI. */
+static BOOL CALLBACK scale_columns_proc(HWND h, LPARAM lp)
+{
+    const int *d = (const int *)lp;
+    wchar_t cls[32];
+
+    GetClassNameW(h, cls, 32);
+    if (_wcsicmp(cls, WC_LISTVIEWW) == 0) {
+        int n = Header_GetItemCount(ListView_GetHeader(h)), i;
+        DWORD ex = ListView_GetExtendedListViewStyle(h);
+        for (i = 0; i < n; i++) {
+            ListView_SetColumnWidth(h, i, MulDiv(ListView_GetColumnWidth(h, i), d[1], d[0]));
+        }
+        /* 체크 상자 그림은 목록이 만들 때의 DPI 로 그려 둔다. 껐다 켜서 새 DPI 로 다시 만든다(체크 상태는
+         * 패널이 갖고 LVN_GETDISPINFO 로 알려 주므로 잃지 않음, 콜백 마스크는 다시 둔다). */
+        if (ex & LVS_EX_CHECKBOXES) {
+            UINT callback = ListView_GetCallbackMask(h);
+            ListView_SetExtendedListViewStyle(h, ex & ~(DWORD)LVS_EX_CHECKBOXES);
+            ListView_SetExtendedListViewStyle(h, ex);
+            ListView_SetCallbackMask(h, callback);
+        }
+    }
+    return TRUE;
+}
+
+/*
+ * DPI 가 바뀌었을 때(배율이 다른 모니터로 옮김·실행 중 배율 변경 → WM_DPICHANGED, 처음 뜬 모니터의 DPI 가
+ * 시스템 DPI 와 다름) 모든 크기를 새 DPI 로 다시 잡는다. 컨트롤을 다시 만들지 않으므로 입력값·선택·목록
+ * 내용·스크롤 위치·고른 페이지는 그대로다. suggested 가 있으면 Windows 가 권한 창 위치·크기로 옮긴다.
+ */
+static void apply_dpi(int dpi, const RECT *suggested)
+{
+    int old = g_app.dpi, d[2], i;
+
+    if (dpi > 0 && dpi != old) {
+        g_app.dpi = dpi;
+        nav_view_set_dpi(g_app.nav, dpi);
+        scan_panel_set_dpi(g_app.pages[NAV_PAGE_SCAN], dpi);
+        drive_panel_set_dpi(g_app.pages[NAV_PAGE_DRIVES], dpi);
+        cleanup_panel_set_dpi(g_app.pages[NAV_PAGE_CLEANUP], dpi);
+        cleaner_panel_set_dpi(g_app.pages[NAV_PAGE_CLEANER], dpi);
+        cleaner_panel_set_dpi(g_app.pages[NAV_PAGE_CACHE], dpi);
+        quarantine_panel_set_dpi(g_app.pages[NAV_PAGE_QUARANTINE], dpi);
+        monitor_panel_set_dpi(g_app.pages[NAV_PAGE_MONITOR], dpi);
+        booster_panel_set_dpi(g_app.pages[NAV_PAGE_BOOSTER], dpi);
+        settings_panel_set_dpi(g_app.pages[NAV_PAGE_SETTINGS], dpi);
+        d[0] = old;
+        d[1] = dpi;
+        for (i = 0; i < NAV_PAGE_COUNT; i++) {
+            if (g_app.pages[i] != NULL) {
+                EnumChildWindows(g_app.pages[i], scale_columns_proc, (LPARAM)d);
+            }
+            g_app.scroll[i][0] = MulDiv(g_app.scroll[i][0], dpi, old);
+            g_app.scroll[i][1] = MulDiv(g_app.scroll[i][1], dpi, old);
+        }
+        apply_fonts(ui_lang_current(), suggested == NULL);
+    }
+    if (suggested != NULL) {
+        SetWindowPos(g_app.hwnd, NULL, suggested->left, suggested->top,
+                     suggested->right - suggested->left, suggested->bottom - suggested->top,
+                     SWP_NOZORDER | SWP_NOACTIVATE);
     }
     layout();
     InvalidateRect(g_app.hwnd, NULL, TRUE);
@@ -635,6 +965,409 @@ static int verify_lang(void)
                 lf.lfFaceName, cx);
         fflush(stdout);
     }
+    return failures == 0 ? 0 : 1;
+}
+
+/* ---- 배치 검사(--self-test-layout) ---- */
+
+/* 검사 중인 조건(실패를 알릴 때 함께 쓴다). */
+static struct {
+    int cx, cy;
+    const wchar_t *where;
+} g_layout;
+
+/* 컨트롤 글꼴로 잰 문구 크기. wrap_w > 0 이면 그 폭에서 줄을 바꾼 크기. */
+static SIZE layout_text_size(HWND h, const wchar_t *text, int wrap_w)
+{
+    SIZE out = {0, 0};
+    RECT r = {0, 0, 0, 0};
+    HFONT font = (HFONT)SendMessageW(h, WM_GETFONT, 0, 0);
+    HDC dc = GetDC(h);
+    HGDIOBJ old;
+
+    if (dc == NULL) {
+        return out;
+    }
+    r.right = wrap_w > 0 ? wrap_w : 0;
+    old = SelectObject(dc, font != NULL ? (HGDIOBJ)font : GetStockObject(DEFAULT_GUI_FONT));
+    DrawTextW(dc, text, -1, &r,
+              DT_CALCRECT | DT_NOPREFIX | (wrap_w > 0 ? DT_WORDBREAK : DT_SINGLELINE));
+    SelectObject(dc, old);
+    ReleaseDC(h, dc);
+    out.cx = r.right - r.left;
+    out.cy = r.bottom - r.top;
+    return out;
+}
+
+static int layout_fail(HWND h, const RECT *rc, const wchar_t *why, HWND other)
+{
+    wchar_t cls[64], text[96], text2[96];
+
+    text2[0] = L'\0';
+    GetClassNameW(h, cls, 64);
+    GetWindowTextW(h, text, 96);
+    if (other != NULL) {
+        GetWindowTextW(other, text2, 96);
+    }
+    fwprintf(stderr,
+             L"layout: %ls dpi=%d window=%dx%d %ls %ls id=%d \"%ls\" at (%ld,%ld %ldx%ld): %ls%ls%ls%ls\n",
+             ui_lang_name(ui_lang_current()), g_app.dpi, g_layout.cx, g_layout.cy, g_layout.where,
+             cls, GetDlgCtrlID(h), text, rc->left, rc->top, rc->right - rc->left,
+             rc->bottom - rc->top, why, other != NULL ? L" \"" : L"", text2,
+             other != NULL ? L"\"" : L"");
+    return 1;
+}
+
+/* 문구가 컨트롤 안에 다 보이는지(단추·체크 상자·글자). 말줄임표를 쓰는 글자는 폭을 보지 않는다. */
+static int layout_check_text(HWND h, const RECT *rc)
+{
+    wchar_t cls[32], text[512];
+    LONG style = (LONG)GetWindowLongPtrW(h, GWL_STYLE);
+    int w = rc->right - rc->left, hgt = rc->bottom - rc->top;
+    SIZE ts;
+
+    GetClassNameW(h, cls, 32);
+    if (GetWindowTextW(h, text, 512) == 0) {
+        return 0;
+    }
+    if (_wcsicmp(cls, L"Button") == 0) {
+        LONG type = style & BS_TYPEMASK;
+        if (type == BS_GROUPBOX) {
+            ts = layout_text_size(h, text, 0);
+            return ts.cx + scale(16) > w ? layout_fail(h, rc, L"group title clipped", NULL) : 0;
+        }
+        if (type == BS_CHECKBOX || type == BS_AUTOCHECKBOX || type == BS_RADIOBUTTON ||
+            type == BS_AUTORADIOBUTTON || type == BS_3STATE || type == BS_AUTO3STATE) {
+            ts = layout_text_size(h, text, (style & BS_MULTILINE) ? w - scale(17) : 0);
+            if (ts.cx + scale(17) > w) {
+                return layout_fail(h, rc, L"check box text clipped (width)", NULL);
+            }
+            return ts.cy > hgt ? layout_fail(h, rc, L"check box text clipped (height)", NULL) : 0;
+        }
+        /* 누름 단추: 테두리 안쪽 여백(양쪽 3px)을 빼고 들어가야 한다. */
+        ts = layout_text_size(h, text, (style & BS_MULTILINE) ? w - scale(6) : 0);
+        if (ts.cx + scale(6) > w) {
+            return layout_fail(h, rc, L"button text clipped (width)", NULL);
+        }
+        return ts.cy + scale(4) > hgt ? layout_fail(h, rc, L"button text clipped (height)", NULL)
+                                      : 0;
+    }
+    if (_wcsicmp(cls, L"Static") == 0) {
+        LONG type = style & SS_TYPEMASK;
+        int ellipsis = (style & SS_ELLIPSISMASK) != 0;
+        if (type == SS_LEFTNOWORDWRAP || type == SS_SIMPLE) {
+            ts = layout_text_size(h, text, 0);
+            if (!ellipsis && ts.cx > w) {
+                return layout_fail(h, rc, L"text clipped (width)", NULL);
+            }
+            return ts.cy > hgt ? layout_fail(h, rc, L"text clipped (height)", NULL) : 0;
+        }
+        if (type == SS_LEFT || type == SS_CENTER || type == SS_RIGHT) {
+            if (ellipsis) {
+                ts = layout_text_size(h, text, 0);
+                return ts.cy > hgt ? layout_fail(h, rc, L"text clipped (height)", NULL) : 0;
+            }
+            ts = layout_text_size(h, text, w > 0 ? w : 1);
+            if (ts.cx > w) {
+                return layout_fail(h, rc, L"text clipped (word wider than control)", NULL);
+            }
+            return ts.cy > hgt ? layout_fail(h, rc, L"wrapped text clipped (height)", NULL) : 0;
+        }
+    }
+    return 0;
+}
+
+#define LAYOUT_MAX_CHILDREN 160
+
+/*
+ * parent 의 보이는 자식 컨트롤이 parent 안에 있고, 서로 겹치지 않고, 문구가 잘리지 않는지 확인한다.
+ * 이 프로그램의 패널(창 클래스 ByteSieve…) 안은 다시 들어가 본다(공용 컨트롤의 내부 자식은 보지 않음).
+ */
+static int layout_check_children(HWND parent)
+{
+    HWND kids[LAYOUT_MAX_CHILDREN];
+    RECT rects[LAYOUT_MAX_CHILDREN], pc;
+    int n = 0, failures = 0, i, j;
+    HWND h;
+
+    GetClientRect(parent, &pc);
+    for (h = GetWindow(parent, GW_CHILD); h != NULL && n < LAYOUT_MAX_CHILDREN;
+         h = GetWindow(h, GW_HWNDNEXT)) {
+        wchar_t cls[64];
+        RECT r;
+        if (!(GetWindowLongPtrW(h, GWL_STYLE) & WS_VISIBLE)) {
+            continue;
+        }
+        GetWindowRect(h, &r);
+        MapWindowPoints(NULL, parent, (POINT *)&r, 2);
+        GetClassNameW(h, cls, 64);
+        if ((_wcsicmp(cls, WC_LISTVIEWW) == 0 || _wcsicmp(cls, WC_TREEVIEWW) == 0) &&
+            r.bottom - r.top < scale(48)) {
+            failures += layout_fail(h, &r, L"list has no room", NULL); /* 목록이 접혀 보이지 않음 */
+        }
+        if (r.right <= r.left || r.bottom <= r.top) {
+            continue; /* 자리가 없어 접어 둔 칸 */
+        }
+        if (r.left < 0 || r.top < 0 || r.right > pc.right || r.bottom > pc.bottom) {
+            failures += layout_fail(h, &r, L"outside its panel", NULL);
+        }
+        failures += layout_check_text(h, &r);
+        if (wcsncmp(cls, L"ByteSieve", 9) == 0) {
+            failures += layout_check_children(h);
+        }
+        kids[n] = h;
+        rects[n++] = r;
+    }
+    for (i = 0; i < n; i++) {
+        for (j = i + 1; j < n; j++) {
+            RECT x;
+            if (IntersectRect(&x, &rects[i], &rects[j])) {
+                failures += layout_fail(kids[i], &rects[i], L"overlaps", kids[j]);
+            }
+        }
+    }
+    return failures;
+}
+
+/* 모든 입력 칸(EDIT)에 표식 문구를 넣거나(set) 그대로인지 확인한다(창 크기·언어를 바꿔도 입력값 유지). */
+static int layout_edit_marks(HWND parent, int set, int *index)
+{
+    HWND h;
+    int failures = 0;
+
+    for (h = GetWindow(parent, GW_CHILD); h != NULL; h = GetWindow(h, GW_HWNDNEXT)) {
+        wchar_t cls[64], want[64], now[64];
+        GetClassNameW(h, cls, 64);
+        if (wcsncmp(cls, L"ByteSieve", 9) == 0) {
+            failures += layout_edit_marks(h, set, index);
+            continue;
+        }
+        if (_wcsicmp(cls, L"Edit") != 0 || (GetWindowLongPtrW(h, GWL_STYLE) & ES_READONLY)) {
+            continue;
+        }
+        swprintf(want, 64, L"C:\\layout-check-%d", (*index)++);
+        if (set) {
+            SetWindowTextW(h, want);
+        } else {
+            GetWindowTextW(h, now, 64);
+            if (wcscmp(now, want) != 0) {
+                RECT r;
+                GetWindowRect(h, &r);
+                failures += layout_fail(h, &r, L"input text was not kept", NULL);
+            }
+        }
+    }
+    return failures;
+}
+
+/*
+ * 자리가 모자랄 때의 스크롤: 창이 작업 영역 안이고, 보이는 페이지는 최소 크기 이상이며 모자란 만큼 스크롤
+ * 막대로 끝까지 갈 수 있고, 사이드바도 항목보다 낮으면 스크롤해 모든 항목에 갈 수 있다.
+ */
+static int layout_check_scroll(void)
+{
+    RECT wr, host, page, nav;
+    SCROLLINFO si;
+    int failures = 0, work_w, work_h, bar;
+    HWND visible = g_app.pages[g_app.page];
+
+    GetWindowRect(g_app.hwnd, &wr);
+    work_area_size(&work_w, &work_h);
+    {
+        int cx, cy;
+        min_window_size(&cx, &cy);
+        if (cx > work_w || cy > work_h) {
+            failures += layout_fail(g_app.hwnd, &wr, L"minimum window larger than work area", NULL);
+        }
+    }
+    GetClientRect(g_app.host, &host);
+    GetWindowRect(visible, &page);
+    if (page.right - page.left < page_min_width((int)g_app.page) ||
+        page.bottom - page.top < page_min_height((int)g_app.page)) {
+        failures += layout_fail(visible, &page, L"page smaller than its minimum", NULL);
+    }
+    for (bar = SB_HORZ; bar <= SB_VERT; bar++) {
+        int need = bar == SB_HORZ ? page.right - page.left : page.bottom - page.top;
+        int have = bar == SB_HORZ ? host.right : host.bottom;
+        memset(&si, 0, sizeof(si));
+        si.cbSize = sizeof(si);
+        si.fMask = SIF_ALL;
+        if (need > have) {
+            if (!GetScrollInfo(g_app.host, bar, &si) || si.nMax + 1 - (int)si.nPage != need - have) {
+                failures += layout_fail(visible, &page, bar == SB_HORZ ? L"cannot scroll to the right edge"
+                                                                       : L"cannot scroll to the bottom", NULL);
+            }
+        }
+    }
+    GetClientRect(g_app.nav, &nav);
+    if (nav.bottom < nav_view_min_height(g_app.nav)) {
+        memset(&si, 0, sizeof(si));
+        si.cbSize = sizeof(si);
+        si.fMask = SIF_ALL;
+        if (!(GetWindowLongPtrW(g_app.nav, GWL_STYLE) & WS_VSCROLL) ||
+            !GetScrollInfo(g_app.nav, SB_VERT, &si) ||
+            si.nMax + 1 - (int)si.nPage < nav_view_min_height(g_app.nav) - nav.bottom) {
+            failures += layout_fail(g_app.nav, &nav, L"sidebar cannot scroll to every item", NULL);
+        }
+    } else {
+        /* 사이드바 항목 문구가 항목 안에 다 들어간다(스크롤 막대가 있어도). */
+        int i;
+        for (i = 0; i < NAV_PAGE_COUNT; i++) {
+            RECT item;
+            int need = theme_text_width(g_app.nav, g_app.font, ui_text(nav_page_text((NavPage)i))) +
+                       scale(20);
+            if (nav_view_item_rect(g_app.nav, (NavPage)i, &item) && item.right - item.left < need) {
+                failures += layout_fail(g_app.nav, &item, L"sidebar item text clipped", NULL);
+            }
+        }
+    }
+    return failures;
+}
+
+/* 창을 cx×cy 로 바꿔 제목·모든 페이지를 확인한다. */
+static int layout_check_window(int cx, int cy)
+{
+    static const wchar_t *const names[NAV_PAGE_COUNT] = {
+        L"scan",    L"drives",  L"cleanup", L"cleaner", L"cache",
+        L"quarantine", L"monitor", L"booster", L"settings"};
+    RECT wr, title;
+    int failures = 0, i;
+
+    SetWindowPos(g_app.hwnd, NULL, 0, 0, cx, cy, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    layout();
+    GetWindowRect(g_app.hwnd, &wr);
+    g_layout.cx = wr.right - wr.left;
+    g_layout.cy = wr.bottom - wr.top;
+    g_layout.where = L"main";
+    GetWindowRect(g_app.title, &title);
+    MapWindowPoints(NULL, g_app.hwnd, (POINT *)&title, 2);
+    failures += layout_check_text(g_app.title, &title);
+    for (i = 0; i < NAV_PAGE_COUNT; i++) {
+        RECT pr;
+        g_layout.where = names[i];
+        GetWindowRect(g_app.pages[i], &pr);
+        if (pr.right - pr.left <= 0 || pr.bottom - pr.top <= 0) {
+            failures += layout_fail(g_app.pages[i], &pr, L"page has no room", NULL);
+            continue;
+        }
+        failures += layout_check_children(g_app.pages[i]);
+    }
+    failures += layout_check_scroll();
+    return failures;
+}
+
+/*
+ * --self-test-layout: 네 언어(ko·en·ja·zh-Hans)마다 최소 창 크기, 조금 큰 크기, 기본 크기, 넓고 낮은 크기,
+ * 좁고 높은 크기에서 모든 페이지를 배치해 확인한다(DPI 는 BYTESIEVE_TEST_DPI). 입력 칸 값은 처음에 넣은
+ * 대로 남아야 한다. 끝나면 한국어로 돌아온다.
+ */
+static int verify_layout(void)
+{
+    static const UiLang langs[] = {UI_LANG_KO, UI_LANG_EN, UI_LANG_JA, UI_LANG_ZH_HANS, UI_LANG_KO};
+    int failures = 0, index = 0, l, s, cx, cy;
+
+    layout_edit_marks(g_app.hwnd, 1, &index);
+    for (l = 0; l < (int)(sizeof(langs) / sizeof(langs[0])); l++) {
+        int sizes[5][2];
+        apply_language(langs[l]);
+        min_window_size(&cx, &cy);
+        sizes[0][0] = cx, sizes[0][1] = cy;
+        sizes[1][0] = cx + scale(160), sizes[1][1] = cy + scale(120);
+        sizes[2][0] = cx > scale(1240) ? cx : scale(1240);
+        sizes[2][1] = cy > scale(720) ? cy : scale(720);
+        sizes[3][0] = cx + scale(700), sizes[3][1] = cy;
+        sizes[4][0] = cx, sizes[4][1] = cy + scale(500);
+        for (s = 0; s < 5; s++) {
+            int pg;
+            failures += layout_check_window(sizes[s][0], sizes[s][1]);
+            /* 페이지마다 스크롤 자리 확인(첫 페이지는 위에서 확인) */
+            for (pg = 1; pg < NAV_PAGE_COUNT && s == 0; pg++) {
+                show_page((NavPage)pg);
+                failures += layout_check_scroll();
+            }
+            show_page(NAV_PAGE_SCAN);
+        }
+    }
+    index = 0;
+    failures += layout_edit_marks(g_app.hwnd, 0, &index);
+    if (failures == 0) {
+        min_window_size(&cx, &cy);
+        wprintf(L"layout: dpi %d, min window %dx%d, checked ko en ja zh-Hans\n", g_app.dpi, cx, cy);
+        fflush(stdout);
+    } else {
+        wprintf(L"layout: %d problem(s)\n", failures);
+        fflush(stdout);
+    }
+    return failures == 0 ? 0 : 1;
+}
+
+/*
+ * --self-test-dpi-change: 창이 배율이 다른 모니터로 옮겨 간 것처럼 WM_DPICHANGED(권한 창 크기 포함)를
+ * 96 → 144 → 192 → 120 → 96 DPI 로 보낸다. 단계마다 DPI·글꼴 크기·목록 열 폭이 비율대로 바뀌고, 그 크기와
+ * 최소 창 크기에서 모든 페이지가 잘리거나 겹치지 않으며(layout_check_window), 입력값·고른 페이지·사이드바
+ * 선택이 그대로인지 확인한다. 실제 모니터 이동은 Windows 가 같은 메시지를 보낸다.
+ */
+static int verify_dpi_change(void)
+{
+    static const int steps[] = {96, 144, 192, 120, 96};
+    HWND list = NULL, child;
+    LOGFONTW base;
+    int failures = 0, index = 0, i, col0 = 0, base_dpi;
+
+    /* 매니페스트로 모니터별 DPI 인식 V2 가 켜져 있어야 Windows 가 WM_DPICHANGED 를 보낸다. */
+    SELF_CHECK(AreDpiAwarenessContextsEqual(GetThreadDpiAwarenessContext(),
+                                            DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2));
+    apply_dpi(96, NULL); /* 시작 DPI 를 96 으로 맞춘다(실제 화면 DPI 와 무관하게) */
+    base_dpi = g_app.dpi;
+    SELF_CHECK(GetObjectW(g_app.font, sizeof(base), &base) == sizeof(base));
+    show_page(NAV_PAGE_CLEANUP);
+    layout_edit_marks(g_app.hwnd, 1, &index);
+    for (child = GetWindow(g_app.pages[NAV_PAGE_CLEANUP], GW_CHILD); child != NULL;
+         child = GetWindow(child, GW_HWNDNEXT)) {
+        wchar_t cls[32];
+        GetClassNameW(child, cls, 32);
+        if (_wcsicmp(cls, WC_LISTVIEWW) == 0) {
+            list = child;
+            col0 = ListView_GetColumnWidth(list, 0);
+        }
+    }
+    SELF_CHECK(list != NULL && col0 > 0);
+    for (i = 1; i < (int)(sizeof(steps) / sizeof(steps[0])); i++) {
+        RECT wr, want;
+        LOGFONTW lf;
+        int dpi = steps[i], prev = g_app.dpi, cx, cy, expect;
+        GetWindowRect(g_app.hwnd, &wr);
+        want.left = wr.left;
+        want.top = wr.top;
+        want.right = wr.left + MulDiv(wr.right - wr.left, dpi, prev);
+        want.bottom = wr.top + MulDiv(wr.bottom - wr.top, dpi, prev);
+        SendMessageW(g_app.hwnd, WM_DPICHANGED, MAKEWPARAM(dpi, dpi), (LPARAM)&want);
+        SELF_CHECK(g_app.dpi == dpi);
+        SELF_CHECK(GetObjectW(g_app.font, sizeof(lf), &lf) == sizeof(lf));
+        expect = MulDiv(base.lfHeight, dpi, base_dpi);
+        SELF_CHECK(lf.lfHeight >= expect - 1 && lf.lfHeight <= expect + 1);
+        SELF_CHECK((HFONT)SendMessageW(list, WM_GETFONT, 0, 0) == g_app.font);
+        /* 체크 상자는 다시 만들어도 그대로 켜져 있고 체크 상태는 패널이 알려 준다 */
+        SELF_CHECK((ListView_GetExtendedListViewStyle(list) & LVS_EX_CHECKBOXES) &&
+                   ListView_GetCallbackMask(list) == LVIS_STATEIMAGEMASK);
+        expect = MulDiv(col0, dpi, base_dpi);
+        SELF_CHECK(ListView_GetColumnWidth(list, 0) >= expect - 2);
+        SELF_CHECK(g_app.page == NAV_PAGE_CLEANUP && nav_view_selected(g_app.nav) == NAV_PAGE_CLEANUP &&
+                   (GetWindowLongPtrW(g_app.pages[NAV_PAGE_CLEANUP], GWL_STYLE) & WS_VISIBLE) != 0);
+        GetWindowRect(g_app.hwnd, &wr);
+        min_window_size(&cx, &cy);
+        failures += layout_check_window(wr.right - wr.left > cx ? wr.right - wr.left : cx,
+                                        wr.bottom - wr.top > cy ? wr.bottom - wr.top : cy);
+        failures += layout_check_window(cx, cy);
+        wprintf(L"dpi-change: %d, font %ld, column %d, min window %dx%d\n", dpi, lf.lfHeight,
+                ListView_GetColumnWidth(list, 0), cx, cy);
+    }
+    index = 0;
+    failures += layout_edit_marks(g_app.hwnd, 0, &index);
+    if (failures == 0) {
+        wprintf(L"dpi-change: ok\n");
+    }
+    fflush(stdout);
     return failures == 0 ? 0 : 1;
 }
 
@@ -1029,24 +1762,28 @@ static void create_controls(void)
                                   0, 0, 0, 0, g_app.hwnd, (HMENU)(INT_PTR)IDC_TITLE, inst, NULL);
     SendMessageW(g_app.title, WM_SETFONT,
                  (WPARAM)(g_app.title_font != NULL ? g_app.title_font : g_app.font), FALSE);
+    /* 페이지 패널은 스크롤 자리 안에 둔다(자리가 모자라면 스크롤). 탭 이동이 패널 안으로 들어가게 CONTROLPARENT. */
+    g_app.host = CreateWindowExW(WS_EX_CONTROLPARENT, PAGE_HOST_CLASS, L"",
+                                 WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN, 0, 0, 0, 0, g_app.hwnd,
+                                 (HMENU)(INT_PTR)IDC_PAGE_HOST, inst, NULL);
 
-    g_app.pages[NAV_PAGE_SCAN] = scan_panel_create(g_app.hwnd, IDC_SCANPAGE, g_app.font, g_app.dpi);
+    g_app.pages[NAV_PAGE_SCAN] = scan_panel_create(g_app.host, IDC_SCANPAGE, g_app.font, g_app.dpi);
     g_app.pages[NAV_PAGE_DRIVES] =
-        drive_panel_create(g_app.hwnd, IDC_DRIVES, g_app.font, g_app.dpi);
+        drive_panel_create(g_app.host, IDC_DRIVES, g_app.font, g_app.dpi);
     g_app.pages[NAV_PAGE_CLEANUP] =
-        cleanup_panel_create(g_app.hwnd, IDC_CLEANUP, g_app.font, g_app.dpi);
+        cleanup_panel_create(g_app.host, IDC_CLEANUP, g_app.font, g_app.dpi);
     g_app.pages[NAV_PAGE_CLEANER] =
-        cleaner_panel_create(g_app.hwnd, IDC_CLEANER, g_app.font, g_app.dpi);
+        cleaner_panel_create(g_app.host, IDC_CLEANER, g_app.font, g_app.dpi);
     g_app.pages[NAV_PAGE_CACHE] =
-        cleaner_panel_create(g_app.hwnd, IDC_CACHE, g_app.font, g_app.dpi);
+        cleaner_panel_create(g_app.host, IDC_CACHE, g_app.font, g_app.dpi);
     g_app.pages[NAV_PAGE_QUARANTINE] =
-        quarantine_panel_create(g_app.hwnd, IDC_QUARANTINE, g_app.font, g_app.dpi);
+        quarantine_panel_create(g_app.host, IDC_QUARANTINE, g_app.font, g_app.dpi);
     g_app.pages[NAV_PAGE_MONITOR] =
-        monitor_panel_create(g_app.hwnd, IDC_MONITOR, g_app.font, g_app.dpi);
+        monitor_panel_create(g_app.host, IDC_MONITOR, g_app.font, g_app.dpi);
     g_app.pages[NAV_PAGE_BOOSTER] =
-        booster_panel_create(g_app.hwnd, IDC_BOOSTER, g_app.font, g_app.dpi);
+        booster_panel_create(g_app.host, IDC_BOOSTER, g_app.font, g_app.dpi);
     g_app.pages[NAV_PAGE_SETTINGS] =
-        settings_panel_create(g_app.hwnd, IDC_SETTINGS, g_app.font, g_app.dpi);
+        settings_panel_create(g_app.host, IDC_SETTINGS, g_app.font, g_app.dpi);
     /* 시스템 정리와 개발 캐시는 같은 Cleaner 패널을 분석 범위만 달리해 쓴다. */
     cleaner_panel_set_kinds(g_app.pages[NAV_PAGE_CLEANER], CLEANER_KINDS_SYSTEM);
     cleaner_panel_set_kinds(g_app.pages[NAV_PAGE_CACHE], CLEANER_KINDS_CACHE);
@@ -1228,6 +1965,12 @@ static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_SIZE:
         layout();
         return 0;
+    case WM_DPICHANGED:
+        /* 배율이 다른 모니터로 옮기거나 배율을 바꿨다. 배치 검사는 흉내 낸 DPI 를 유지한다. */
+        if (g_app.self_test != SELF_TEST_LAYOUT) {
+            apply_dpi(HIWORD(wp), (const RECT *)lp);
+        }
+        return 0;
     case WM_GETMINMAXINFO: {
         int cx, cy;
         min_window_size(&cx, &cy);
@@ -1332,6 +2075,8 @@ static void parse_args(int argc, wchar_t **argv, const wchar_t **target,
         {L"--self-test-theme", SELF_TEST_THEME, 0},
         {L"--self-test-settings", SELF_TEST_SETTINGS, 0},
         {L"--self-test-lang-switch", SELF_TEST_LANG_SWITCH, 1},
+        {L"--self-test-layout", SELF_TEST_LAYOUT, 0},
+        {L"--self-test-dpi-change", SELF_TEST_DPI_CHANGE, 0},
     };
     size_t i;
 
@@ -1400,6 +2145,16 @@ static void start_self_test(const wchar_t *target, const wchar_t *cleanup_target
     layout();
     if (g_app.self_test == SELF_TEST_LANG) {
         finish_self_test(verify_lang());
+        return;
+    }
+    if (g_app.self_test == SELF_TEST_LAYOUT) {
+        g_app.dry_load = 1; /* 페이지를 오가도 사용자 시스템을 조회하지 않는다 */
+        finish_self_test(verify_layout());
+        return;
+    }
+    if (g_app.self_test == SELF_TEST_DPI_CHANGE) {
+        g_app.dry_load = 1;
+        finish_self_test(verify_dpi_change());
         return;
     }
     if (g_app.self_test == SELF_TEST_NAV) {
@@ -1518,6 +2273,10 @@ static void start_self_test(const wchar_t *target, const wchar_t *cleanup_target
  *                                         종료(아무것도 바꾸지 않음)
  *   bytesieve-gui --self-test-lang <tag>  <tag> 언어(ko, en, ja, zh-Hans)로 창을 만들어 번역 문구·글꼴과
  *                                         최소 창 크기에서 문구가 잘리지 않는지 검증하고 종료
+ *   bytesieve-gui --self-test-layout      네 언어 × 여러 창 크기에서 모든 페이지의 문구 잘림·컨트롤 겹침·패널 밖
+ *                                         넘침과 입력값 유지를 검증하고 종료(BYTESIEVE_TEST_DPI 로 DPI 흉내)
+ *   bytesieve-gui --self-test-dpi-change  실행 중 DPI 변경(WM_DPICHANGED)마다 글꼴·열 폭·배치·입력값·고른
+ *                                         페이지가 맞는지 검증하고 종료
  *   bytesieve-gui --self-test-nav         사이드바 키보드·마우스 이동과 페이지 전환을 검증하고 종료
  *                                         (페이지 조회는 세기만 하고 실제로 하지 않음)
  *   bytesieve-gui --self-test-theme       테마를 바꿔 가며 컨트롤 색·저장 값을 검증하고 종료
@@ -1586,6 +2345,17 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmd, int show)
     screen = GetDC(NULL);
     g_app.dpi = GetDeviceCaps(screen, LOGPIXELSY);
     ReleaseDC(NULL, screen);
+    g_app.font_dpi = g_app.dpi;
+    /* 배치 검사는 BYTESIEVE_TEST_DPI(96·120·144·192 등)로 그 배율의 화면을 흉내 낸다(시스템 DPI 인식이라
+     * 실제 배율에서도 시작할 때 읽은 DPI 하나로 모든 크기를 정한다). */
+    if (g_app.self_test == SELF_TEST_LAYOUT) {
+        wchar_t env[16];
+        DWORD n = GetEnvironmentVariableW(L"BYTESIEVE_TEST_DPI", env, 16);
+        int dpi = n > 0 && n < 16 ? _wtoi(env) : 0;
+        if (dpi >= 72 && dpi <= 480) {
+            g_app.dpi = dpi;
+        }
+    }
     CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
 
     icc.dwSize = sizeof(icc);
@@ -1602,6 +2372,13 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmd, int show)
     booster_panel_register(inst);
     settings_panel_register(inst);
     treemap_view_register(inst);
+    memset(&wc, 0, sizeof(wc));
+    wc.cbSize = sizeof(wc);
+    wc.lpfnWndProc = host_proc;
+    wc.hInstance = inst;
+    wc.hCursor = LoadCursorW(NULL, IDC_ARROW);
+    wc.lpszClassName = PAGE_HOST_CLASS;
+    RegisterClassExW(&wc);
 
     memset(&wc, 0, sizeof(wc));
     wc.cbSize = sizeof(wc);
@@ -1620,6 +2397,18 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmd, int show)
                         inst, NULL) == NULL) {
         LocalFree(argv);
         return 1;
+    }
+    /* 모니터별 DPI 인식(매니페스트 PerMonitorV2): 창이 뜬 모니터의 DPI 가 시작할 때 읽은 시스템 DPI 와 다르면
+     * 그 DPI 로 다시 잡는다(창 크기도 같은 비율). 자체 검사는 시스템 DPI(또는 흉내 낸 DPI)로 고정한다. */
+    if (g_app.self_test == SELF_TEST_NONE) {
+        int window_dpi = (int)GetDpiForWindow(g_app.hwnd);
+        if (window_dpi > 0 && window_dpi != g_app.dpi) {
+            RECT wr;
+            GetWindowRect(g_app.hwnd, &wr);
+            wr.right = wr.left + MulDiv(wr.right - wr.left, window_dpi, g_app.dpi);
+            wr.bottom = wr.top + MulDiv(wr.bottom - wr.top, window_dpi, g_app.dpi);
+            apply_dpi(window_dpi, &wr);
+        }
     }
     /* Windows 11 이면 둥근 모서리·Mica 제목 표시줄(지원하지 않으면 그대로). */
     theme_apply_frame(g_app.hwnd);

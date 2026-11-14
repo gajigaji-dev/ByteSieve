@@ -43,6 +43,10 @@ int booster_panel_verify(HWND panel);
  */
 void booster_panel_apply_language(HWND panel, HFONT font);
 
+/* DPI 가 바뀌면(배율이 다른 모니터로 옮김·배율 변경) 크기 계산 기준을 바꾼다. 글꼴·폭·배치는 이어서
+ * 부르는 booster_panel_apply_language 가 다시 잡는다. */
+void booster_panel_set_dpi(HWND panel, int dpi);
+
 /* 단추 줄이 잘리지 않는 최소 폭(최소 창 크기에 쓴다). */
 int booster_panel_min_width(HWND panel);
 

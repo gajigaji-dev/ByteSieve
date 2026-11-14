@@ -54,6 +54,10 @@ HWND treemap_view_create(HWND parent, int id, HFONT font, int dpi);
  */
 void treemap_view_set_font(HWND view, HFONT font);
 
+/* DPI 가 바뀌면(배율이 다른 모니터로 옮김·배율 변경) 크기 계산 기준을 바꾼다. 글꼴·폭·배치는 이어서
+ * 부르는 treemap_view_set_font 가 다시 잡는다. */
+void treemap_view_set_dpi(HWND view, int dpi);
+
 /* 모델을 바꾼다(NULL 이면 비움). 기준 폴더는 루트(0), 고른 폴더는 없음으로 돌아간다. */
 void treemap_view_set_model(HWND view, const ScanModel *model);
 

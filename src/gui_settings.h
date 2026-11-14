@@ -48,6 +48,13 @@ UiLang settings_panel_language(HWND panel);
  */
 void settings_panel_apply_language(HWND panel, HFONT font);
 
+/* DPI 가 바뀌면(배율이 다른 모니터로 옮김·배율 변경) 크기 계산 기준을 바꾼다. 글꼴·폭·배치는 이어서
+ * 부르는 settings_panel_apply_language 가 다시 잡는다. */
+void settings_panel_set_dpi(HWND panel, int dpi);
+
+/* 모든 줄(구역 제목·설정·상태 줄)이 잘리지 않는 높이(픽셀, 마지막 배치 기준). 0 이면 아직 배치 전. */
+int settings_panel_min_height(HWND panel);
+
 /* 사용자가 체크 상자로 요청한 자동 저장 상태(STN_AUTOSAVE 를 받은 부모가 읽음). */
 int settings_panel_autosave_request(HWND panel);
 /* 실제 자동 저장 상태를 보이고(ok 가 0 이면 실패 안내), 고대비 안내를 다시 확인한다. 페이지를 열 때도 부른다. */

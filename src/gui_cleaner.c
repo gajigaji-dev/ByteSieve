@@ -928,10 +928,20 @@ static void panel_layout(CleanerPanel *p)
 {
     RECT rc;
     int h = pscale(p, 24), gap = pscale(p, 6);
-    int w, y, x, list_h, detail_h = pscale(p, 68);
+    int w, y, x, list_h, detail_h = pscale(p, 68), info_h = pscale(p, 34);
 
     GetClientRect(p->hwnd, &rc);
     w = rc.right - rc.left;
+    {
+        /* 안내 문단은 창 폭·언어에 따라 줄 수가 달라지므로, 줄을 바꾼 높이만큼 늘린다(최소 두 줄 자리). */
+        wchar_t info[1024];
+        int need;
+        GetWindowTextW(p->info, info, 1024);
+        need = theme_text_wrap_height(p->hwnd, p->font, info, w);
+        if (need > info_h) {
+            info_h = need;
+        }
+    }
     y = 0;
     MoveWindow(p->refresh, 0, y, p->w_refresh, h, TRUE);
     MoveWindow(p->cancel, p->w_refresh + gap, y, p->w_cancel, h, TRUE);
@@ -940,8 +950,8 @@ static void panel_layout(CleanerPanel *p)
     y += h + gap;
     MoveWindow(p->progress, 0, y, w, pscale(p, 16), TRUE);
     y += pscale(p, 16) + gap;
-    MoveWindow(p->info, 0, y, w, pscale(p, 34), TRUE);
-    y += pscale(p, 34) + gap;
+    MoveWindow(p->info, 0, y, w, info_h, TRUE);
+    y += info_h + gap;
     MoveWindow(p->check_all, 0, y, p->w_check_all, h, TRUE);
     x = p->w_check_all + gap;
     MoveWindow(p->check_none, x, y, p->w_check_none, h, TRUE);
@@ -1223,6 +1233,7 @@ void cleaner_panel_set_kinds(HWND panel, unsigned kinds)
     if (p != NULL && p->scan == NULL && p->run == NULL) {
         p->kinds = kinds;
         SetWindowTextW(p->info, info_text(kinds));
+        panel_layout(p); /* 안내 문단 길이가 바뀌면 줄 수(높이)도 바뀐다 */
     }
 }
 
@@ -1833,4 +1844,13 @@ int cleaner_panel_verify_lang(HWND panel)
         }
     }
     return failures;
+}
+
+void cleaner_panel_set_dpi(HWND panel, int dpi)
+{
+    CleanerPanel *p = panel_of(panel);
+
+    if (p != NULL && dpi > 0) {
+        p->dpi = dpi;
+    }
 }

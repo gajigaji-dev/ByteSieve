@@ -1371,3 +1371,12 @@ int treemap_view_verify(HWND view)
     }
     return failures;
 }
+
+void treemap_view_set_dpi(HWND view, int dpi)
+{
+    TreemapView *t = view_of(view);
+
+    if (t != NULL && dpi > 0) {
+        t->dpi = dpi;
+    }
+}

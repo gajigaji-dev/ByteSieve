@@ -50,6 +50,7 @@ typedef struct {
     HWND status;
     HFONT font, section_font;
     int dpi;
+    int content_h; /* 모든 줄이 들어가는 높이(마지막 배치 기준). 자리가 낮으면 메인 창이 스크롤한다 */
     ThemeMode theme_mode;
     int status_error; /* 상태 줄을 경고 색으로 */
     /* 상태 줄 내용(언어를 바꾸면 새 언어로 다시 쓴다): 문구 번호와 그 %lu 인자. 비었으면 UI_T_COUNT. */
@@ -296,6 +297,7 @@ static void panel_layout(SettingsPanel *p)
     y += row + section;
 
     MoveWindow(p->status, 0, y, w, note * 2, TRUE);
+    p->content_h = y + note * 2;
 }
 
 static HWND panel_child(SettingsPanel *p, const wchar_t *cls, const wchar_t *text, DWORD style,
@@ -759,4 +761,20 @@ int settings_panel_verify_lang(HWND panel)
     GetWindowRect(p->theme, &r);
     SELF_CHECK(r.right <= panel_rc.right);
     return failures;
+}
+
+void settings_panel_set_dpi(HWND panel, int dpi)
+{
+    SettingsPanel *p = panel_of(panel);
+
+    if (p != NULL && dpi > 0) {
+        p->dpi = dpi;
+    }
+}
+
+int settings_panel_min_height(HWND panel)
+{
+    SettingsPanel *p = panel_of(panel);
+
+    return p != NULL ? p->content_h : 0;
 }

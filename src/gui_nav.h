@@ -32,10 +32,15 @@ HWND nav_view_create(HWND parent, int id, HFONT font, int dpi);
  */
 void nav_view_set_font(HWND nav, HFONT font);
 
+/* DPI 가 바뀌면(배율이 다른 모니터로 옮김·배율 변경) 크기 계산 기준을 바꾼다. 글꼴·폭·배치는 이어서
+ * 부르는 nav_view_set_font 가 다시 잡는다. */
+void nav_view_set_dpi(HWND nav, int dpi);
+
 /* 사이드바 폭: 가장 긴 문구(머리글·항목) + 여백, 최소 200px(96 DPI 기준). */
 int nav_view_width(HWND nav);
 
-/* 모든 항목이 겹치지 않고 들어가는 사이드바 높이(아래 여백 포함). 최소 창 높이에 쓴다. */
+/* 모든 항목이 겹치지 않고 들어가는 사이드바 높이(아래 여백 포함). 최소 창 높이에 쓴다.
+ * 사이드바가 이보다 낮으면(작업 영역이 작음) 세로 스크롤 막대가 생기고 휠·키보드로 옮긴다. */
 int nav_view_min_height(HWND nav);
 
 /* 고른 페이지. */
